@@ -1,0 +1,6 @@
+{
+  "name": "IndexArc",
+  "description": "A completely portable, zero-dependency local Knowledge Management system with SQLite database, folder indexing, and vector search capabilities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
