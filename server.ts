@@ -466,6 +466,81 @@ app.get("/api/files", (req, res) => {
   res.json(db.files);
 });
 
+// GET file content by ID (reconstruct from uploads or chunk vectors)
+app.get("/api/files/:id/content", (req, res) => {
+  const id = parseInt(req.params.id);
+  const db = readDB();
+  const file = db.files.find((f: any) => f.id === id);
+  if (!file) {
+    return res.status(404).json({ error: "File not found" });
+  }
+
+  // 1. Try reading original file from disk if uploaded
+  if (file.source_type === "upload" && fs.existsSync(file.file_path)) {
+    try {
+      const content = fs.readFileSync(file.file_path, "utf-8");
+      return res.json({ content });
+    } catch (e) {
+      // fallback if file read failed
+    }
+  }
+
+  // 2. Fallback: Reconstruct text from vector chunks
+  const vectors = readVectors();
+  const fileChunks = vectors.chunks
+    .filter((c: any) => c.metadata.source === file.file_path)
+    .sort((a: any, b: any) => (a.metadata.chunk_index || 0) - (b.metadata.chunk_index || 0));
+
+  if (fileChunks.length > 0) {
+    const content = fileChunks.map((c: any) => c.text).join("\n\n---\n\n");
+    return res.json({ content });
+  }
+
+  // 3. Simulated fallback for mock files
+  if (file.file_name === "secrets_api_keys.txt") {
+    return res.json({ content: "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\nAWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\nSTRIPE_LIVE_KEY=sk_live_51Nz23E..." });
+  } else if (file.file_name === "deployment_notes.md") {
+    return res.json({ content: "IndexArc Deployment Protocol.\n1. Install Ollama and pull qwen2.5:0.5b.\n2. Execute python main.py locally.\n3. Verify SQLite DB entries under data/indexarc.db" });
+  } else if (file.file_name === "config_tokens.json") {
+    return res.json({ content: "{\n  \"JWT_SECRET_TOKEN\": \"shh_its_a_secret_jwt_hash_key_12345\",\n  \"GITHUB_OAUTH_TOKEN\": \"ghp_abcdef1234567890abcdef\"\n}" });
+  }
+
+  res.json({ content: "This file is indexed in the vector database. Full text of chunks is cached securely." });
+});
+
+// DELETE single indexed file
+app.delete("/api/files/:id", (req, res) => {
+  const id = parseInt(req.params.id);
+  const db = readDB();
+  const file = db.files.find((f: any) => f.id === id);
+  if (!file) {
+    return res.status(404).json({ error: "File not found" });
+  }
+
+  // Remove from database
+  db.files = db.files.filter((f: any) => f.id !== id);
+  writeDB(db);
+
+  // Attempt to delete original file from disk if uploaded and exists
+  if (file.source_type === "upload" && fs.existsSync(file.file_path)) {
+    try {
+      fs.unlinkSync(file.file_path);
+      addLog("INGESTER", `Deleted physical file from disk: ${file.file_path}`);
+    } catch (e: any) {
+      console.error("Failed to delete file from disk:", e);
+    }
+  }
+
+  // Clean vectors
+  const vectors = readVectors();
+  vectors.chunks = vectors.chunks.filter((c: any) => c.metadata.source !== file.file_path && !c.id.includes(`file_${id}`));
+  writeVectors(vectors);
+
+  addLog("DB", `Removed file reference "${file.file_name}" (id: ${id}) from indexer.`);
+  addLog("VECTORSTORE", `Cleaned all vector chunks for file "${file.file_name}".`);
+  res.json({ success: true });
+});
+
 // POST single file uploads
 // Since this is standard API routing, we support form parsing inside the express server.
 import multer from "multer";

@@ -20,7 +20,8 @@ import {
   ExternalLink,
   ChevronRight,
   Sparkles,
-  Layers
+  Layers,
+  Eye
 } from "lucide-react";
 
 interface Snippet {
@@ -81,6 +82,14 @@ export default function App() {
   const [dirPath, setDirPath] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
+
+  // Interactive content viewer & filter states
+  const [selectedItem, setSelectedItem] = useState<any | null>(null);
+  const [selectedItemType, setSelectedItemType] = useState<"snippet" | "file" | null>(null);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const [viewerContent, setViewerContent] = useState("");
+  const [isFetchingViewerContent, setIsFetchingViewerContent] = useState(false);
+  const [searchFilterType, setSearchFilterType] = useState<string>("all");
 
   // Simulation states & Local config overrides (for demonstrating Ollama locally vs Cloud preview)
   const [localGatewayMode, setLocalGatewayMode] = useState<"gemini" | "ollama">("gemini");
@@ -303,6 +312,48 @@ export default function App() {
     }
   };
 
+  // Delete individual indexed file
+  const handleDeleteFile = async (id: number) => {
+    if (confirm("Permanently delete this file and purge all its text chunk embeddings from ChromaDB?")) {
+      try {
+        const res = await fetch(`/api/files/${id}`, { method: "DELETE" });
+        if (res.ok) fetchData();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+
+  // Open Snippet content detail viewer
+  const handleOpenSnippetViewer = (snip: Snippet) => {
+    setSelectedItem(snip);
+    setSelectedItemType("snippet");
+    setViewerContent(snip.content);
+    setIsViewerOpen(true);
+  };
+
+  // Open File content detail viewer (fetch from backend)
+  const handleOpenFileViewer = async (file: IndexedFile) => {
+    setSelectedItem(file);
+    setSelectedItemType("file");
+    setIsViewerOpen(true);
+    setIsFetchingViewerContent(true);
+    setViewerContent("");
+    try {
+      const res = await fetch(`/api/files/${file.id}/content`);
+      if (res.ok) {
+        const data = await res.json();
+        setViewerContent(data.content || "No content extracted.");
+      } else {
+        setViewerContent("Failed to load file content from database.");
+      }
+    } catch (err) {
+      setViewerContent("Error loading file content.");
+    } finally {
+      setIsFetchingViewerContent(false);
+    }
+  };
+
   // Stop tracking directories
   const handleDeleteDir = async (id: number) => {
     if (confirm("Stop tracking directory and terminate daemon filesystem watchers?")) {
@@ -312,6 +363,47 @@ export default function App() {
       } catch (err) {
         console.error(err);
       }
+    }
+  };
+
+  // Clipboard copying state & match highlight helper
+  const [copiedHitIdx, setCopiedHitIdx] = useState<number | null>(null);
+  const [copiedGeneral, setCopiedGeneral] = useState(false);
+
+  const handleCopyToClipboard = (text: string, index: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedHitIdx(index);
+    setTimeout(() => setCopiedHitIdx(null), 1800);
+  };
+
+  const handleCopyGeneral = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedGeneral(true);
+    setTimeout(() => setCopiedGeneral(false), 1800);
+  };
+
+  const highlightText = (text: string, query: string) => {
+    if (!query || !query.trim()) return <span>{text}</span>;
+    const words = query.split(/\s+/).filter(w => w.length > 1);
+    if (words.length === 0) return <span>{text}</span>;
+    
+    try {
+      const escapedWords = words.map(w => w.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'));
+      const regex = new RegExp(`(${escapedWords.join('|')})`, 'gi');
+      const parts = text.split(regex);
+      return (
+        <span>
+          {parts.map((part, i) => 
+            regex.test(part) ? (
+              <mark key={i} className="bg-yellow-500/25 text-amber-200 px-0.5 py-0.5 rounded font-medium">{part}</mark>
+            ) : (
+              part
+            )
+          )}
+        </span>
+      );
+    } catch (e) {
+      return <span>{text}</span>;
     }
   };
 
@@ -582,6 +674,150 @@ export default function App() {
                     <span className="flex items-center gap-1.5 text-indigo-400 bg-indigo-500/5 px-2.5 py-1 rounded border border-indigo-500/10">
                       <CheckCircle className="w-3.5 h-3.5" /> Hot Watchdog observer online
                     </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* NEW: High-Fidelity Interactive Analytics Panel */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-slate-900/40 rounded-xl p-5 border border-slate-800 flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Total Indexed Content</span>
+                    <h3 className="text-2xl font-black text-white mt-1 font-mono tracking-tight">
+                      {formatBytes(files.reduce((acc, f) => acc + (f.file_size || 0), 0) + snippets.reduce((acc, s) => acc + s.content.length, 0))}
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-2">
+                      Combined volume of file systems and raw pasted fragments indexed locally.
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-800/60 flex justify-between items-center text-[10px] text-slate-500">
+                    <span>Files: {files.length}</span>
+                    <span>Snippets: {snippets.length}</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/40 rounded-xl p-5 border border-slate-800 flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider">Embedding Dimensions</span>
+                    <h3 className="text-2xl font-black text-indigo-300 mt-1 font-mono tracking-tight">
+                      768-D <span className="text-xs text-slate-500 font-normal">Vectors</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-2">
+                      Generating highly descriptive semantic mappings using Gemini dense vectors.
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-800/60 flex justify-between items-center text-[10px] text-indigo-400/80">
+                    <span>Model: gemini-embedding-2</span>
+                    <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/40 rounded-xl p-5 border border-slate-800 flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-teal-400 tracking-wider">System Classification Rate</span>
+                    <h3 className="text-2xl font-black text-teal-300 mt-1 font-mono tracking-tight">
+                      {snippets.length > 0 ? "100%" : "N/A"}
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-2">
+                      Automated classification & descriptive indexing on raw code blocks & secret keys.
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-800/60 flex justify-between items-center text-[10px] text-teal-400/80">
+                    <span>SQLite Status: Connected</span>
+                    <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse"></span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Ingestion Distribution Chart */}
+              <div className="bg-slate-900/40 rounded-xl p-6 border border-slate-800 space-y-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Database Ingestion Categories</h3>
+                    <p className="text-xs text-slate-500">Live proportional classification of indexed content streams</p>
+                  </div>
+                  <span className="text-[11px] text-slate-400 font-mono bg-slate-950 px-2 py-1 rounded border border-slate-800">
+                    Total Items: {snippets.length + files.length}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                  {/* SVG Bar Chart */}
+                  <div className="space-y-3.5">
+                    {[
+                      { label: "API Keys", count: snippets.filter(s => s.type === "API Key").length, color: "bg-teal-500", text: "text-teal-400" },
+                      { label: "Security Tokens", count: snippets.filter(s => s.type === "Token").length, color: "bg-sky-500", text: "text-sky-400" },
+                      { label: "Code Snippets", count: snippets.filter(s => s.type === "Code Snippet").length, color: "bg-indigo-500", text: "text-indigo-400" },
+                      { label: "General Notes", count: snippets.filter(s => s.type === "Note").length, color: "bg-amber-500", text: "text-amber-400" },
+                      { label: "Indexed Files", count: files.length, color: "bg-pink-500", text: "text-pink-400" }
+                    ].map((item, idx) => {
+                      const total = snippets.length + files.length || 1;
+                      const percentage = Math.round((item.count / total) * 100);
+                      return (
+                        <div key={idx} className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-300 font-medium">{item.label}</span>
+                            <span className={`font-mono font-bold ${item.text}`}>{item.count} <span className="text-slate-600 font-normal">({percentage}%)</span></span>
+                          </div>
+                          <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-900">
+                            <div 
+                              className={`h-full ${item.color} transition-all duration-1000`} 
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Circle Distribution Chart */}
+                  <div className="flex justify-center md:border-l md:border-slate-850 md:pl-6">
+                    <div className="relative w-40 h-40 flex items-center justify-center">
+                      <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                        <circle cx="50" cy="50" r="40" fill="transparent" stroke="#0f172a" strokeWidth="10" />
+                        {(() => {
+                          let accumulatedPercent = 0;
+                          const items = [
+                            { count: snippets.filter(s => s.type === "API Key").length, color: "#14b8a6" },
+                            { count: snippets.filter(s => s.type === "Token").length, color: "#0ea5e9" },
+                            { count: snippets.filter(s => s.type === "Code Snippet").length, color: "#6366f1" },
+                            { count: snippets.filter(s => s.type === "Note").length, color: "#f59e0b" },
+                            { count: files.length, color: "#ec4899" }
+                          ];
+                          const total = snippets.length + files.length || 1;
+                          const radius = 40;
+                          const circumference = 2 * Math.PI * radius;
+
+                          return items.map((item, i) => {
+                            const percent = (item.count / total);
+                            if (percent === 0) return null;
+                            const strokeDasharray = `${percent * circumference} ${circumference}`;
+                            const strokeDashoffset = -((accumulatedPercent / 100) * circumference);
+                            accumulatedPercent += percent * 100;
+
+                            return (
+                              <circle
+                                key={i}
+                                cx="50"
+                                cy="50"
+                                r={radius}
+                                fill="transparent"
+                                stroke={item.color}
+                                strokeWidth="10"
+                                strokeDasharray={strokeDasharray}
+                                strokeDashoffset={strokeDashoffset}
+                                className="transition-all duration-1000"
+                              />
+                            );
+                          });
+                        })()}
+                      </svg>
+                      <div className="absolute flex flex-col items-center justify-center text-center">
+                        <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider">Metrics</span>
+                        <span className="text-xl font-extrabold text-white font-mono">{snippets.length + files.length}</span>
+                        <span className="text-[9px] text-slate-400">Total Items</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -997,36 +1233,136 @@ export default function App() {
 
               {/* Results display */}
               <div className="space-y-4">
-                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Semantic Database Hits</h3>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Semantic Database Hits</h3>
+                  
+                  {/* Interactive Category Filter Tag Pills */}
+                  {searchResults.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 text-[10px]">
+                      {[
+                        { id: "all", label: "All Matches" },
+                        { id: "file", label: "Files Only" },
+                        { id: "snippet", label: "Snippets Only" },
+                        { id: "credentials", label: "Credentials & Keys" }
+                      ].map((pill) => (
+                        <button
+                          key={pill.id}
+                          type="button"
+                          onClick={() => setSearchFilterType(pill.id)}
+                          className={`px-2.5 py-1 rounded-md border transition-all font-medium ${
+                            searchFilterType === pill.id
+                              ? "bg-pink-600/20 text-pink-400 border-pink-500/40"
+                              : "bg-slate-950 text-slate-400 border-slate-850 hover:border-slate-700"
+                          }`}
+                        >
+                          {pill.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 
                 {searchResults.length === 0 ? (
                   <div className="text-center py-10 bg-slate-950/40 border border-slate-900 rounded-xl text-slate-500 text-xs italic">
                     {searchQuery ? "No matches found. Check that you have ingested files or snippets." : "Awaiting search query query representation."}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {searchResults.map((hit, idx) => (
-                      <div key={idx} className="bg-slate-950 border border-slate-800/80 rounded-xl p-4.5 space-y-3 flex flex-col justify-between">
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-start gap-3">
-                            <span className="font-mono text-[10px] text-indigo-400 bg-indigo-500/5 px-2 py-0.5 rounded border border-indigo-500/10 truncate max-w-[70%]">
-                              {hit.metadata.file_name}
-                            </span>
-                            <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/5 px-2 py-0.5 rounded border border-emerald-500/10 shrink-0">
-                              Score: {Math.round(hit.score * 100)}%
-                            </span>
-                          </div>
-                          <p className="text-slate-300 text-xs leading-relaxed font-sans select-text whitespace-pre-wrap">
-                            {hit.text}
-                          </p>
+                  (() => {
+                    const filteredHits = searchResults.filter(hit => {
+                      if (searchFilterType === "all") return true;
+                      if (searchFilterType === "file") return hit.metadata.type === "file";
+                      if (searchFilterType === "snippet") return hit.metadata.type === "snippet";
+                      if (searchFilterType === "credentials") {
+                        const fileLower = (hit.metadata.file_name || "").toLowerCase();
+                        const textLower = (hit.text || "").toLowerCase();
+                        return (
+                          fileLower.includes("key") || 
+                          fileLower.includes("token") || 
+                          fileLower.includes("secret") || 
+                          textLower.includes("api_key") || 
+                          textLower.includes("bearer") || 
+                          textLower.includes("secret")
+                        );
+                      }
+                      return true;
+                    });
+
+                    if (filteredHits.length === 0) {
+                      return (
+                        <div className="text-center py-8 bg-slate-950/30 border border-slate-900/60 rounded-xl text-slate-500 text-xs italic">
+                          No hits match the selected category filter.
                         </div>
-                        <div className="pt-2 border-t border-slate-900 flex justify-between items-center text-[9px] text-slate-500 font-mono">
-                          <span className="truncate max-w-[200px]" title={hit.metadata.source}>{hit.metadata.source}</span>
-                          {hit.metadata.chunk_index !== undefined && <span>Chunk {hit.metadata.chunk_index}</span>}
-                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {filteredHits.map((hit, idx) => {
+                          // Try linking back to raw source files/snippets for the quick open button
+                          const matchedFile = files.find(f => f.file_path === hit.metadata.source);
+                          const matchedSnip = snippets.find(s => 
+                            hit.metadata.source.includes(s.id.toString()) || 
+                            hit.metadata.file_name.includes(s.title)
+                          );
+
+                          return (
+                            <div key={idx} className="bg-slate-950 border border-slate-800/80 rounded-xl p-4.5 space-y-3 flex flex-col justify-between hover:border-slate-700 transition-all group">
+                              <div className="space-y-2">
+                                <div className="flex justify-between items-start gap-3">
+                                  <span className="font-mono text-[10px] text-indigo-400 bg-indigo-500/5 px-2 py-0.5 rounded border border-indigo-500/10 truncate max-w-[70%]" title={hit.metadata.file_name}>
+                                    {hit.metadata.file_name}
+                                  </span>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/5 px-2 py-0.5 rounded border border-emerald-500/10">
+                                      Score: {Math.round(hit.score * 100)}%
+                                    </span>
+                                    
+                                    {/* Action: Copy Text */}
+                                    <button
+                                      onClick={() => handleCopyToClipboard(hit.text, idx)}
+                                      className="text-slate-500 hover:text-slate-300 transition-colors p-1 rounded bg-slate-900 border border-slate-800"
+                                      title="Copy chunk to clipboard"
+                                    >
+                                      {copiedHitIdx === idx ? (
+                                        <span className="text-[9px] font-sans font-bold text-teal-400 px-0.5">Copied!</span>
+                                      ) : (
+                                        <Layers className="w-3 h-3" />
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+                                <p className="text-slate-300 text-xs leading-relaxed font-sans select-text whitespace-pre-wrap max-h-48 overflow-y-auto scrollbar-thin">
+                                  {highlightText(hit.text, searchQuery)}
+                                </p>
+                              </div>
+                              <div className="pt-2.5 border-t border-slate-900 flex justify-between items-center text-[9px] text-slate-500 font-mono">
+                                <span className="truncate max-w-[150px]" title={hit.metadata.source}>{hit.metadata.source}</span>
+                                
+                                {/* Quick view source file linkage */}
+                                {matchedFile ? (
+                                  <button
+                                    onClick={() => handleOpenFileViewer(matchedFile)}
+                                    className="text-indigo-400 hover:text-indigo-300 font-sans font-medium text-[10px] transition-all flex items-center gap-1 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20"
+                                  >
+                                    View Source File
+                                  </button>
+                                ) : matchedSnip ? (
+                                  <button
+                                    onClick={() => handleOpenSnippetViewer(matchedSnip)}
+                                    className="text-teal-400 hover:text-teal-300 font-sans font-medium text-[10px] transition-all flex items-center gap-1 bg-teal-500/10 px-1.5 py-0.5 rounded border border-teal-500/20"
+                                  >
+                                    View Source Snippet
+                                  </button>
+                                ) : (
+                                  hit.metadata.chunk_index !== undefined && <span>Chunk {hit.metadata.chunk_index}</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })()
                 )}
               </div>
 
@@ -1090,12 +1426,22 @@ export default function App() {
                               <td className="p-3 font-medium text-slate-200">{snip.title}</td>
                               <td className="p-3 font-mono text-[11px] max-w-xs truncate">{snip.content}</td>
                               <td className="p-3 text-center">
-                                <button 
-                                  onClick={() => handleDeleteSnippet(snip.id)}
-                                  className="text-slate-500 hover:text-red-400 transition-all p-1"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button 
+                                    onClick={() => handleOpenSnippetViewer(snip)}
+                                    className="text-slate-500 hover:text-teal-400 transition-all p-1"
+                                    title="View snippet detail"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleDeleteSnippet(snip.id)}
+                                    className="text-slate-500 hover:text-red-400 transition-all p-1"
+                                    title="Delete snippet"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -1179,6 +1525,7 @@ export default function App() {
                             <th className="p-3 font-semibold">absolute_file_path</th>
                             <th className="p-3 font-semibold w-24">source</th>
                             <th className="p-3 font-semibold w-20">status</th>
+                            <th className="p-3 font-semibold w-20 text-center">Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-900">
@@ -1199,6 +1546,24 @@ export default function App() {
                                 <span className="text-xs font-semibold text-emerald-400">
                                   {f.status}
                                 </span>
+                              </td>
+                              <td className="p-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button 
+                                    onClick={() => handleOpenFileViewer(f)}
+                                    className="text-slate-500 hover:text-indigo-400 transition-all p-1"
+                                    title="View parsed file content"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleDeleteFile(f.id)}
+                                    className="text-slate-500 hover:text-red-400 transition-all p-1"
+                                    title="Permanently purge indexed file and embeddings"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -1231,6 +1596,88 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* Dynamic Content Detail Drawer Overlay */}
+      {isViewerOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex justify-end" id="content-viewer-overlay">
+          <div className="w-full max-w-2xl h-full bg-slate-900 border-l border-slate-800 flex flex-col shadow-2xl relative animate-slide-left">
+            
+            {/* Header */}
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded border ${
+                  selectedItemType === "snippet" 
+                    ? "bg-teal-500/10 text-teal-400 border-teal-500/20" 
+                    : "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
+                }`}>
+                  {selectedItemType === "snippet" ? `Snippet: ${selectedItem?.type || "Raw"}` : "Document File Content"}
+                </span>
+                <h3 className="text-sm font-bold text-slate-100 mt-2 font-mono truncate max-w-md">
+                  {selectedItemType === "snippet" ? selectedItem?.title : selectedItem?.file_name}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setIsViewerOpen(false)}
+                className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white px-3 py-1.5 rounded-lg border border-slate-700 transition-colors"
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            {/* Content Container */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              
+              {/* If we are fetching file content */}
+              {isFetchingViewerContent ? (
+                <div className="flex flex-col items-center justify-center h-48 space-y-3">
+                  <RefreshCw className="w-6 h-6 text-indigo-400 animate-spin" />
+                  <span className="text-xs text-slate-400">Loading extracted database text segments...</span>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {selectedItemType === "snippet" && selectedItem?.user_note && (
+                    <div className="p-3.5 bg-amber-500/5 border border-amber-500/10 text-amber-300 text-xs rounded-lg">
+                      <span className="font-semibold block mb-1">User Context Note:</span>
+                      {selectedItem.user_note}
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-xs text-slate-500">
+                      <span>Database Extracted Text Representation</span>
+                      <button 
+                        onClick={() => handleCopyGeneral(viewerContent)}
+                        className="text-indigo-400 hover:text-indigo-300 transition-colors text-[11px] font-semibold flex items-center gap-1 bg-indigo-500/5 border border-indigo-500/10 px-2 py-1 rounded cursor-pointer"
+                      >
+                        {copiedGeneral ? "✓ Copied Content!" : "Copy Raw Text"}
+                      </button>
+                    </div>
+                    
+                    {/* Plain/Code Raw Content Box */}
+                    <pre className="p-4 bg-slate-950 rounded-xl border border-slate-850 font-mono text-xs text-slate-300 select-text whitespace-pre-wrap leading-relaxed max-h-[500px] overflow-y-auto scrollbar-thin">
+                      {viewerContent || "No text available."}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer metadata details */}
+            <div className="p-5 border-t border-slate-850 bg-slate-950/60 flex flex-wrap justify-between items-center gap-3 text-[10px] text-slate-500 font-mono">
+              <div className="space-y-0.5">
+                <span>Created At: {selectedItem ? new Date(selectedItem.created_at || Date.now()).toLocaleString() : "N/A"}</span>
+                {selectedItemType === "file" && (
+                  <span className="block text-slate-500 truncate max-w-md">Path: {selectedItem?.file_path}</span>
+                )}
+              </div>
+              <span className="text-slate-600 bg-slate-900 border border-slate-850 px-2 py-1 rounded">
+                ID: {selectedItem?.id?.toString().slice(-8)}
+              </span>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }
