@@ -10,8 +10,10 @@ const PORT = 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Path definitions
-const DATA_DIR = path.join(process.cwd(), "data");
+// Path definitions - support env overrides for Electron packaging
+const DATA_DIR = process.env.INDEXARC_DATA_DIR 
+  ? path.join(process.env.INDEXARC_DATA_DIR, "data")
+  : path.join(process.cwd(), "data");
 const DB_FILE = path.join(DATA_DIR, "indexarc_node_db.json");
 const VECTORS_FILE = path.join(DATA_DIR, "indexarc_node_vectors.json");
 
@@ -723,7 +725,10 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    // In Electron, INDEXARC_DIST_DIR points to the built React assets
+    const distPath = process.env.INDEXARC_DIST_DIR 
+      ? process.env.INDEXARC_DIST_DIR
+      : path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));

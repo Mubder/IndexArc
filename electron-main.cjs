@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain } = require("electron");
 const { fork } = require("child_process");
 const path = require("path");
 const http = require("http");
@@ -7,20 +7,39 @@ let serverProcess = null;
 let mainWindow = null;
 const PORT = 3000;
 
-// Set env for production by default in desktop mode
-process.env.NODE_ENV = "production";
+// Resolve paths for packaged app
+function getResourcePath() {
+  // In development: project root
+  // In packaged app: resources/app.asar.unpacked or resources/app
+  // Check if we're running from electron's installed location (node_modules/electron)
+  const isDev = !app.isPackaged;
+  
+  if (isDev) {
+    return process.cwd();
+  }
+  // electron-builder puts resources in process.resourcesPath
+  return path.join(process.resourcesPath, "app");
+}
 
 function startBackendServer() {
-  const serverPath = path.join(__dirname, "dist", "server.cjs");
+  const resourcePath = getResourcePath();
+  const serverPath = path.join(resourcePath, "dist", "server.cjs");
+  const dataDir = path.join(app.getPath("userData"), "indexarc-data");
+  const distDir = path.join(resourcePath, "dist");
   
+  console.log(`Resource path: ${resourcePath}`);
   console.log(`Starting backend database server from: ${serverPath}`);
-  
+  console.log(`Data directory: ${dataDir}`);
+  console.log(`Dist directory: ${distDir}`);
+
   // Fork the Express backend as a child process
   serverProcess = fork(serverPath, [], {
     env: { 
       ...process.env, 
       PORT: PORT.toString(),
-      NODE_ENV: "production"
+      NODE_ENV: "production",
+      INDEXARC_DATA_DIR: dataDir,
+      INDEXARC_DIST_DIR: distDir
     },
     silent: false
   });
@@ -65,7 +84,8 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: false,
+      preload: path.join(__dirname, "preload.cjs")
     },
     icon: path.join(__dirname, "public", "favicon.ico") // Fallback icon path
   });
@@ -82,6 +102,16 @@ function createWindow() {
     mainWindow = null;
   });
 }
+
+// IPC handler for folder picker dialog
+ipcMain.handle("select-folder", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openDirectory"],
+    title: "Select Folder to Watch",
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
 
 // Ensure background server dies when Electron process dies
 app.on("ready", () => {
