@@ -10,7 +10,7 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js dist-desktop",
     "lint": "tsc --noEmit",
-    "desktop": "electron electron-main.cjs",
+    "desktop": "npm run build && electron electron-main.cjs",
     "desktop:pack": "npm run build && electron-builder --dir",
     "desktop:dist": "npm run build && electron-builder"
   },
