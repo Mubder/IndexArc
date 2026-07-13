@@ -1,723 +1,604 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
-import fs from "fs";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
+import { ensurePortableLayout } from "./server/paths.js";
+import { VaultStore } from "./server/store.js";
+import { addLog, getLogs } from "./server/logs.js";
+import {
+  checkOllama,
+  pullOllamaModel,
+  resolveActiveProvider,
+  warmOllamaLlm,
+} from "./server/ai/providers.js";
+import { askVault } from "./server/services/ask.js";
+import {
+  clarifyEntry,
+  runAnalyze,
+  saveCandidate,
+  saveMany,
+} from "./server/services/vault.js";
+import { scanFolder } from "./server/services/folderScan.js";
+import { FolderWatcherManager } from "./server/services/folderWatcher.js";
+import { listDirectory, listFsRoots } from "./server/services/fsBrowser.js";
+import { randomUUID } from "crypto";
+import type { AnalyzeCandidate, WatchedFolder } from "./server/types.js";
 
+const paths = ensurePortableLayout();
+const store = new VaultStore(paths);
+const watchers = new FolderWatcherManager(store, () => store.getSettings());
 const app = express();
-const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Path definitions - support env overrides for Electron packaging
-const DATA_DIR = process.env.INDEXARC_DATA_DIR 
-  ? path.join(process.env.INDEXARC_DATA_DIR, "data")
-  : path.join(process.cwd(), "data");
-const DB_FILE = path.join(DATA_DIR, "indexarc_node_db.json");
-const VECTORS_FILE = path.join(DATA_DIR, "indexarc_node_vectors.json");
+addLog("SYSTEM", `IndexArc Vault portable root: ${paths.root}`);
+addLog("SYSTEM", `Data → ${paths.dataDir} | Config → ${paths.configDir}`);
 
-// Ensure data folder exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-// Ensure database files exist
-if (!fs.existsSync(DB_FILE)) {
-  fs.writeFileSync(DB_FILE, JSON.stringify({ snippets: [], directories: [], files: [] }, null, 2));
-}
-if (!fs.existsSync(VECTORS_FILE)) {
-  fs.writeFileSync(VECTORS_FILE, JSON.stringify({ chunks: [] }, null, 2));
-}
-
-// Helpers for Reading/Writing our SQLite-matching JSON Database
-function readDB() {
-  try {
-    return JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
-  } catch (e) {
-    return { snippets: [], directories: [], files: [] };
-  }
-}
-
-function writeDB(data: any) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-}
-
-function readVectors() {
-  try {
-    return JSON.parse(fs.readFileSync(VECTORS_FILE, "utf-8"));
-  } catch (e) {
-    return { chunks: [] };
-  }
-}
-
-function writeVectors(data: any) {
-  fs.writeFileSync(VECTORS_FILE, JSON.stringify(data, null, 2));
-}
-
-// Logs Buffer for high-fidelity live tracking simulator
-let systemLogs: { time: string; type: string; message: string }[] = [];
-function addLog(type: string, message: string) {
-  const log = {
-    time: new Date().toLocaleTimeString(),
-    type,
-    message
-  };
-  systemLogs.push(log);
-  if (systemLogs.length > 200) systemLogs.shift();
-}
-
-addLog("SYSTEM", "IndexArc portal interface loaded successfully.");
-addLog("DB", "Connected to relative local database: data/indexarc.db");
-addLog("VECTORSTORE", "Initialized ChromaDB persistent client in data/chroma");
-
-// Initialize Gemini SDK with telemetry
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
-  }
-});
-
-// Helper for fetching embeddings safely across different SDK response structures
-async function getEmbeddingValues(text: string): Promise<number[] | null> {
-  if (!process.env.GEMINI_API_KEY) return null;
-  try {
-    const res: any = await ai.models.embedContent({
-      model: "gemini-embedding-2-preview",
-      contents: text
-    });
-    const values = res.embedding?.values || res.embeddings?.[0]?.values || res.embeddings?.values || res.embedding;
-    if (Array.isArray(values)) {
-      return values as number[];
-    }
-  } catch (err) {
-    console.error("Embedding API Error:", err);
-  }
-  return null;
-}
-
-// Helper for Cosine Similarity
-function cosineSimilarity(vecA: number[], vecB: number[]) {
-  let dotProduct = 0.0;
-  let normA = 0.0;
-  let normB = 0.0;
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
-  }
-  if (normA === 0 || normB === 0) return 0;
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
-// Text Chunking (Matches Python implementation)
-function chunkText(text: string, chunkSize = 800, overlap = 150) {
-  if (!text) return [];
-  const chunks: string[] = [];
-  let start = 0;
-  const len = text.length;
-  while (start < len) {
-    const end = Math.min(start + chunkSize, len);
-    const chunk = text.slice(start, end).trim();
-    if (chunk) chunks.push(chunk);
-    start += chunkSize - overlap;
-  }
-  return chunks;
-}
-
-// Multi-format Text Scraper
-function scrapeTextContent(fileName: string, buffer: Buffer): string {
-  const suffix = path.extname(fileName).toLowerCase();
-  if (suffix === ".pdf") {
-    // Basic text extractor from PDF binary blocks
-    const content = buffer.toString("binary");
-    const matches = content.match(/\(([^)]+)\)\s*Tj/g);
-    if (matches && matches.length > 0) {
-      return matches.map(m => m.slice(1, -4)).join(" ");
-    }
-    // Fallback to reading printable characters
-    return buffer.toString("utf-8").replace(/[^\x20-\x7E\n\r\t]/g, " ");
-  } else if (suffix === ".docx") {
-    // Extraction for docx XML document.xml contents
-    return buffer.toString("utf-8").replace(/<[^>]+>/g, " ").trim();
-  } else {
-    // Normal text formats (.txt, .md, .json, .log, .csv)
-    return buffer.toString("utf-8");
-  }
-}
-
-// Simulated active watchers
-const activeWatchers: Record<string, NodeJS.Timeout> = {};
-
-// --- API ENDPOINTS ---
-
-// GET System Status and statistics
-app.get("/api/status", (req, res) => {
-  const db = readDB();
-  const isGeminiAvailable = !!process.env.GEMINI_API_KEY;
-  
+// --- Status ---
+app.get("/api/status", async (_req, res) => {
+  const settings = store.getSettings();
+  const ollama = await checkOllama(settings.ollama_base_url);
+  const active = await resolveActiveProvider(settings);
+  const stats = store.stats();
   res.json({
-    is_ollama_online: false, // In preview container, local Ollama is offline
-    is_gemini_active: isGeminiAvailable,
+    portable_root: paths.root,
+    ai_provider: settings.ai_provider,
+    active_provider: active === "heuristic" ? "heuristic" : active,
+    is_ollama_online: ollama.online,
+    ollama_models: ollama.models,
+    is_gemini_configured: !!settings.gemini_api_key,
     stats: {
-      total_snippets: db.snippets.length,
-      total_directories: db.directories.length,
-      total_files: db.files.length,
-    }
+      total_saved: stats.total_saved,
+      needs_attention: stats.needs_attention,
+      total_commands: stats.total_commands,
+      total_notes: stats.total_notes,
+      total_secrets: stats.total_secrets,
+    },
   });
 });
 
-// GET System Logs
-app.get("/api/logs", (req, res) => {
-  res.json(systemLogs);
+app.get("/api/logs", (_req, res) => res.json(getLogs()));
+
+app.get("/api/settings", (_req, res) => {
+  const s = store.getSettings();
+  res.json({
+    ...s,
+    // never echo full key to client if long — still needed for form; mask in UI
+    gemini_api_key: s.gemini_api_key,
+  });
 });
 
-// POST Ingest raw text snippets with Gemini classification
-app.post("/api/snippets/ingest", async (req, res) => {
-  const { content, user_note } = req.body;
-  if (!content || !content.trim()) {
-    return res.status(400).json({ error: "Content is required" });
+app.post("/api/settings", (req, res) => {
+  const body = req.body || {};
+  const allowed: (keyof ReturnType<typeof store.getSettings>)[] = [
+    "ai_provider",
+    "ollama_base_url",
+    "ollama_llm_model",
+    "ollama_embed_model",
+    "gemini_api_key",
+    "gemini_llm_model",
+    "gemini_embed_model",
+    "ui_language",
+  ];
+  const patch: Record<string, unknown> = {};
+  for (const k of allowed) {
+    if (body[k] !== undefined) patch[k] = body[k];
   }
+  if (patch.ai_provider && !["local", "api", "auto"].includes(patch.ai_provider as string)) {
+    return res.status(400).json({ error: "Invalid ai_provider" });
+  }
+  const next = store.saveSettings(patch as Partial<ReturnType<typeof store.getSettings>>);
+  addLog("SETTINGS", `Updated AI provider mode: ${next.ai_provider}`);
+  res.json(next);
+});
 
-  addLog("INGESTER", `Received text snippet of size ${content.length} characters.`);
-  
+// --- Ollama helpers ---
+app.get("/api/ollama/models", async (_req, res) => {
+  const s = store.getSettings();
+  const ollama = await checkOllama(s.ollama_base_url);
+  res.json(ollama);
+});
+
+app.post("/api/ollama/ensure", async (_req, res) => {
+  const s = store.getSettings();
+  const ollama = await checkOllama(s.ollama_base_url);
+  if (!ollama.online) return res.status(503).json({ error: "Ollama is not running" });
+  const required = [s.ollama_llm_model, s.ollama_embed_model];
+  for (const model of required) {
+    const has = ollama.models.some(
+      (m) => m === model || m.startsWith(model.split(":")[0])
+    );
+    if (!has) {
+      addLog("OLLAMA", `Pulling model ${model}…`);
+      await pullOllamaModel(s, model, (p) => addLog("OLLAMA", p));
+    }
+  }
+  // Actually load the LLM into VRAM (not just the embedder)
+  const warmed = await warmOllamaLlm(s);
+  const updated = await checkOllama(s.ollama_base_url);
+  res.json({ status: "success", models: updated.models, llm_loaded: warmed });
+});
+
+app.post("/api/ollama/warm", async (_req, res) => {
+  const s = store.getSettings();
+  const ollama = await checkOllama(s.ollama_base_url);
+  if (!ollama.online) return res.status(503).json({ error: "Ollama is not running" });
+  const ok = await warmOllamaLlm(s);
+  res.json({ status: ok ? "success" : "failed", model: s.ollama_llm_model });
+});
+
+// --- Analyze (multi-extract, no save yet) ---
+app.post("/api/analyze", async (req, res) => {
+  const paste = String(req.body?.content ?? req.body?.paste ?? "").trim();
+  if (!paste) return res.status(400).json({ error: "Paste content is required" });
   try {
-    let classification = { type: "Note", title: "Text Snippet Ingestion" };
-
-    if (process.env.GEMINI_API_KEY) {
-      addLog("LLM", "Calling Gemini API for intelligent snippet classification & titles...");
-      try {
-        const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
-          contents: `Analyze this raw text snippet and classify it into one of these types:
-- 'API Key'
-- 'Token'
-- 'Code Snippet'
-- 'Note'
-- 'Document Extract'
-
-Also generate an automated, professional 3-to-5 word title summarizing it.
-
-Snippet content:
-"""
-${content.slice(0, 2000)}
-"""`,
-          config: {
-            systemInstruction: "You are a local knowledge classifier. Classify the input and output a strict JSON object with type and title keys.",
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                type: { type: Type.STRING, description: "One of the listed classification types" },
-                title: { type: Type.STRING, description: "Automated 3-to-5 word title" }
-              },
-              required: ["type", "title"]
-            }
-          }
-        });
-
-        if (response.text) {
-          classification = JSON.parse(response.text.trim());
-          addLog("LLM", `Gemini response: Classified as [${classification.type}] - "${classification.title}"`);
-        }
-      } catch (err: any) {
-        addLog("LLM", `Gemini call failed or timed out: ${err.message || err}. Falling back to system heuristics.`);
-      }
-    } else {
-      addLog("LLM", "No GEMINI_API_KEY found. Falling back to internal architect heuristic classifier.");
-    }
-
-    // Heuristics fallback if Gemini was offline/failed
-    if (!classification.type || !classification.title || classification.title === "Text Snippet Ingestion") {
-      const lower = content.toLowerCase();
-      const firstLine = content.split("\n")[0]?.trim() || "Snippet";
-      if (lower.includes("api_key") || lower.includes("apikey") || lower.includes("client_secret")) {
-        classification = { type: "API Key", title: "API Configuration Credentials" };
-      } else if (lower.includes("jwt") || lower.includes("token") || lower.includes("bearer ")) {
-        classification = { type: "Token", title: "Security Access Credentials" };
-      } else if (lower.includes("import ") || lower.includes("def ") || lower.includes("function") || lower.includes("class ")) {
-        classification = { type: "Code Snippet", title: `Code Block: ${firstLine.slice(0, 20)}...` };
-      } else {
-        classification = { type: "Note", title: firstLine.length > 25 ? `${firstLine.slice(0, 25)}...` : firstLine };
-      }
-    }
-
-    const db = readDB();
-    const newSnippet = {
-      id: Date.now(),
-      type: classification.type,
-      title: classification.title,
-      content,
-      user_note: user_note || "",
-      created_at: new Date().toISOString()
-    };
-
-    db.snippets.unshift(newSnippet);
-    writeDB(db);
-    addLog("DB", `Stored raw snippet successfully (id: ${newSnippet.id}) in database.`);
-
-    // Index snippet in Vector Database
-    if (process.env.GEMINI_API_KEY) {
-      try {
-        addLog("EMBEDDER", `Creating semantic embeddings for snippet "${classification.title}"`);
-        const values = await getEmbeddingValues(content);
-        if (values) {
-          const vectors = readVectors();
-          vectors.chunks.push({
-            id: `snippet_${newSnippet.id}`,
-            text: content,
-            embedding: values,
-            metadata: {
-              source: `snippet://${newSnippet.id}`,
-              file_name: `Snippet: ${classification.title}`,
-              type: "snippet"
-            }
-          });
-          writeVectors(vectors);
-          addLog("VECTORSTORE", `Ingested 1 chunk to local semantic vector index.`);
-        }
-      } catch (e: any) {
-        addLog("EMBEDDER", `Embedding failed: ${e.message}`);
-      }
-    }
-
-    res.json(newSnippet);
+    const result = await runAnalyze(store, store.getSettings(), paste);
+    res.json(result);
   } catch (e: any) {
-    addLog("SYSTEM", `Failed to ingest snippet: ${e.message}`);
+    addLog("ANALYZE", `Failed: ${e.message}`);
     res.status(500).json({ error: e.message });
   }
 });
 
-// GET list all snippets
-app.get("/api/snippets", (req, res) => {
-  const db = readDB();
-  res.json(db.snippets);
-});
-
-// DELETE snippet
-app.delete("/api/snippets/:id", (req, res) => {
-  const id = parseInt(req.params.id);
-  const db = readDB();
-  db.snippets = db.snippets.filter((s: any) => s.id !== id);
-  writeDB(db);
-  
-  // Clean up vectors
-  const vectors = readVectors();
-  vectors.chunks = vectors.chunks.filter((c: any) => c.id !== `snippet_${id}`);
-  writeVectors(vectors);
-
-  addLog("DB", `Removed snippet reference ${id} from database.`);
-  addLog("VECTORSTORE", `Removed vector data for snippet ${id}.`);
-  res.json({ success: true });
-});
-
-// GET list all tracked directories
-app.get("/api/directories", (req, res) => {
-  const db = readDB();
-  res.json(db.directories);
-});
-
-// POST Track and scan a folder directory (Simulated observer)
-app.post("/api/directories/track", (req, res) => {
-  const { path: dirPath } = req.body;
-  if (!dirPath || !dirPath.trim()) {
-    return res.status(400).json({ error: "Directory path is required" });
-  }
-
-  const db = readDB();
-  const normalizedPath = path.normalize(dirPath.trim());
-
-  // Prevent duplicates
-  if (db.directories.some((d: any) => d.path === normalizedPath)) {
-    return res.status(400).json({ error: "Directory path is already registered" });
-  }
-
-  const newDir = {
-    id: Date.now(),
-    path: normalizedPath,
-    status: "Scanning",
-    created_at: new Date().toISOString()
-  };
-
-  db.directories.push(newDir);
-  writeDB(db);
-
-  addLog("WATCHDOG", `Registered directory watcher on local path: ${normalizedPath}`);
-  addLog("INDEXER", `Initiating recursive text indexing pipeline for: ${normalizedPath}`);
-
-  // Simulating the folder scan and hot monitoring logs
-  setTimeout(() => {
-    addLog("INDEXER", `[${normalizedPath}] Discovered 3 local system documents.`);
-    
-    // Create mock local documents inside the folder to demonstrate search
-    const mockDocs = [
-      {
-        file_path: path.join(normalizedPath, "secrets_api_keys.txt"),
-        file_name: "secrets_api_keys.txt",
-        content: "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\nAWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\nSTRIPE_LIVE_KEY=sk_live_51Nz23E...",
-        size: 204
-      },
-      {
-        file_path: path.join(normalizedPath, "deployment_notes.md"),
-        file_name: "deployment_notes.md",
-        content: "IndexArc Deployment Protocol.\n1. Install Ollama and pull qwen2.5:0.5b.\n2. Execute python main.py locally.\n3. Verify SQLite DB entries under data/indexarc.db",
-        size: 340
-      },
-      {
-        file_path: path.join(normalizedPath, "config_tokens.json"),
-        file_name: "config_tokens.json",
-        content: "{\n  \"JWT_SECRET_TOKEN\": \"shh_its_a_secret_jwt_hash_key_12345\",\n  \"GITHUB_OAUTH_TOKEN\": \"ghp_abcdef1234567890abcdef\"\n}",
-        size: 110
-      }
-    ];
-
-    // Embed mock documents if Gemini is available
-    mockDocs.forEach(async (doc, idx) => {
-      setTimeout(async () => {
-        addLog("INDEXER", `[${normalizedPath}] Parsing Document: ${doc.file_name} (${doc.size} bytes)`);
-        
-        // Write file tracking entry
-        const dbCurrent = readDB();
-        const newFile = {
-          id: Date.now() + idx,
-          file_path: doc.file_path,
-          file_name: doc.file_name,
-          file_size: doc.size,
-          source_type: "folder",
-          directory_id: newDir.id,
-          status: "indexed",
-          last_indexed: new Date().toISOString()
-        };
-        dbCurrent.files.push(newFile);
-        writeDB(dbCurrent);
-
-        // Vector indexing
-        if (process.env.GEMINI_API_KEY) {
-          try {
-            const values = await getEmbeddingValues(doc.content);
-            if (values) {
-              const vectors = readVectors();
-              vectors.chunks.push({
-                id: `folder_file_${newFile.id}`,
-                text: doc.content,
-                embedding: values,
-                metadata: {
-                  source: doc.file_path,
-                  file_name: doc.file_name,
-                  type: "file"
-                }
-              });
-              writeVectors(vectors);
-              addLog("VECTORSTORE", `[${normalizedPath}] Created embedding vector for ${doc.file_name} in ChromaDB.`);
-            }
-          } catch (embedErr: any) {
-            addLog("EMBEDDER", `Embedding failed for ${doc.file_name}: ${embedErr.message}`);
-          }
-        }
-      }, (idx + 1) * 800);
-    });
-
-    // Update folder observer state to active
-    setTimeout(() => {
-      const dbCurrent = readDB();
-      const dirIndex = dbCurrent.directories.findIndex((d: any) => d.id === newDir.id);
-      if (dirIndex !== -1) {
-        dbCurrent.directories[dirIndex].status = "Active";
-        writeDB(dbCurrent);
-      }
-      addLog("WATCHDOG", `[${normalizedPath}] Watchdog daemon registered. Active folder watching online.`);
-    }, 3200);
-
-  }, 1000);
-
-  res.json(newDir);
-});
-
-// DELETE tracked directory
-app.delete("/api/directories/:id", (req, res) => {
-  const id = parseInt(req.params.id);
-  const db = readDB();
-  const dir = db.directories.find((d: any) => d.id === id);
-  if (dir) {
-    addLog("WATCHDOG", `Stopped active directory watcher daemon on: ${dir.path}`);
-  }
-  
-  db.directories = db.directories.filter((d: any) => d.id !== id);
-  
-  // Clean indexed files under this directory
-  const filesToDelete = db.files.filter((f: any) => f.directory_id === id);
-  const filePaths = filesToDelete.map((f: any) => f.file_path);
-  db.files = db.files.filter((f: any) => f.directory_id !== id);
-  writeDB(db);
-
-  // Clean vectors
-  const vectors = readVectors();
-  vectors.chunks = vectors.chunks.filter((c: any) => !filePaths.includes(c.metadata.source));
-  writeVectors(vectors);
-
-  addLog("DB", `Removed directory tracking references (id: ${id}) from indexer.`);
-  res.json({ success: true });
-});
-
-// GET list all indexed files
-app.get("/api/files", (req, res) => {
-  const db = readDB();
-  res.json(db.files);
-});
-
-// GET file content by ID (reconstruct from uploads or chunk vectors)
-app.get("/api/files/:id/content", (req, res) => {
-  const id = parseInt(req.params.id);
-  const db = readDB();
-  const file = db.files.find((f: any) => f.id === id);
-  if (!file) {
-    return res.status(404).json({ error: "File not found" });
-  }
-
-  // 1. Try reading original file from disk if uploaded
-  if (file.source_type === "upload" && fs.existsSync(file.file_path)) {
-    try {
-      const content = fs.readFileSync(file.file_path, "utf-8");
-      return res.json({ content });
-    } catch (e) {
-      // fallback if file read failed
-    }
-  }
-
-  // 2. Fallback: Reconstruct text from vector chunks
-  const vectors = readVectors();
-  const fileChunks = vectors.chunks
-    .filter((c: any) => c.metadata.source === file.file_path)
-    .sort((a: any, b: any) => (a.metadata.chunk_index || 0) - (b.metadata.chunk_index || 0));
-
-  if (fileChunks.length > 0) {
-    const content = fileChunks.map((c: any) => c.text).join("\n\n---\n\n");
-    return res.json({ content });
-  }
-
-  // 3. Simulated fallback for mock files
-  if (file.file_name === "secrets_api_keys.txt") {
-    return res.json({ content: "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\nAWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\nSTRIPE_LIVE_KEY=sk_live_51Nz23E..." });
-  } else if (file.file_name === "deployment_notes.md") {
-    return res.json({ content: "IndexArc Deployment Protocol.\n1. Install Ollama and pull qwen2.5:0.5b.\n2. Execute python main.py locally.\n3. Verify SQLite DB entries under data/indexarc.db" });
-  } else if (file.file_name === "config_tokens.json") {
-    return res.json({ content: "{\n  \"JWT_SECRET_TOKEN\": \"shh_its_a_secret_jwt_hash_key_12345\",\n  \"GITHUB_OAUTH_TOKEN\": \"ghp_abcdef1234567890abcdef\"\n}" });
-  }
-
-  res.json({ content: "This file is indexed in the vector database. Full text of chunks is cached securely." });
-});
-
-// DELETE single indexed file
-app.delete("/api/files/:id", (req, res) => {
-  const id = parseInt(req.params.id);
-  const db = readDB();
-  const file = db.files.find((f: any) => f.id === id);
-  if (!file) {
-    return res.status(404).json({ error: "File not found" });
-  }
-
-  // Remove from database
-  db.files = db.files.filter((f: any) => f.id !== id);
-  writeDB(db);
-
-  // Attempt to delete original file from disk if uploaded and exists
-  if (file.source_type === "upload" && fs.existsSync(file.file_path)) {
-    try {
-      fs.unlinkSync(file.file_path);
-      addLog("INGESTER", `Deleted physical file from disk: ${file.file_path}`);
-    } catch (e: any) {
-      console.error("Failed to delete file from disk:", e);
-    }
-  }
-
-  // Clean vectors
-  const vectors = readVectors();
-  vectors.chunks = vectors.chunks.filter((c: any) => c.metadata.source !== file.file_path && !c.id.includes(`file_${id}`));
-  writeVectors(vectors);
-
-  addLog("DB", `Removed file reference "${file.file_name}" (id: ${id}) from indexer.`);
-  addLog("VECTORSTORE", `Cleaned all vector chunks for file "${file.file_name}".`);
-  res.json({ success: true });
-});
-
-// POST single file uploads
-// Since this is standard API routing, we support form parsing inside the express server.
-import multer from "multer";
-const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // Limit to 10MB
-
-app.post("/api/files/upload", upload.single("file"), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: "No file uploaded" });
-  }
-
-  const { originalname, size, buffer } = req.file;
-  addLog("INGESTER", `Received file upload: ${originalname} (${size} bytes)`);
-
-  const db = readDB();
-  const tempPath = path.join(DATA_DIR, "uploads", originalname);
-
-  // Ensure uploads directory exists
-  if (!fs.existsSync(path.join(DATA_DIR, "uploads"))) {
-    fs.mkdirSync(path.join(DATA_DIR, "uploads"), { recursive: true });
-  }
-
-  // Save original file on server disk
-  fs.writeFileSync(tempPath, buffer);
-  addLog("INGESTER", `Saved original document references under relative path: data/uploads/${originalname}`);
-
-  const newFile = {
-    id: Date.now(),
-    file_path: tempPath,
-    file_name: originalname,
-    file_size: size,
-    source_type: "upload",
-    directory_id: null,
-    status: "indexing",
-    last_indexed: new Date().toISOString()
-  };
-
-  db.files.unshift(newFile);
-  writeDB(db);
-
-  // Index and chunk file contents asynchronously
-  setTimeout(async () => {
-    try {
-      const textContent = scrapeTextContent(originalname, buffer);
-      if (!textContent.trim()) {
-        throw new Error("Empty file content extracted.");
-      }
-
-      const chunks = chunkText(textContent);
-      addLog("INDEXER", `Segmented ${originalname} into ${chunks.length} overlapping text chunks.`);
-
-      const vectors = readVectors();
-
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
-        let embedding = Array(384).fill(0).map(() => Math.random() - 0.5); // Fallback mock values
-
-        if (process.env.GEMINI_API_KEY) {
-          try {
-            const values = await getEmbeddingValues(chunk);
-            if (values) {
-              embedding = values;
-            }
-          } catch (e: any) {
-            addLog("EMBEDDER", `Embedding chunk ${i} failed: ${e.message}`);
-          }
-        }
-
-        vectors.chunks.push({
-          id: `file_${newFile.id}_chunk_${i}`,
-          text: chunk,
-          embedding,
-          metadata: {
-            source: tempPath,
-            file_name: originalname,
-            chunk_index: i,
-            type: "file"
-          }
-        });
-      }
-
-      writeVectors(vectors);
-      
-      // Update file state to indexed
-      const dbCurrent = readDB();
-      const fileIdx = dbCurrent.files.findIndex((f: any) => f.id === newFile.id);
-      if (fileIdx !== -1) {
-        dbCurrent.files[fileIdx].status = "indexed";
-        writeDB(dbCurrent);
-      }
-
-      addLog("VECTORSTORE", `Ingested ${chunks.length} vectors to ChromaDB index for: ${originalname}`);
-      addLog("INDEXER", `Successfully completed vector pipeline index for: ${originalname}`);
-
-    } catch (err: any) {
-      addLog("INDEXER", `File indexing failed: ${err.message}`);
-      const dbCurrent = readDB();
-      const fileIdx = dbCurrent.files.findIndex((f: any) => f.id === newFile.id);
-      if (fileIdx !== -1) {
-        dbCurrent.files[fileIdx].status = "failed";
-        dbCurrent.files[fileIdx].error_message = err.message;
-        writeDB(dbCurrent);
-      }
-    }
-  }, 1200);
-
-  res.json({ status: "processing", file: originalname });
-});
-
-// POST semantic vector search queries
-app.post("/api/search", async (req, res) => {
-  const { query, n_results = 5 } = req.body;
-  if (!query || !query.trim()) {
-    return res.status(400).json({ error: "Query is required" });
-  }
-
-  addLog("SEARCH", `Semantic query search initiated: "${query}"`);
-
+// --- Save candidates (batch or single) ---
+app.post("/api/entries/save", async (req, res) => {
+  const settings = store.getSettings();
+  const paste_id = req.body?.paste_id as string | undefined;
+  const items = req.body?.candidates || req.body?.items;
   try {
-    let queryEmbedding: number[] | null = null;
-
-    if (process.env.GEMINI_API_KEY) {
-      try {
-        const values = await getEmbeddingValues(query);
-        if (values) {
-          queryEmbedding = values;
-          addLog("SEARCH", "Created semantic query vector representation using Gemini Embeddings.");
-        }
-      } catch (embedErr: any) {
-        addLog("SEARCH", `Query embedding failed: ${embedErr.message}. Falling back to keyword proximity match.`);
-      }
+    if (Array.isArray(items) && items.length) {
+      const saved = await saveMany(
+        store,
+        settings,
+        paste_id || "manual",
+        items.map((c: any) => ({
+          value: String(c.value ?? ""),
+          type: String(c.type ?? ""),
+          name: String(c.name ?? ""),
+          raw_fragment: c.raw_fragment,
+          labels: c.labels,
+          type_aliases: c.type_aliases,
+          family: c.family,
+          notes: c.notes,
+          source_file: c.source_file,
+          allow_incomplete: true,
+        }))
+      );
+      return res.json({ entries: saved });
     }
+    // single
+    const c = req.body;
+    if (!c?.value) return res.status(400).json({ error: "value is required" });
+    const entry = await saveCandidate(store, settings, {
+      value: String(c.value),
+      type: String(c.type ?? ""),
+      name: String(c.name ?? ""),
+      raw_fragment: c.raw_fragment,
+      labels: c.labels,
+      type_aliases: c.type_aliases,
+      family: c.family,
+      notes: c.notes,
+      paste_id,
+      allow_incomplete: true,
+    });
+    res.json({ entry });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-    const vectors = readVectors();
-    const hits: any[] = [];
+// Park incomplete (save as needs_*)
+app.post("/api/entries/park", async (req, res) => {
+  const settings = store.getSettings();
+  const items = Array.isArray(req.body?.candidates) ? req.body.candidates : [req.body];
+  const paste_id = req.body?.paste_id;
+  const saved = [];
+  for (const c of items) {
+    if (!c?.value) continue;
+    saved.push(
+      await saveCandidate(store, settings, {
+        value: String(c.value),
+        type: String(c.type ?? ""),
+        name: String(c.name ?? ""),
+        raw_fragment: c.raw_fragment,
+        labels: c.labels,
+        type_aliases: c.type_aliases,
+        family: c.family || "unknown",
+        paste_id,
+        allow_incomplete: true,
+      })
+    );
+  }
+  res.json({ entries: saved });
+});
 
-    vectors.chunks.forEach((c: any) => {
-      let score = 0;
-      if (queryEmbedding && c.embedding) {
-        score = cosineSimilarity(queryEmbedding, c.embedding);
-      } else {
-        // Keyword fallback text search (simple substring term match)
-        const words = query.toLowerCase().split(/\s+/);
-        const textLower = c.text.toLowerCase();
-        let matchCount = 0;
-        words.forEach((w: string) => {
-          if (textLower.includes(w)) matchCount++;
-        });
-        score = matchCount / Math.max(words.length, 1);
+app.get("/api/entries", (req, res) => {
+  const status = req.query.status as string | undefined;
+  const family = req.query.family as string | undefined;
+  if (status === "attention") {
+    return res.json(store.getNeedsAttention());
+  }
+  res.json(
+    store.listEntries({
+      status: status as any,
+      family,
+    })
+  );
+});
+
+app.get("/api/entries/:id", (req, res) => {
+  const e = store.getEntry(req.params.id);
+  if (!e) return res.status(404).json({ error: "Not found" });
+  res.json(e);
+});
+
+app.patch("/api/entries/:id", async (req, res) => {
+  const updated = await clarifyEntry(store, store.getSettings(), req.params.id, {
+    type: req.body?.type,
+    name: req.body?.name,
+    notes: req.body?.notes,
+    labels: req.body?.labels,
+  });
+  if (!updated) return res.status(404).json({ error: "Not found" });
+  res.json(updated);
+});
+
+app.delete("/api/entries/:id", (req, res) => {
+  const ok = store.deleteEntry(req.params.id);
+  if (!ok) return res.status(404).json({ error: "Not found" });
+  addLog("VAULT", `Deleted entry ${req.params.id.slice(0, 8)}`);
+  res.json({ success: true });
+});
+
+// --- Folder scan & watch ---
+app.get("/api/folders", (_req, res) => {
+  res.json({
+    folders: store.listWatchedFolders().map((f) => ({
+      ...f,
+      live: watchers.isWatching(f.id),
+    })),
+    active_session_id: store.getActiveScanSession()?.id || null,
+  });
+});
+
+app.get("/api/folders/sessions", (_req, res) => {
+  res.json(store.listScanSessions());
+});
+
+app.get("/api/folders/sessions/active", (_req, res) => {
+  const s = store.getActiveScanSession();
+  if (!s) return res.status(404).json({ error: "No active review session" });
+  res.json(s);
+});
+
+app.get("/api/folders/sessions/:id", (req, res) => {
+  const s = store.getScanSession(req.params.id);
+  if (!s) return res.status(404).json({ error: "Session not found" });
+  res.json(s);
+});
+
+async function registerAndMaybeWatch(
+  session: Awaited<ReturnType<typeof scanFolder>>,
+  keepWatching: boolean
+) {
+  const existing = store.listWatchedFolders().find((f) => f.path === session.folder_path);
+  const folder: WatchedFolder = existing
+    ? {
+        ...existing,
+        watching: keepWatching,
+        last_scan_id: session.id,
+        last_scan_at: session.created_at,
       }
+    : {
+        id: randomUUID(),
+        path: session.folder_path,
+        watching: keepWatching,
+        last_scan_id: session.id,
+        last_scan_at: session.created_at,
+        created_at: new Date().toISOString(),
+      };
+  store.upsertWatchedFolder(folder);
+  if (keepWatching) watchers.start(folder, session.id);
+  else watchers.stop(folder.id);
+  return folder;
+}
 
-      hits.push({
-        text: c.text,
-        metadata: c.metadata,
-        score: Math.max(0, Math.min(1, score)) // clamp 0 to 1
+/**
+ * Server-side filesystem browser — reads folders in place on this machine.
+ * Used by the web UI Browse dialog (no file upload).
+ */
+app.get("/api/fs/roots", (_req, res) => {
+  try {
+    res.json({ roots: listFsRoots() });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/fs/list", (req, res) => {
+  try {
+    const dirPath = String(req.query.path || "").trim();
+    if (!dirPath) {
+      return res.json({
+        path: "",
+        parent: null,
+        entries: listFsRoots().map((r) => ({
+          name: r.label,
+          path: r.path,
+          isDirectory: true,
+        })),
       });
+    }
+    res.json(listDirectory(dirPath));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+/** Full folder scan in place (absolute path on the machine running the server) */
+app.post("/api/folders/scan", async (req, res) => {
+  const folderPath = String(req.body?.path ?? "").trim();
+  if (!folderPath) return res.status(400).json({ error: "Folder path is required" });
+  const useAi = !!req.body?.use_ai;
+  const keepWatching = req.body?.watch !== false;
+
+  try {
+    const session = await scanFolder(store, store.getSettings(), {
+      folderPath,
+      useAi,
+      watching: keepWatching,
     });
+    await registerAndMaybeWatch(session, keepWatching);
+    res.json(session);
+  } catch (e: any) {
+    addLog("FOLDER", `Scan error: ${e.message}`);
+    res.status(400).json({ error: e.message });
+  }
+});
 
-    // Sort by score descending and take top N
-    const results = hits
-      .sort((a, b) => b.score - a.score)
-      .slice(0, n_results)
-      .filter(h => h.score > 0.05); // Filter out zero/negligible hits
+/** Update candidate decisions / fields in a review session */
+app.patch("/api/folders/sessions/:id/candidates", (req, res) => {
+  const session = store.getScanSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+  if (session.status !== "review") {
+    return res.status(400).json({ error: "Session is no longer in review" });
+  }
 
-    addLog("SEARCH", `Vector search completed. Identified ${results.length} relevant semantic contexts.`);
-    res.json({ results });
+  type CandPatch = Partial<AnalyzeCandidate> & { temp_id: string };
+  const updates: CandPatch[] = Array.isArray(req.body?.candidates)
+    ? req.body.candidates
+    : [req.body];
+  const byId = new Map<string, CandPatch>(updates.map((u) => [u.temp_id, u]));
 
+  const candidates = session.candidates.map((c) => {
+    const u = byId.get(c.temp_id);
+    if (!u) return c;
+    const next: AnalyzeCandidate = {
+      ...c,
+      type: u.type !== undefined ? String(u.type) : c.type,
+      name: u.name !== undefined ? String(u.name) : c.name,
+      family: u.family !== undefined ? u.family : c.family,
+      decision: u.decision !== undefined ? u.decision : c.decision,
+      labels: u.labels !== undefined ? u.labels : c.labels,
+    };
+    const secretLike = next.family === "secret" || next.family === "unknown";
+    next.needs_type = secretLike && !String(next.type || "").trim();
+    next.needs_name = secretLike && !String(next.name || "").trim();
+    next.ready = !next.needs_type && !next.needs_name;
+    return next;
+  });
+
+  const ready = candidates.filter((c) => c.ready && c.decision !== "discard").length;
+  const needs = candidates.filter((c) => !c.ready && c.decision !== "discard").length;
+  const discarded = candidates.filter((c) => c.decision === "discard").length;
+
+  const updated = store.updateScanSession(req.params.id, {
+    candidates,
+    summary: {
+      ...session.summary,
+      candidates_ready: ready,
+      candidates_needs_review: needs,
+      candidates_discarded: discarded,
+      candidates_total: candidates.length,
+    },
+  });
+  res.json(updated);
+});
+
+/**
+ * Commit review session:
+ * - decision=save or ready pending → vault save
+ * - decision=park or incomplete pending → park as unidentified
+ * - decision=discard → skip
+ */
+app.post("/api/folders/sessions/:id/commit", async (req, res) => {
+  const session = store.getScanSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+  if (session.status !== "review") {
+    return res.status(400).json({ error: "Session already committed or discarded" });
+  }
+
+  const mode = String(req.body?.mode || "selected"); // selected | all_ready | all_pending
+  const settings = store.getSettings();
+  const saved = [];
+  const parked = [];
+  let discarded = 0;
+
+  for (const c of session.candidates) {
+    const decision = c.decision || "pending";
+    if (decision === "discard") {
+      discarded++;
+      continue;
+    }
+
+    let action: "save" | "park" | "skip" = "skip";
+    if (decision === "save") action = "save";
+    else if (decision === "park") action = "park";
+    else if (decision === "pending") {
+      if (mode === "all_ready" && c.ready) action = "save";
+      else if (mode === "all_pending") action = c.ready ? "save" : "park";
+      else if (mode === "apply") action = c.ready ? "save" : "park";
+    }
+
+    if (action === "skip") continue;
+
+    const entry = await saveCandidate(store, settings, {
+      value: c.value,
+      type: c.type,
+      name: c.name,
+      raw_fragment: c.raw_fragment,
+      labels: c.labels,
+      type_aliases: c.type_aliases,
+      family: c.family,
+      paste_id: session.id,
+      source_file: c.source_file,
+      allow_incomplete: true,
+    });
+    if (entry.status === "saved") saved.push(entry);
+    else parked.push(entry);
+  }
+
+  store.updateScanSession(req.params.id, { status: "committed" });
+
+  addLog(
+    "FOLDER",
+    `Committed session ${session.id.slice(0, 8)}: saved=${saved.length} parked=${parked.length} discarded=${discarded}`
+  );
+  res.json({ saved, parked, discarded, session_id: session.id });
+});
+
+/** Clearer commit: apply decisions */
+app.post("/api/folders/sessions/:id/apply", async (req, res) => {
+  const session = store.getScanSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+  if (session.status !== "review") {
+    return res.status(400).json({ error: "Session already closed" });
+  }
+
+  const settings = store.getSettings();
+  const saved = [];
+  const parked = [];
+  let discarded = 0;
+
+  for (const c of session.candidates) {
+    const decision = c.decision || "pending";
+    if (decision === "discard") {
+      discarded++;
+      continue;
+    }
+
+    // pending + ready → save; pending + not ready → park; explicit save/park honored
+    let park = false;
+    if (decision === "park") park = true;
+    else if (decision === "save") park = false;
+    else {
+      // pending
+      park = !c.ready;
+    }
+
+    // If user only wants ready and discard rest — handled via decisions in UI
+
+    const entry = await saveCandidate(store, settings, {
+      value: c.value,
+      type: park && !c.type ? "" : c.type,
+      name: park && !c.name ? "" : c.name,
+      raw_fragment: c.raw_fragment,
+      labels: c.labels,
+      type_aliases: c.type_aliases,
+      family: c.family,
+      paste_id: session.id,
+      source_file: c.source_file,
+      allow_incomplete: true,
+    });
+    if (entry.status === "saved") saved.push(entry);
+    else parked.push(entry);
+  }
+
+  store.updateScanSession(req.params.id, {
+    status: "committed",
+    summary: {
+      ...session.summary,
+      candidates_discarded: discarded,
+    },
+  });
+
+  addLog(
+    "FOLDER",
+    `Applied session: ${saved.length} saved, ${parked.length} unidentified, ${discarded} discarded`
+  );
+  res.json({
+    saved_count: saved.length,
+    parked_count: parked.length,
+    discarded_count: discarded,
+    saved,
+    parked,
+  });
+});
+
+/** Discard entire session without saving */
+app.post("/api/folders/sessions/:id/discard", (req, res) => {
+  const session = store.getScanSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+  store.updateScanSession(req.params.id, { status: "discarded" });
+  addLog("FOLDER", `Discarded scan session ${req.params.id.slice(0, 8)}`);
+  res.json({ success: true });
+});
+
+app.post("/api/folders/:id/unwatch", (req, res) => {
+  watchers.stop(req.params.id);
+  const folders = store.listWatchedFolders();
+  const f = folders.find((x) => x.id === req.params.id);
+  if (f) {
+    f.watching = false;
+    store.upsertWatchedFolder(f);
+  }
+  res.json({ success: true });
+});
+
+app.delete("/api/folders/:id", (req, res) => {
+  watchers.stop(req.params.id);
+  const ok = store.removeWatchedFolder(req.params.id);
+  if (!ok) return res.status(404).json({ error: "Not found" });
+  res.json({ success: true });
+});
+
+// --- Ask (AR + EN) ---
+app.post("/api/ask", async (req, res) => {
+  const query = String(req.body?.query ?? "").trim();
+  if (!query) return res.status(400).json({ error: "Query is required" });
+  try {
+    const result = await askVault(
+      store,
+      store.getSettings(),
+      query,
+      Number(req.body?.limit) || 12
+    );
+    res.json(result);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
 });
 
-
-// --- VITE MIDDLEWARE CONFIGURATION ---
+// Legacy aliases for older UI bits
+app.get("/api/snippets", (_req, res) => {
+  res.json(
+    store.listEntries().map((e) => ({
+      id: e.id,
+      type: e.type,
+      title: e.name,
+      content: e.value,
+      user_note: e.notes,
+      created_at: e.created_at,
+    }))
+  );
+});
 
 async function startServer() {
+  const settings = store.getSettings();
+  const PORT = Number(process.env.PORT) || settings.port || 3000;
+  const HOST = process.env.HOST || settings.bind_host || "127.0.0.1";
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -725,19 +606,39 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // In Electron, INDEXARC_DIST_DIR points to the built React assets
-    const distPath = process.env.INDEXARC_DIST_DIR 
+    const distPath = process.env.INDEXARC_DIST_DIR
       ? process.env.INDEXARC_DIST_DIR
-      : path.join(process.cwd(), "dist");
+      : path.join(paths.root, "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.get("*", (req, res, next) => {
+      if (req.path.startsWith("/api")) {
+        return res.status(404).json({ error: `API route not found: ${req.path}` });
+      }
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  // Always JSON for unknown /api routes (dev + prod)
+  app.use("/api", (req, res) => {
+    res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });
+  });
+
+  app.listen(PORT, HOST, () => {
+    addLog("SYSTEM", `Vault server listening on http://${HOST}:${PORT}`);
+    console.log(`IndexArc Vault → http://${HOST}:${PORT}`);
+    console.log(`Portable root → ${paths.root}`);
+    try {
+      watchers.restoreFromStore();
+    } catch (e: any) {
+      addLog("WATCH", `Restore watchers failed: ${e.message}`);
+    }
   });
 }
+
+process.on("exit", () => watchers.stopAll());
+process.on("SIGINT", () => {
+  watchers.stopAll();
+  process.exit(0);
+});
 
 startServer();

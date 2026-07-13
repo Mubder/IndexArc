@@ -1,20 +1,84 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# IndexArc Vault
 
-# Run and deploy your AI Studio app
+**Portable personal vault** — paste secrets, API keys, tokens, commands, and notes. The app multi-extracts values, requires a **name** for every secret, parks unidentified items until you label them, and answers questions in **English and Arabic**.
 
-This contains everything you need to run your app locally.
+All data stays in **one folder** (USB-safe). Copy the whole directory anywhere and run.
 
-View your app in AI Studio: https://ai.studio/apps/bd2ea74b-306a-4b1e-b864-3ba1a48ed1a3
+## Features
 
-## Run Locally
+| Capability | Behavior |
+|------------|----------|
+| Multi-extract | One paste (e.g. full `.env`) → many candidates |
+| Smart types | Freeform types (`telegram user id`, `Hermes profile id`, …) |
+| Always named | Every secret/token gets a name (model or you) |
+| Unidentified inbox | Incomplete items wait on Home for type/name |
+| Ask AR/EN | “Telegram ID” / “معرف تيليجرام” / “bot bAlfaris_1 token” |
+| AI mode | **Local (Ollama)** or **API (Gemini)** or **Auto** — your choice |
+| Portable | `data/` + `config/` next to the app — no AppData dependency |
 
-**Prerequisites:**  Node.js
+## Folder layout
 
+```
+IndexArc/                 ← copy this whole folder to USB
+├── data/                 ← vault.json + vectors (your secrets)
+├── config/               ← settings.json (AI mode, API key)
+├── logs/
+├── dist/                 ← built app (after npm run build)
+├── electron-main.cjs
+└── package.json
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Run locally (dev)
+
+**Prerequisites:** Node.js 18+
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:3000`.
+
+### Optional AI
+
+- **Local:** install [Ollama](https://ollama.com), pull e.g. `qwen2.5:0.5b` and `nomic-embed-text`. Set provider to **Local** in Settings.
+- **API:** set Gemini API key in Settings (stored in `config/settings.json` inside the portable folder). Or set env `GEMINI_API_KEY` for dev.
+
+Without either backend, **heuristics** still parse `.env` lines, Telegram-style IDs, bot tokens, commands, and notes.
+
+## Desktop (portable)
+
+```bash
+npm run desktop          # dev desktop
+npm run desktop:dist     # portable zip / portable exe under dist-desktop/
+```
+
+Packaged builds write vault data next to the executable (`INDEXARC_ROOT`).
+
+## Core workflow
+
+1. **Paste** anything (single key, `.env`, shell command, note).
+2. **Analyze** → review candidates; edit freeform **type** and **name**.
+3. **Save** ready items, or **Park incomplete** → Unidentified on Home.
+4. **Identify** parked secrets when you know what they are.
+5. **Ask** in English or Arabic for lists or named lookups.
+
+## Environment (optional)
+
+| Variable | Purpose |
+|----------|---------|
+| `INDEXARC_ROOT` | Force portable root path |
+| `GEMINI_API_KEY` | Cloud API key (dev override) |
+| `PORT` | Server port (default 3000) |
+| `HOST` | Bind address (default `127.0.0.1`) |
+
+## Security notes
+
+- Values are masked in the UI by default; use reveal/copy.
+- Server binds to **localhost** only.
+- Treat `data/vault.json` as sensitive — encrypt the USB or the file if needed.
+- Logs never intentionally store full secret values.
+
+## License
+
+Private project.

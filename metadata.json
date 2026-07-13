@@ -1,6 +1,6 @@
 {
-  "name": "IndexArc",
-  "description": "A completely portable, zero-dependency local Knowledge Management system with SQLite database, folder indexing, and vector search capabilities.",
+  "name": "IndexArc Vault",
+  "description": "Portable single-folder personal vault: multi-extract secrets, always-named tokens, unidentified inbox, bilingual Ask (AR/EN), Local Ollama or Gemini API.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
