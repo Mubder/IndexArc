@@ -105,7 +105,7 @@ export default function App() {
   const [dragActive, setDragActive] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const consoleBottomRef = useRef<HTMLDivElement>(null);
+  const logContainerRef = useRef<HTMLDivElement>(null);
 
   // Poll database & status on load and periodically
   const fetchData = async () => {
@@ -155,10 +155,10 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Auto-scroll logs panel
+  // Auto-scroll logs panel (container-bound, prevents document viewport scrolling)
   useEffect(() => {
-    if (consoleBottomRef.current) {
-      consoleBottomRef.current.scrollIntoView({ behavior: "smooth" });
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [logs]);
 
@@ -929,7 +929,7 @@ export default function App() {
                   </div>
                 </div>
                 
-                <div className="bg-slate-950 p-5 h-80 overflow-y-auto font-mono text-xs text-slate-400 space-y-2.5 leading-relaxed scrollbar-thin scrollbar-thumb-slate-800">
+                <div ref={logContainerRef} className="bg-slate-950 p-5 h-80 overflow-y-auto font-mono text-xs text-slate-400 space-y-2.5 leading-relaxed scrollbar-thin scrollbar-thumb-slate-800">
                   {logs.length === 0 ? (
                     <div className="text-slate-600 italic">Console starting... Logging database operations and watcher scans</div>
                   ) : (
@@ -951,7 +951,6 @@ export default function App() {
                       </div>
                     ))
                   )}
-                  <div ref={consoleBottomRef} />
                 </div>
               </div>
 
