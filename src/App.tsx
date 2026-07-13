@@ -210,6 +210,14 @@ export default function App() {
   const [clarifyType, setClarifyType] = useState("");
   const [clarifyName, setClarifyName] = useState("");
 
+  /** Prevent poll/refresh from wiping in-progress Settings form edits */
+  const settingsDirtyRef = useRef(false);
+
+  const patchSettings = useCallback((patch: Partial<Settings>) => {
+    settingsDirtyRef.current = true;
+    setSettings((prev) => (prev ? { ...prev, ...patch } : (patch as Settings)));
+  }, []);
+
   useEffect(() => {
     scanSessionIdRef.current = scanSession?.id ?? null;
   }, [scanSession?.id]);
@@ -228,7 +236,10 @@ export default function App() {
       setEntries(en);
       setAttention(att);
       setLogs(lg);
-      setSettings(se);
+      // Only load settings from server when form is clean (not mid-edit)
+      if (!settingsDirtyRef.current) {
+        setSettings(se);
+      }
       setWatchedFolders(folders.folders || []);
 
       // keep active scan session in sync (watch updates)
@@ -387,11 +398,16 @@ export default function App() {
 
   const saveSettings = async () => {
     if (!settings) return;
-    await fetch("/api/settings", {
+    const res = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings),
     });
+    const saved = await res.json().catch(() => settings);
+    settingsDirtyRef.current = false;
+    if (saved && typeof saved === "object" && saved.ai_provider) {
+      setSettings(saved as Settings);
+    }
     // When using local/auto, ensure models exist and warm the LLM into memory
     if (settings.ai_provider === "local" || settings.ai_provider === "auto") {
       try {
@@ -1461,7 +1477,7 @@ export default function App() {
                   <button
                     key={m}
                     type="button"
-                    onClick={() => setSettings({ ...settings, ai_provider: m })}
+                    onClick={() => patchSettings({ ai_provider: m })}
                     className={`px-3 py-2 rounded-xl text-xs font-medium border ${
                       settings.ai_provider === m
                         ? "bg-indigo-600 border-indigo-500 text-white"
@@ -1509,7 +1525,7 @@ export default function App() {
                     <span className="text-slate-400">Ollama base URL</span>
                     <input
                       value={settings.ollama_base_url}
-                      onChange={(e) => setSettings({ ...settings, ollama_base_url: e.target.value })}
+                      onChange={(e) => patchSettings({ ollama_base_url: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-sm font-mono"
                     />
                   </label>
@@ -1518,9 +1534,7 @@ export default function App() {
                       <span className="text-slate-400">LLM (classify / extract)</span>
                       <select
                         value={settings.ollama_llm_model}
-                        onChange={(e) =>
-                          setSettings({ ...settings, ollama_llm_model: e.target.value })
-                        }
+                        onChange={(e) => patchSettings({ ollama_llm_model: e.target.value })}
                         className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-sm font-mono"
                       >
                         {/* keep current even if not in list */}
@@ -1541,9 +1555,7 @@ export default function App() {
                       </select>
                       <input
                         value={settings.ollama_llm_model}
-                        onChange={(e) =>
-                          setSettings({ ...settings, ollama_llm_model: e.target.value })
-                        }
+                        onChange={(e) => patchSettings({ ollama_llm_model: e.target.value })}
                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[11px] font-mono text-slate-400"
                         placeholder="or type model name"
                       />
@@ -1552,9 +1564,7 @@ export default function App() {
                       <span className="text-slate-400">Embed (search vectors)</span>
                       <select
                         value={settings.ollama_embed_model}
-                        onChange={(e) =>
-                          setSettings({ ...settings, ollama_embed_model: e.target.value })
-                        }
+                        onChange={(e) => patchSettings({ ollama_embed_model: e.target.value })}
                         className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-sm font-mono"
                       >
                         {!status?.ollama_models?.some(
@@ -1574,9 +1584,7 @@ export default function App() {
                       </select>
                       <input
                         value={settings.ollama_embed_model}
-                        onChange={(e) =>
-                          setSettings({ ...settings, ollama_embed_model: e.target.value })
-                        }
+                        onChange={(e) => patchSettings({ ollama_embed_model: e.target.value })}
                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[11px] font-mono text-slate-400"
                         placeholder="or type model name"
                       />
@@ -1613,9 +1621,7 @@ export default function App() {
                     <input
                       type="password"
                       value={settings.gemini_api_key}
-                      onChange={(e) =>
-                        setSettings({ ...settings, gemini_api_key: e.target.value })
-                      }
+                      onChange={(e) => patchSettings({ gemini_api_key: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-sm font-mono"
                       placeholder="AIza…"
                     />
@@ -1625,9 +1631,7 @@ export default function App() {
                       <span className="text-slate-400">Gemini LLM</span>
                       <select
                         value={settings.gemini_llm_model}
-                        onChange={(e) =>
-                          setSettings({ ...settings, gemini_llm_model: e.target.value })
-                        }
+                        onChange={(e) => patchSettings({ gemini_llm_model: e.target.value })}
                         className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-sm font-mono"
                       >
                         {[
@@ -1649,9 +1653,7 @@ export default function App() {
                       <span className="text-slate-400">Gemini embed</span>
                       <select
                         value={settings.gemini_embed_model}
-                        onChange={(e) =>
-                          setSettings({ ...settings, gemini_embed_model: e.target.value })
-                        }
+                        onChange={(e) => patchSettings({ gemini_embed_model: e.target.value })}
                         className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-sm font-mono"
                       >
                         {["text-embedding-004", "embedding-001", settings.gemini_embed_model]
