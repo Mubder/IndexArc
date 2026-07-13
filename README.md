@@ -46,14 +46,21 @@ Open `http://127.0.0.1:3000`.
 
 Without either backend, **heuristics** still parse `.env` lines, Telegram-style IDs, bot tokens, commands, and notes.
 
-## Desktop (portable)
+## Desktop app (Windows now · macOS/Linux next)
 
 ```bash
-npm run desktop          # dev desktop
-npm run desktop:dist     # portable zip / portable exe under dist-desktop/
+npm run desktop          # Electron shell (dev)
+npm run desktop:win      # Windows: portable .exe + installer
+npm run desktop:mac      # macOS .dmg (run on a Mac)
+npm run desktop:linux    # Linux AppImage (run on Linux)
 ```
 
-Packaged builds write vault data next to the executable (`INDEXARC_ROOT`).
+| Output | Path |
+|--------|------|
+| Portable Windows | `dist-desktop/IndexArc-Portable-2.0.0.exe` |
+| Windows installer | `dist-desktop/IndexArc-Setup-2.0.0.exe` |
+
+Packaged builds write vault data next to the executable (`data/`, `config/`). See [DESKTOP_BUILD_GUIDE.md](./DESKTOP_BUILD_GUIDE.md).
 
 ## Core workflow
 

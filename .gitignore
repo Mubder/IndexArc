@@ -1,15 +1,20 @@
 node_modules/
-build/
 dist/
 dist-desktop/
-coverage/
-.DS_Store
-*.log
-.env
-.env.*
-!.env.example
+dist-desktop-release/
+dist-desktop-out/
+.desktop-sandbox/
+
+# Never commit vault secrets
 data/
 config/
 logs/
 tmp/
-*.tmp
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.vs/

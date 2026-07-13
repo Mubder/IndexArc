@@ -1,7 +1,6 @@
 import "dotenv/config";
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { ensurePortableLayout } from "./server/paths.js";
 import { VaultStore } from "./server/store.js";
 import { addLog, getLogs } from "./server/logs.js";
@@ -600,6 +599,8 @@ async function startServer() {
   const HOST = process.env.HOST || settings.bind_host || "127.0.0.1";
 
   if (process.env.NODE_ENV !== "production") {
+    // Vite is dev-only — dynamic import so production desktop bundle stays lean
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

@@ -11,24 +11,38 @@ let mainWindow = null;
 const PORT = Number(process.env.PORT) || 3000;
 
 /**
- * Portable single-folder root:
- * - Dev: project cwd
- * - Packaged: directory containing the executable (USB-safe)
+ * Where vault data lives (data/, config/, logs/).
+ * - Packaged: folder next to the .exe (USB portable) — starts EMPTY
+ * - Dev Electron: isolated `.desktop-sandbox/` so we NEVER use your real project vault
+ * - Override: INDEXARC_ROOT env
+ *
+ * IMPORTANT: user secrets must never be baked into the installer/package.
  */
 function getPortableRoot() {
   if (process.env.INDEXARC_ROOT) {
     return path.resolve(process.env.INDEXARC_ROOT);
   }
   if (!app.isPackaged) {
-    return process.cwd();
+    // Separate from G:/…/IndexArc/data (real vault) so desktop testing is clean
+    return path.join(process.cwd(), ".desktop-sandbox");
   }
-  // Portable: data/config next to IndexArc.exe
+  // Portable: empty data/config created next to IndexArc.exe on first run
   return path.dirname(process.execPath);
 }
 
 function getResourcePath() {
   if (!app.isPackaged) {
     return process.cwd();
+  }
+  // electron-builder: app files live under resources/app (asar:false)
+  const candidates = [
+    path.join(process.resourcesPath, "app"),
+    process.resourcesPath,
+    path.dirname(process.execPath),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(c, "dist", "server.cjs"))) return c;
+    if (fs.existsSync(path.join(c, "electron-main.cjs"))) return c;
   }
   return path.join(process.resourcesPath, "app");
 }

@@ -26,6 +26,21 @@ function hasToken(haystack: string, needle: string): boolean {
   return re.test(h);
 }
 
+/**
+ * Partial key / token fragment lookups (e.g. "P29T" inside a long access token).
+ * Alphanumeric-ish, no spaces — not everyday English words.
+ */
+function isKeyFragmentQuery(q: string): boolean {
+  const t = q.trim();
+  if (t.length < 3 || t.length > 80) return false;
+  if (/\s/.test(t)) return false;
+  // must look like a code fragment (has digit or mixed case or long)
+  if (!/^[A-Za-z0-9_\-+/=.:]+$/.test(t)) return false;
+  if (t.length >= 4) return true;
+  // length 3: require a digit so "the"/"api" don't flood value substring matches
+  return /\d/.test(t);
+}
+
 function scoreEntry(
   entry: VaultEntry,
   query: string,
@@ -41,6 +56,7 @@ function scoreEntry(
   const source = (entry.source_file || "").toLowerCase();
   const typeBlob = `${type} ${aliases} ${labels}`;
   const searchable = `${name} ${typeBlob} ${value} ${raw} ${source}`;
+  const keyFrag = isKeyFragmentQuery(query);
 
   let score = 0;
   let keywordHits = 0;
@@ -67,22 +83,29 @@ function scoreEntry(
     }
   }
 
-  // Full-query text hit in value / labels / source / raw
+  // Full-query text hit in labels / source (token-ish)
   if (q.length >= 3 && (hasToken(searchable, q) || (q.length >= 5 && searchable.includes(q)))) {
     score += 0.55;
     keywordHits += 1;
     reasons.push("text");
   }
 
-  // Value-specific
-  if (value === q) {
-    score += 0.7;
+  // Value / raw: support partial key search (P29T inside long token)
+  if (value === q || raw === q) {
+    score += 0.9;
     keywordHits += 2;
     reasons.push("exact value");
-  } else if (q.length >= 4 && (hasToken(value, q) || (q.length >= 5 && value.includes(q)))) {
-    score += 0.5;
-    keywordHits += 1;
-    reasons.push("value");
+  } else if (value.includes(q) || raw.includes(q)) {
+    if (hasToken(value, q) || hasToken(raw, q)) {
+      score += 0.7;
+      keywordHits += 2;
+      reasons.push("value");
+    } else if (keyFrag || q.length >= 4) {
+      // substring inside a secret string — this is how people find keys by a known fragment
+      score += keyFrag ? 1.1 : 0.65;
+      keywordHits += 2;
+      reasons.push("value fragment");
+    }
   }
 
   // Expanded terms (twitter→x, etc.) — token hits only; no bare substring for short terms

@@ -3,17 +3,21 @@
   "private": true,
   "version": "2.0.0",
   "description": "Portable personal vault — paste secrets, multi-extract, name, ask in AR/EN",
+  "author": "IndexArc",
   "type": "module",
   "main": "electron-main.cjs",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --external:vite --external:electron --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
-    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true}); try{require('fs').rmSync('dist-desktop',{recursive:true,force:true})}catch(e){}\"",
     "lint": "tsc --noEmit",
     "desktop": "npm run build && electron electron-main.cjs",
-    "desktop:pack": "npm run build && electron-builder --dir",
-    "desktop:dist": "npm run build && electron-builder"
+    "desktop:pack": "npm run build && electron-builder --dir --win",
+    "desktop:win": "npm run build && electron-builder --win portable nsis --x64",
+    "desktop:mac": "npm run build && electron-builder --mac dmg zip --x64 --arm64",
+    "desktop:linux": "npm run build && electron-builder --linux AppImage tar.gz --x64",
+    "desktop:dist": "npm run desktop:win"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -43,33 +47,89 @@
   "build": {
     "appId": "com.indexarc.vault",
     "productName": "IndexArc",
+    "copyright": "Copyright © IndexArc",
     "directories": {
-      "output": "dist-desktop"
+      "output": "dist-desktop",
+      "buildResources": "assets"
     },
     "files": [
       "dist/**/*",
       "electron-main.cjs",
       "preload.cjs",
-      "package.json"
+      "package.json",
+      "!**/{node_modules,docs,test,tests,examples,coverage}/**/*",
+      "!dist/**/*.map",
+      "!data{,/**/*}",
+      "!config{,/**/*}",
+      "!logs{,/**/*}",
+      "!tmp{,/**/*}",
+      "!.desktop-sandbox{,/**/*}",
+      "!dist-desktop{,/**/*}",
+      "!dist-desktop-release{,/**/*}",
+      "!**/*vault*.json",
+      "!**/*vector*.json",
+      "!**/scan_sessions.json",
+      "!**/watched_folders.json",
+      "!**/settings.json",
+      "!**/.env",
+      "!**/.env.*"
     ],
     "asar": false,
+    "extraMetadata": {
+      "main": "electron-main.cjs"
+    },
     "win": {
       "target": [
-        "portable",
-        "zip"
-      ]
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        },
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "IndexArc-Portable-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "IndexArc",
+      "artifactName": "IndexArc-Setup-${version}.exe"
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
-      ]
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
     },
     "linux": {
       "target": [
-        "AppImage",
-        "tar.gz"
-      ]
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "tar.gz",
+          "arch": ["x64"]
+        }
+      ],
+      "category": "Office",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
     }
   }
 }
