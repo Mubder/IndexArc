@@ -232,7 +232,7 @@ function noteTitle(line: string): string {
 }
 
 function nameFromEnvKey(key: string): string {
-  // TELEGRAM_BOT_TOKEN_MYBOT_1 → mybot_1-ish name
+  // TELEGRAM_BOT_TOKEN_BALFARIS_1 → balfaris_1-ish name
   const parts = key.toLowerCase().split("_").filter(Boolean);
   const noise = new Set([
     "api",
@@ -644,7 +644,7 @@ export function heuristicAnalyze(paste: string): AnalyzeCandidate[] {
   // Single-line or free paste
   const single = text.trim();
 
-  // Quoted env style: TELEGRAM_ALLOWED_USERS "123456789"
+  // Quoted env style: TELEGRAM_ALLOWED_USERS "1804015016"
   const spaced = single.match(
     /^([A-Za-z_][A-Za-z0-9_]*)\s+["']([^"']+)["']\s*$/
   );

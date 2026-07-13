@@ -12,7 +12,7 @@ All data stays in **one folder** (USB-safe). Copy the whole directory anywhere a
 | Smart types | Freeform types (`telegram user id`, `Hermes profile id`, …) |
 | Always named | Every secret/token gets a name (model or you) |
 | Unidentified inbox | Incomplete items wait on Home for type/name |
-| Ask AR/EN | “Telegram ID” / “معرف تيليجرام” / “bot mybot_1 token” |
+| Ask AR/EN | “Telegram ID” / “معرف تيليجرام” / “bot bAlfaris_1 token” |
 | AI mode | **Local (Ollama)** or **API (Gemini)** or **Auto** — your choice |
 | Portable | `data/` + `config/` next to the app — no AppData dependency |
 

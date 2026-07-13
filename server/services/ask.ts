@@ -1,7 +1,7 @@
 import type { VaultStore } from "../store.js";
 import type { AppSettings, AskResultItem, VaultEntry } from "../types.js";
 import { expandQueryTerms } from "../ai/heuristics.js";
-import { cosineSimilarity, embedText, resolveActiveProvider } from "../ai/providers.js";
+import { cosineSimilarity, embedText, resolveActiveProvider, generateText } from "../ai/providers.js";
 import { addLog } from "../logs.js";
 
 function maskValue(v: string): string {
@@ -195,7 +195,7 @@ export async function askVault(
   settings: AppSettings,
   query: string,
   limit = 10
-): Promise<{ results: AskResultItem[]; provider_used: string; mode: string }> {
+): Promise<{ results: AskResultItem[]; answer?: string; provider_used: string; mode: string }> {
   const q = query.trim();
   if (!q) return { results: [], provider_used: "none", mode: "empty" };
 
@@ -218,7 +218,13 @@ export async function askVault(
     try {
       const qEmb = await embedText(settings, q, active);
       if (qEmb) {
-        provider_used = active === "local" ? "ollama+keyword" : "gemini+keyword";
+        if (active === "local") {
+          provider_used = "ollama+keyword";
+        } else if (active === "api") {
+          provider_used = "gemini+keyword";
+        } else {
+          provider_used = `${active}+keyword`;
+        }
         const vectors = store.allVectors();
         const byEntry = new Map(vectors.map((v) => [v.entry_id, v]));
         for (const item of scored) {
@@ -258,8 +264,47 @@ export async function askVault(
     .slice(0, limit)
     .map(({ entry, score, match_reason }) => ({ entry, score, match_reason }));
 
+  let answer: string | undefined = undefined;
+  if (active !== "heuristic" && results.length > 0) {
+    try {
+      const topMatches = results.slice(0, 5);
+      const matchesContext = topMatches
+        .map(
+          (r, index) =>
+            `[Entry #${index + 1}]
+Name: ${r.entry.name}
+Type: ${r.entry.type}
+Family: ${r.entry.family}
+Value: ${r.entry.value}
+Labels: ${(r.entry.labels || []).join(", ")}
+Notes: ${r.entry.notes || ""}`
+        )
+        .join("\n\n");
+
+      const systemInstruction = `You are IndexArc, a secure bilingual (English/Arabic) personal vault assistant. Your goal is to answer the user's question directly, accurately, and concisely using only the retrieved entries from their secure vault.
+
+Guidelines:
+- Answer in the language of the user's query (English or Arabic), or provide a bilingual response if appropriate.
+- Directly answer the question. If they ask for a specific secret, token, or command, display it clearly, preferably inside a code block or prominent formatting so they can find or copy it instantly.
+- Be extremely brief and professional. Do not hallucinate or make up secrets. If the provided entries do not contain the answer, say so clearly.`;
+
+      const userPrompt = `User Query: "${q}"
+
+Matching Vault Entries:
+${matchesContext}`;
+
+      const genResult = await generateText(settings, userPrompt, systemInstruction);
+      if (genResult) {
+        answer = genResult.text;
+        provider_used = `${provider_used} + generateText via ${genResult.provider_used}`;
+      }
+    } catch (e: any) {
+      addLog("ASK", `Conversational answer generation failed: ${e.message}`);
+    }
+  }
+
   addLog("ASK", `Query processed → ${results.length} hit(s) via ${provider_used}`);
-  return { results, provider_used, mode: "hybrid" };
+  return { results, answer, provider_used, mode: "hybrid" };
 }
 
 export { maskValue };

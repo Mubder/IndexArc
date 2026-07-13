@@ -43,7 +43,15 @@ export interface VectorChunk {
   };
 }
 
-export type AIProviderMode = "local" | "api" | "auto";
+export type AIProviderMode =
+  | "auto"
+  | "local"
+  | "api"
+  | "openai"
+  | "groq"
+  | "openrouter"
+  | "anthropic"
+  | "local_openai";
 
 export interface AppSettings {
   ai_provider: AIProviderMode;
@@ -53,6 +61,17 @@ export interface AppSettings {
   gemini_api_key: string;
   gemini_llm_model: string;
   gemini_embed_model: string;
+  openai_api_key: string;
+  openai_llm_model: string;
+  groq_api_key: string;
+  groq_llm_model: string;
+  openrouter_api_key: string;
+  openrouter_llm_model: string;
+  anthropic_api_key: string;
+  anthropic_llm_model: string;
+  local_openai_base_url: string;
+  local_openai_api_key: string;
+  local_openai_llm_model: string;
   ui_language: "en" | "ar" | "both";
   bind_host: string;
   port: number;
@@ -66,6 +85,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
   gemini_api_key: "",
   gemini_llm_model: "gemini-2.0-flash",
   gemini_embed_model: "text-embedding-004",
+  openai_api_key: "",
+  openai_llm_model: "gpt-4o-mini",
+  groq_api_key: "",
+  groq_llm_model: "llama-3.3-70b-versatile",
+  openrouter_api_key: "",
+  openrouter_llm_model: "meta-llama/llama-3.3-70b-instruct",
+  anthropic_api_key: "",
+  anthropic_llm_model: "claude-3-5-haiku-latest",
+  local_openai_base_url: "http://127.0.0.1:1234/v1",
+  local_openai_api_key: "",
+  local_openai_llm_model: "meta-llama-3-8b-instruct",
   ui_language: "both",
   bind_host: "127.0.0.1",
   port: 3000,

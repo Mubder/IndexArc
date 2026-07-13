@@ -31,10 +31,88 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
+// --- Vault Lock Middleware & Routes ---
+function checkVaultUnlocked(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (store.isLocked()) {
+    return res.status(423).json({ error: "Vault is locked", is_locked: true });
+  }
+  next();
+}
+
+app.use("/api/entries", checkVaultUnlocked);
+app.use("/api/analyze", checkVaultUnlocked);
+app.use("/api/folders", checkVaultUnlocked);
+app.use("/api/ask", checkVaultUnlocked);
+app.use("/api/snippets", checkVaultUnlocked);
+
+app.get("/api/vault/status", (_req, res) => {
+  res.json({
+    is_locked: store.isLocked(),
+    encryption_enabled: store.isEncryptionEnabled(),
+  });
+});
+
+app.post("/api/vault/unlock", (req, res) => {
+  const { password } = req.body;
+  if (!password) {
+    return res.status(400).json({ error: "Password is required" });
+  }
+  const ok = store.unlock(password);
+  if (ok) {
+    addLog("SECURITY", "Vault successfully unlocked");
+    res.json({ success: true });
+  } else {
+    addLog("SECURITY", "Failed unlock attempt");
+    setTimeout(() => {
+      res.status(401).json({ error: "Incorrect master password" });
+    }, 500);
+  }
+});
+
+app.post("/api/vault/lock", (_req, res) => {
+  store.lock();
+  addLog("SECURITY", "Vault locked");
+  res.json({ success: true });
+});
+
+app.post("/api/vault/setup-password", (req, res) => {
+  const { password } = req.body;
+  if (!password || String(password).length < 4) {
+    return res.status(400).json({ error: "Password must be at least 4 characters long" });
+  }
+  try {
+    store.setupPassword(password);
+    addLog("SECURITY", "Vault password configured & storage encrypted");
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post("/api/vault/remove-password", (req, res) => {
+  const { password } = req.body;
+  if (!password) {
+    return res.status(400).json({ error: "Password is required" });
+  }
+  const ok = store.removePassword(password);
+  if (ok) {
+    addLog("SECURITY", "Vault password removed & storage decrypted");
+    res.json({ success: true });
+  } else {
+    setTimeout(() => {
+      res.status(401).json({ error: "Incorrect master password" });
+    }, 500);
+  }
+});
+
 addLog("SYSTEM", `IndexArc Vault portable root: ${paths.root}`);
 addLog("SYSTEM", `Data → ${paths.dataDir} | Config → ${paths.configDir}`);
 
 // --- Status ---
+app.get("/api/ping", (_req, res) => {
+  res.json({ status: "ok" });
+});
+
 app.get("/api/status", async (_req, res) => {
   const settings = store.getSettings();
   const ollama = await checkOllama(settings.ollama_base_url);
@@ -78,13 +156,36 @@ app.post("/api/settings", (req, res) => {
     "gemini_api_key",
     "gemini_llm_model",
     "gemini_embed_model",
+    "openai_api_key",
+    "openai_llm_model",
+    "groq_api_key",
+    "groq_llm_model",
+    "openrouter_api_key",
+    "openrouter_llm_model",
+    "anthropic_api_key",
+    "anthropic_llm_model",
+    "local_openai_base_url",
+    "local_openai_api_key",
+    "local_openai_llm_model",
     "ui_language",
   ];
   const patch: Record<string, unknown> = {};
   for (const k of allowed) {
     if (body[k] !== undefined) patch[k] = body[k];
   }
-  if (patch.ai_provider && !["local", "api", "auto"].includes(patch.ai_provider as string)) {
+  if (
+    patch.ai_provider &&
+    ![
+      "local",
+      "api",
+      "auto",
+      "openai",
+      "groq",
+      "openrouter",
+      "anthropic",
+      "local_openai",
+    ].includes(patch.ai_provider as string)
+  ) {
     return res.status(400).json({ error: "Invalid ai_provider" });
   }
   const next = store.saveSettings(patch as Partial<ReturnType<typeof store.getSettings>>);

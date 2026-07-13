@@ -1,0 +1,79 @@
+name: Desktop Build & Package CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  release:
+    types: [ created ]
+
+jobs:
+  build-cross-platform:
+    name: Build Desktop app (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            build-script: desktop:win
+          - os: macos-latest
+            build-script: desktop:mac
+          - os: ubuntu-latest
+            build-script: desktop:linux
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-size: 20
+          cache: 'npm'
+
+      - name: Install System Dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools rpm
+
+      - name: Install Dependencies
+        run: npm ci || npm install
+
+      - name: Build and Package Desktop Binary
+        run: npm run ${{ matrix.build-script }}
+        env:
+          # Avoid signing issues during CI on macOS unless certs are passed
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Locate and Upload Windows Artifacts
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: IndexArc-Windows-Builds
+          path: |
+            dist-desktop/IndexArc-Portable-*.exe
+            dist-desktop/IndexArc-Setup-*.exe
+
+      - name: Locate and Upload macOS Artifacts
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: IndexArc-macOS-Builds
+          path: |
+            dist-desktop/IndexArc-*-mac-*.dmg
+            dist-desktop/IndexArc-*-mac-*.zip
+
+      - name: Locate and Upload Linux Artifacts
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: IndexArc-Linux-Builds
+          path: |
+            dist-desktop/IndexArc-*-linux-*.AppImage
+            dist-desktop/IndexArc-*-linux-*.tar.gz

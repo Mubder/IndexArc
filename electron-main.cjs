@@ -149,7 +149,7 @@ function pollServerAndLoad(url, window, attempts = 0) {
     return;
   }
   http
-    .get(`http://127.0.0.1:${PORT}/api/status`, (res) => {
+    .get(`http://127.0.0.1:${PORT}/api/ping`, (res) => {
       if (res.statusCode === 200) {
         window.loadURL(url);
         if (!app.isPackaged) {
