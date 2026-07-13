@@ -813,7 +813,7 @@ export default function App() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Ask: Telegram ID · توكن بوت bAlfaris_1 · my bot token?"
+            placeholder="Ask: Telegram ID · توكن بوت mybot_1 · my bot token?"
             className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
           />
           <button
@@ -889,7 +889,7 @@ export default function App() {
                   value={paste}
                   onChange={(e) => setPaste(e.target.value)}
                   rows={4}
-                  placeholder={`Paste secrets, .env blocks, commands, or notes…\nمثال: TELEGRAM_ALLOWED_USERS "1804015016"`}
+                  placeholder={`Paste secrets, .env blocks, commands, or notes…\nمثال: TELEGRAM_ALLOWED_USERS "123456789"`}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:border-teal-500"
                 />
                 <button
@@ -1042,7 +1042,7 @@ export default function App() {
                           <input
                             value={c.name}
                             onChange={(e) => updateCandidate(c.temp_id, { name: e.target.value })}
-                            placeholder="e.g. bAlfaris_1"
+                            placeholder="e.g. mybot_1"
                             className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-sm"
                           />
                         </label>
@@ -1365,7 +1365,7 @@ export default function App() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm"
-                  placeholder="what is my Telegram ID؟ · توكن بوت bAlfaris_1"
+                  placeholder="what is my Telegram ID؟ · توكن بوت mybot_1"
                 />
                 <button
                   type="submit"
@@ -1821,7 +1821,7 @@ export default function App() {
                 value={clarifyName}
                 onChange={(e) => setClarifyName(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm"
-                placeholder="bAlfaris_1"
+                placeholder="mybot_1"
               />
             </label>
             <div className="flex justify-end gap-2 pt-2">
