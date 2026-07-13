@@ -1150,14 +1150,30 @@ export default function App() {
                 <div className="flex gap-3">
                   <div className="flex-1">
                     <label className="block text-[11px] text-slate-500 uppercase tracking-wider mb-1">Absolute Directory Path</label>
-                    <input
-                      type="text"
-                      required
-                      value={dirPath}
-                      onChange={(e) => setDirPath(e.target.value)}
-                      placeholder="e.g., D:/ProjectDocuments or /home/user/workspace"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-mono"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        required
+                        value={dirPath}
+                        onChange={(e) => setDirPath(e.target.value)}
+                        placeholder="e.g., D:/ProjectDocuments or /home/user/workspace"
+                        className="flex-1 bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (window.electronAPI?.selectFolder) {
+                            const folder = await window.electronAPI.selectFolder();
+                            if (folder) setDirPath(folder);
+                          }
+                        }}
+                        className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-3 rounded-lg transition-colors text-xs flex items-center gap-1.5 whitespace-nowrap"
+                        title={window.electronAPI?.selectFolder ? "Browse folders" : "Folder picker only available in desktop app"}
+                      >
+                        <Folder className="w-3.5 h-3.5" />
+                        Browse
+                      </button>
+                    </div>
                   </div>
                   <div className="flex items-end">
                     <button
