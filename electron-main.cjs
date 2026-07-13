@@ -35,21 +35,22 @@ function startBackendServer() {
 }
 
 function pollServerAndLoad(url, window, attempts = 0) {
-  if (attempts > 30) {
-    console.error("Failed to connect to local database server after 30 attempts.");
+  if (attempts > 120) {
+    console.error("Failed to connect to local database server after 120 attempts.");
     app.quit();
     return;
   }
 
-  http.get(`http://localhost:${PORT}/api/status`, (res) => {
+  // Use 127.0.0.1 directly to prevent IPv6/IPv4 lookup discrepancy on localhost in Windows
+  http.get(`http://127.0.0.1:${PORT}/api/status`, (res) => {
     if (res.statusCode === 200) {
       console.log("Local server is online! Loading desktop interface.");
       window.loadURL(url);
     } else {
-      setTimeout(() => pollServerAndLoad(url, window, attempts + 1), 200);
+      setTimeout(() => pollServerAndLoad(url, window, attempts + 1), 400);
     }
   }).on("error", () => {
-    setTimeout(() => pollServerAndLoad(url, window, attempts + 1), 200);
+    setTimeout(() => pollServerAndLoad(url, window, attempts + 1), 400);
   });
 }
 
@@ -72,7 +73,7 @@ function createWindow() {
   // Remove the standard menu bar for a clean, application-like feel
   Menu.setApplicationMenu(null);
 
-  const localUrl = `http://localhost:${PORT}`;
+  const localUrl = `http://127.0.0.1:${PORT}`;
   
   // Wait until server starts responding before loading
   pollServerAndLoad(localUrl, mainWindow);
