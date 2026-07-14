@@ -37,51 +37,57 @@ export const FsBrowserModal: React.FC<FsBrowserModalProps> = ({
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh]">
-        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between gap-2">
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}>
+      <div
+        className="w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh]"
+        style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "1rem" }}
+      >
+        <div className="px-5 py-4 flex items-center justify-between gap-2" style={{ borderBottom: "1px solid var(--border)" }}>
           <div>
-            <h3 className="text-sm font-semibold text-white">{t("fs_modal_title")}</h3>
-            <p className="text-[11px] text-slate-500 mt-0.5">
+            <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("fs_modal_title")}</h3>
+            <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>
               {t("fs_modal_subtitle")}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-white text-sm"
+            className="text-sm transition-colors"
+            style={{ color: "var(--text-muted)" }}
           >
             {t("fs_close_btn")}
           </button>
         </div>
 
-        <div className="px-4 py-2 border-b border-slate-800 flex items-center gap-2">
+        <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: "1px solid var(--border)" }}>
           <button
             type="button"
             disabled={!fsParent && !!fsPath}
             onClick={() => onLoadFsDir(fsParent || "")}
-            className="px-2 py-1 text-[11px] rounded-lg border border-slate-700 text-slate-300 disabled:opacity-40"
+            className="px-2 py-1 text-[11px] rounded-lg disabled:opacity-40"
+            style={{ border: "1px solid var(--border)", color: "var(--text-dim)" }}
           >
             {t("fs_up_btn")}
           </button>
           <button
             type="button"
             onClick={() => onLoadFsDir("")}
-            className="px-2 py-1 text-[11px] rounded-lg border border-slate-700 text-slate-300"
+            className="px-2 py-1 text-[11px] rounded-lg"
+            style={{ border: "1px solid var(--border)", color: "var(--text-dim)" }}
           >
             {t("fs_roots_btn")}
           </button>
-          <div className="flex-1 font-mono text-[11px] text-slate-400 truncate" title={fsPath}>
+          <div className="flex-1 text-[11px] truncate" style={{ fontFamily: "var(--font-mono)", color: "var(--text-muted)" }} title={fsPath}>
             {fsPath || "(drives & home)"}
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto min-h-[200px] max-h-[40vh]">
           {fsLoading && (
-            <p className="p-4 text-xs text-slate-500">{t("fs_loading")}</p>
+            <p className="p-4 text-xs" style={{ color: "var(--text-muted)" }}>{t("fs_loading")}</p>
           )}
           {fsError && (
-            <p className="p-4 text-xs text-red-400">{fsError}</p>
+            <p className="p-4 text-xs" style={{ color: "var(--danger)" }}>{fsError}</p>
           )}
           {!fsLoading &&
             !fsError &&
@@ -90,22 +96,26 @@ export const FsBrowserModal: React.FC<FsBrowserModalProps> = ({
                 key={ent.path}
                 type="button"
                 onClick={() => onLoadFsDir(ent.path)}
-                className="w-full text-left px-4 py-2.5 text-sm border-b border-slate-800/80 hover:bg-slate-800/60 flex items-center gap-2"
+                className="w-full text-left px-4 py-2.5 text-sm flex items-center gap-2 transition-colors"
+                style={{ borderBottom: "1px solid var(--border)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
-                <Folder className="w-4 h-4 text-indigo-400 shrink-0" />
-                <span className="truncate font-mono text-slate-200">{ent.name}</span>
+                <Folder className="w-4 h-4 shrink-0" style={{ color: "var(--cyan)" }} />
+                <span className="truncate" style={{ fontFamily: "var(--font-mono)", color: "var(--text)" }}>{ent.name}</span>
               </button>
             ))}
           {!fsLoading && !fsError && !fsEntries.length && (
-            <p className="p-4 text-xs text-slate-500">{t("fs_no_subfolders")}</p>
+            <p className="p-4 text-xs" style={{ color: "var(--text-muted)" }}>{t("fs_no_subfolders")}</p>
           )}
         </div>
 
-        <div className="px-4 py-3 border-t border-slate-800 flex flex-wrap gap-2 justify-end">
+        <div className="px-4 py-3 flex flex-wrap gap-2 justify-end" style={{ borderTop: "1px solid var(--border)" }}>
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 text-sm text-slate-400 hover:text-white"
+            className="px-3 py-1.5 text-sm"
+            style={{ color: "var(--text-muted)" }}
           >
             {t("identify_cancel_btn")}
           </button>
@@ -116,7 +126,8 @@ export const FsBrowserModal: React.FC<FsBrowserModalProps> = ({
               onSelectFolder(fsPath);
               onClose();
             }}
-            className="px-3 py-1.5 text-sm rounded-lg border border-slate-600 text-slate-200 hover:bg-slate-800 disabled:opacity-40"
+            className="px-3 py-1.5 text-sm rounded-lg disabled:opacity-40"
+            style={{ border: "1px solid var(--border)", color: "var(--text)" }}
           >
             {t("fs_use_path_btn")}
           </button>
@@ -124,7 +135,8 @@ export const FsBrowserModal: React.FC<FsBrowserModalProps> = ({
             type="button"
             disabled={!fsPath || scanning}
             onClick={() => onFolderScan(fsPath)}
-            className="px-4 py-1.5 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-500 font-medium disabled:opacity-40"
+            className="px-4 py-1.5 text-sm rounded-lg font-medium disabled:opacity-40"
+            style={{ background: "var(--accent)", color: "white" }}
           >
             {scanning ? t("scanning_label") : t("fs_scan_folder_btn")}
           </button>

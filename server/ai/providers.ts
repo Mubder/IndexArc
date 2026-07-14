@@ -387,7 +387,7 @@ export async function embedText(
   return null;
 }
 
-const ANALYZE_SYSTEM = `You are IndexArc Vault classifier. Extract ALL secrets, tokens, IDs, commands, and notes from the user paste.
+const ANALYZE_SYSTEM = `You are IndexArc Vault classifier. Extract ALL secrets, tokens, IDs, commands, URLs, and notes from the user paste.
 Return STRICT JSON:
 {
   "candidates": [
@@ -409,15 +409,20 @@ Return STRICT JSON:
 Rules:
 - One paste may yield MANY candidates (.env files).
 - Every secret/token/id MUST have a name if clear from context; else needs_name=true and name="".
+- **name must NEVER be the secret value itself.** If no contextual name is available, use the type as the name (e.g. "google api key", "oauth client secret"). If even the type is unknown, leave name="" and set needs_name=true.
 - If a line is a human title and the next line is a key/ID, use the title as name and the key as value (family=secret). Example:
-  Antigravity Kazma Build
-  4475….apps.googleusercontent.com
-  → name="Antigravity Kazma Build", value=client id, type="google oauth client id", family=secret
+  Gemini API New
+  AQ.Ab8...
+  → name="Gemini API New", value=AQ.Ab8..., type="google api key", family=secret
 - Google *.apps.googleusercontent.com → type "google oauth client id", family=secret.
+- Google GOCSPX-* → type "google oauth client secret", family=secret.
+- Google API keys (AIza*, AQ.*) → type "google api key", family=secret.
+- URLs (https://... or http://...) on their own line → family=note, type="url", name="url". Keep the full URL as value, do NOT split it.
 - Unknown high-entropy keys: family=unknown, needs_type=true, needs_name=true.
 - Commands (shell): family=command.
 - Plain text only (no secret): family=note.
 - NEVER put title+value into one note. Split them.
+- NEVER split a URL into parts. Keep the entire URL as one candidate.
 - Include Arabic aliases in type_aliases when relevant.
 - Do not invent values not present in the paste.
 - value must be the critical payload (e.g. the ID number, not the whole env line).`;
@@ -432,6 +437,12 @@ function normalizeLlmCandidates(raw: any, paste: string): AnalyzeCandidate[] {
       : "unknown") as AnalyzeCandidate["family"];
     let needs_type = !!c.needs_type || !String(c.type || "").trim();
     let needs_name = !!c.needs_name || !String(c.name || "").trim();
+    // Prevent LLM from using the value itself as the name
+    const valueStr = String(c.value || "").trim();
+    const nameStr = String(c.name || "").trim();
+    if (nameStr && valueStr && nameStr === valueStr) {
+      needs_name = true;
+    }
     if (family === "note" || family === "command") {
       needs_type = false;
       needs_name = false;

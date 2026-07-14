@@ -72,7 +72,7 @@ export interface AppSettings {
   local_openai_base_url: string;
   local_openai_api_key: string;
   local_openai_llm_model: string;
-  ui_language: "en" | "ar" | "both";
+  ui_language: "en" | "ar";
   bind_host: string;
   port: number;
 }
@@ -96,7 +96,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   local_openai_base_url: "http://127.0.0.1:1234/v1",
   local_openai_api_key: "",
   local_openai_llm_model: "meta-llama-3-8b-instruct",
-  ui_language: "both",
+  ui_language: "en",
   bind_host: "127.0.0.1",
   port: 3000,
 };

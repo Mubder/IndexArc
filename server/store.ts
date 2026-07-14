@@ -262,6 +262,19 @@ export class VaultStore {
     return vault.entries.length < before;
   }
 
+  bulkDeleteEntries(ids: string[]): number {
+    const idSet = new Set(ids);
+    const vault = this.readVault();
+    const before = vault.entries.length;
+    vault.entries = vault.entries.filter((e) => !idSet.has(e.id));
+    const removed = before - vault.entries.length;
+    this.writeVault(vault);
+    const v = this.readVectors();
+    v.chunks = v.chunks.filter((c) => !idSet.has(c.entry_id));
+    this.writeVectors(v);
+    return removed;
+  }
+
   stats() {
     const entries = this.readVault().entries;
     const needs = entries.filter((e) =>

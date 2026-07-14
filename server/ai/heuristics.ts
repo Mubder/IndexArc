@@ -23,12 +23,19 @@ const TELEGRAM_BOT_TOKEN_RE = /^\d{8,12}:[A-Za-z0-9_-]{30,}$/;
 const GITHUB_TOKEN_RE = /^(ghp_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9_]{20,}$/;
 const AWS_KEY_RE = /^AKIA[0-9A-Z]{16}$/;
 const JWT_RE = /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
-const HIGH_ENTROPY_RE = /^[A-Za-z0-9+\/_\-=]{24,}$/;
+/** Expanded high-entropy pattern: alphanumeric + common secret chars (dots, dashes, underscores, slashes) */
+const HIGH_ENTROPY_RE = /^[A-Za-z0-9+\/_\-=\.]{20,}$/;
 /** Google OAuth client IDs */
 const GOOGLE_CLIENT_ID_RE =
   /^\d{6,20}-[a-z0-9]+\.apps\.googleusercontent\.com$/i;
 /** Google API keys */
 const GOOGLE_API_KEY_RE = /^AIza[0-9A-Za-z\-_]{20,}$/;
+/** Google OAuth client secrets */
+const GOOGLE_OAUTH_SECRET_RE = /^GOCSPX-[A-Za-z0-9_-]{10,}$/;
+/** Google API keys (alternative prefix like AQ.) */
+const GOOGLE_API_KEY_ALT_RE = /^AQ\.[A-Za-z0-9_-]{20,}$/;
+/** Standalone URLs */
+const URL_RE = /^https?:\/\/[^\s]+$/i;
 
 /** Decorative section rules / pure punctuation — never extract as notes */
 const NOISE_LINE_RE = /^[\s=\-_*~#|>.·•]{3,}$/;
@@ -122,6 +129,36 @@ function classifyStandaloneSecret(value: string): {
       needs_type: false,
       needs_name: true,
       confidence: 0.9,
+    };
+  }
+  if (GOOGLE_OAUTH_SECRET_RE.test(v)) {
+    return {
+      type: "google oauth client secret",
+      aliases: ["google client secret", "oauth client secret", "GOCSPX"],
+      family: "secret",
+      needs_type: false,
+      needs_name: true,
+      confidence: 0.9,
+    };
+  }
+  if (GOOGLE_API_KEY_ALT_RE.test(v)) {
+    return {
+      type: "google api key",
+      aliases: ["google api key", "gemini api key", "AQ key"],
+      family: "secret",
+      needs_type: false,
+      needs_name: true,
+      confidence: 0.88,
+    };
+  }
+  if (URL_RE.test(v)) {
+    return {
+      type: "url",
+      aliases: ["url", "link", "رابط"],
+      family: "note",
+      needs_type: false,
+      needs_name: false,
+      confidence: 0.8,
     };
   }
   if (TELEGRAM_BOT_TOKEN_RE.test(v)) {

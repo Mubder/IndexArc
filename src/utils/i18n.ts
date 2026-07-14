@@ -1,9 +1,8 @@
 import { Settings } from "../types";
 
-export type UiLanguage = "en" | "ar" | "both";
+export type UiLanguage = "en" | "ar";
 
 export interface TranslationDict {
-  // Navigation Tabs
   tab_home: string;
   tab_paste: string;
   tab_folders: string;
@@ -12,7 +11,6 @@ export interface TranslationDict {
   tab_settings: string;
   tab_logs: string;
 
-  // App Metadata / Header / Ribbon
   app_title: string;
   app_subtitle: string;
   ribbon_portable: string;
@@ -22,7 +20,6 @@ export interface TranslationDict {
   api_key_configured: string;
   api_key_empty: string;
 
-  // Quick Paste & Analyze (Home / Paste tab)
   quick_paste: string;
   paste_placeholder: string;
   analyze_btn: string;
@@ -31,36 +28,51 @@ export interface TranslationDict {
   paste_multi_extract: string;
   paste_placeholder_generic: string;
 
-  // Recent / Attention Panels
   attention_title: string;
   attention_desc: string;
   recent_saved: string;
   no_saved: string;
 
-  // EntryCard Actions
   hide: string;
   reveal: string;
   copy: string;
   copied: string;
   identify: string;
 
-  // Clarify / Identify Modal
   identify_modal_title: string;
   identify_modal_desc: string;
   identify_placeholder_name: string;
   identify_placeholder_type: string;
+  identify_placeholder_value: string;
   identify_save_btn: string;
   identify_cancel_btn: string;
 
-  // Ask Tab / Input
   ask_placeholder: string;
   ask_header_placeholder: string;
   search_btn: string;
   ask_btn: string;
   assistant_answer: string;
   no_results: string;
+  rewrite_mode_btn: string;
+  rewrite_style_label: string;
+  rewrite_placeholder: string;
+  rewrite_btn: string;
+  rewriting_btn: string;
+  rewrite_original_btn: string;
+  rewrite_copied: string;
+  rewrite_style_human: string;
+  rewrite_style_human_desc: string;
+  rewrite_style_professional: string;
+  rewrite_style_professional_desc: string;
+  rewrite_style_technical: string;
+  rewrite_style_technical_desc: string;
+  rewrite_style_concise: string;
+  rewrite_style_concise_desc: string;
+  rewrite_style_formal: string;
+  rewrite_style_formal_desc: string;
+  rewrite_style_casual: string;
+  rewrite_style_casual_desc: string;
 
-  // Folder Watcher Tab
   folder_watcher_title: string;
   folder_watcher_desc: string;
   folder_path_placeholder: string;
@@ -89,7 +101,6 @@ export interface TranslationDict {
   applying: string;
   discard_scan: string;
 
-  // Library Tab
   library_filter_all: string;
   library_filter_secrets: string;
   library_filter_commands: string;
@@ -97,7 +108,6 @@ export interface TranslationDict {
   library_search_placeholder: string;
   no_library_entries: string;
 
-  // Settings Tab
   ai_provider_choice: string;
   active_now: string;
   auto_desc: string;
@@ -120,7 +130,6 @@ export interface TranslationDict {
   ui_language_label: string;
   ui_language_desc: string;
 
-  // New keys for strict TS support
   candidates_title: string;
   save_selected_btn: string;
   park_incomplete_title: string;
@@ -188,6 +197,13 @@ export interface TranslationDict {
   sec_error_length: string;
   sec_status_enabled: string;
   sec_status_disabled: string;
+  find_duplicates_btn: string;
+  duplicates_found: string;
+  duplicates_desc: string;
+  remove_duplicate_btn: string;
+  select_all: string;
+  remove_selected_btn: string;
+  lib_archived: string;
 }
 
 export const translations: Record<UiLanguage, TranslationDict> = {
@@ -228,19 +244,39 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     copied: "Copied",
     identify: "Identify",
 
-    identify_modal_title: "Identify Entry / التعديل والتعريف",
+    identify_modal_title: "Identify Entry",
     identify_modal_desc: "Clarify the category type and unique name for this vault entry to make it searchable and organized.",
     identify_placeholder_name: "e.g. bAlfaris_1 or MyDatabaseKey",
     identify_placeholder_type: "e.g. telegram bot token or postgres password",
+    identify_placeholder_value: "Enter the secret value",
     identify_save_btn: "Save to Vault",
     identify_cancel_btn: "Cancel",
 
-    ask_placeholder: "Ask: what is my Telegram ID? or bAlfaris_1 bot token",
-    ask_header_placeholder: "Ask: Telegram ID · bAlfaris_1 bot token · my API key?",
+    ask_placeholder: "Search: token name, key type, or ask a question...",
+    ask_header_placeholder: "Ask: What is my Telegram token and ID?",
     search_btn: "Search",
     ask_btn: "Ask",
     assistant_answer: "Assistant Answer",
     no_results: "No results yet. Ask a question to your secure vault.",
+    rewrite_mode_btn: "Rewrite Text",
+    rewrite_style_label: "Rewrite Style",
+    rewrite_placeholder: "Paste text to revise, reformat, or rephrase...",
+    rewrite_btn: "Rewrite with AI",
+    rewriting_btn: "Rewriting...",
+    rewrite_original_btn: "Restore Original",
+    rewrite_copied: "Copied!",
+    rewrite_style_human: "Human",
+    rewrite_style_human_desc: "Natural, conversational tone",
+    rewrite_style_professional: "Professional",
+    rewrite_style_professional_desc: "Clear, business-appropriate language",
+    rewrite_style_technical: "Technical",
+    rewrite_style_technical_desc: "Precise, developer-focused terminology",
+    rewrite_style_concise: "Concise",
+    rewrite_style_concise_desc: "Short and to the point",
+    rewrite_style_formal: "Formal",
+    rewrite_style_formal_desc: "Official, structured writing style",
+    rewrite_style_casual: "Casual",
+    rewrite_style_casual_desc: "Relaxed, friendly tone",
 
     folder_watcher_title: "Watch & scan folder into portable vault",
     folder_watcher_desc: "Reads supported text/config files under a folder, extracts secrets, tokens, commands, and notes. Nothing is written to the vault until you review and save.",
@@ -296,10 +332,9 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     gemini_embed_label: "Gemini embed",
     vault_data_location: "All vault data lives in data/ and settings in config/ next to the app — copy the whole folder to a USB drive and run anywhere.",
     save_settings_btn: "Save settings",
-    ui_language_label: "UI Language / لغة الواجهة",
+    ui_language_label: "UI Language",
     ui_language_desc: "Select the display language for the application interface.",
 
-    // New keys
     candidates_title: "Extraction Candidates",
     save_selected_btn: "Save Selected to Vault",
     park_incomplete_title: "Park Incomplete Items",
@@ -367,6 +402,13 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     sec_error_length: "Password must be at least 4 characters",
     sec_status_enabled: "Encrypted (AES-256-GCM)",
     sec_status_disabled: "Unencrypted (Plain JSON)",
+    find_duplicates_btn: "Find Duplicates",
+    duplicates_found: "Duplicates Found",
+    duplicates_desc: "These entries have identical values. Consider removing the duplicates.",
+    remove_duplicate_btn: "Remove",
+    select_all: "Select All",
+    remove_selected_btn: "Remove Selected",
+    lib_archived: "Archived",
   },
   ar: {
     tab_home: "الرئيسية",
@@ -409,15 +451,35 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     identify_modal_desc: "قم بتوضيح نوع الفئة والاسم الفريد لهذا المدخل لجعله قابلاً للبحث والترتيب بفعالية.",
     identify_placeholder_name: "مثال: bAlfaris_1 أو MyDatabaseKey",
     identify_placeholder_type: "مثال: توكن بوت تيليجرام أو كلمة مرور قاعدة البيانات",
+    identify_placeholder_value: "أدخل القيمة",
     identify_save_btn: "حفظ في الخزنة",
     identify_cancel_btn: "إلغاء",
 
-    ask_placeholder: "اسأل: ما هو معرف التيليجرام الخاص بي؟ أو توكن بوت bAlfaris_1",
-    ask_header_placeholder: "اسأل: معرف التيليجرام · توكن بوت bAlfaris_1 · مفتاح الـ API الخاص بي؟",
+    ask_placeholder: "ابحث: اسم التوكن، نوع المفتاح، أو اطرح سؤالاً...",
+    ask_header_placeholder: "اسأل: ما هو توكن ومفتاح التليجرام؟",
     search_btn: "بحث",
     ask_btn: "اسأل",
     assistant_answer: "إجابة المساعد الذكي",
     no_results: "لا توجد نتائج بعد. اسأل سؤالاً للبحث في خزنتك الآمنة.",
+    rewrite_mode_btn: "إعادة صياغة",
+    rewrite_style_label: "أسلوب إعادة الصياغة",
+    rewrite_placeholder: "الصق النص للمراجعة أو إعادة الصياغة...",
+    rewrite_btn: "إعادة صياغة بالذكاء الاصطناعي",
+    rewriting_btn: "جاري إعادة الصياغة...",
+    rewrite_original_btn: "استعادة النص الأصلي",
+    rewrite_copied: "تم النسخ!",
+    rewrite_style_human: "بشري",
+    rewrite_style_human_desc: "نبرة طبيعية محادثة",
+    rewrite_style_professional: "مهني",
+    rewrite_style_professional_desc: "لغة واضحة مناسبة للأعمال",
+    rewrite_style_technical: "تقني",
+    rewrite_style_technical_desc: "مصطلحات دقيقة للمطورين",
+    rewrite_style_concise: "مختصر",
+    rewrite_style_concise_desc: "مباشر وإلى النقطة",
+    rewrite_style_formal: "رسمي",
+    rewrite_style_formal_desc: "أسلوب كتابة رسمي منظم",
+    rewrite_style_casual: "ودي",
+    rewrite_style_casual_desc: "نبرة مريحة وودية",
 
     folder_watcher_title: "مراقبة وفحص المجلد في الخزنة المحمولة",
     folder_watcher_desc: "يقرأ ملفات النصوص والإعدادات المدعومة تحت المجلد، ويستخرج الأسرار، التوكنات، الأوامر والملاحظات. لن يتم كتابة أي شيء في الخزنة حتى تقوم بالمراجعة والحفظ.",
@@ -473,10 +535,9 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     gemini_embed_label: "نموذج المتجهات (Embed)",
     vault_data_location: "تخزن جميع بيانات الخزنة في المجلد data/ والإعدادات في المجلد config/ بجانب التطبيق — انسخ المجلد بالكامل لفلاش USB وشغله في أي مكان.",
     save_settings_btn: "حفظ الإعدادات",
-    ui_language_label: "لغة الواجهة / UI Language",
+    ui_language_label: "لغة الواجهة",
     ui_language_desc: "اختر لغة عرض واجهة المستخدم الخاصة بالتطبيق.",
 
-    // New keys
     candidates_title: "المرشحون المستخرجون",
     save_selected_btn: "حفظ العناصر المحددة في الخزنة",
     park_incomplete_title: "تأجيل العناصر غير المكتملة",
@@ -544,188 +605,18 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     sec_error_length: "يجب أن تكون كلمة المرور 4 أحرف على الأقل",
     sec_status_enabled: "مشفرة (AES-256-GCM)",
     sec_status_disabled: "غير مشفرة (JSON عادي)",
-  },
-  both: {
-    tab_home: "Home / الرئيسية",
-    tab_paste: "Paste & Analyze / لصق وتحليل",
-    tab_folders: "Folder Watcher / مراقب المجلدات",
-    tab_ask: "Ask / اسأل",
-    tab_library: "Library / المكتبة",
-    tab_settings: "Settings / الإعدادات",
-    tab_logs: "Logs / السجلات",
-
-    app_title: "IndexArc",
-    app_subtitle: "Paste · Extract · Name · Ask (EN / العربية) · Single-folder portable",
-    ribbon_portable: "IndexArc Vault · Portable / خزنة محمولة",
-    ai_status: "AI / الذكاء الاصطناعي",
-    ollama_status_on: "Ollama on / متصل",
-    ollama_status_off: "Ollama off / منفصل",
-    api_key_configured: "API key / مفتاح",
-    api_key_empty: "—",
-
-    quick_paste: "Quick paste / لصق سريع",
-    paste_placeholder: "Paste secrets, .env blocks, commands, or notes…\nمثال: TELEGRAM_ALLOWED_USERS \"1804015016\"",
-    analyze_btn: "Analyze & extract / تحليل واستخراج",
-    analyzing: "Analyzing… / جاري التحليل",
-    re_analyze_btn: "Re-analyze / إعادة التحليل",
-    paste_multi_extract: "Paste & multi-extract / لصق واستخراج",
-    paste_placeholder_generic: "Whole .env, single key, command, or note…\nمثال: TELEGRAM_ALLOWED_USERS \"1804015016\"",
-
-    attention_title: "Unidentified / يحتاج مراجعة",
-    attention_desc: "Secrets waiting for type and/or name before they are fully saved.",
-    recent_saved: "Recent saved / المحفوظة حديثاً",
-    no_saved: "No saved entries yet. Paste something above / لا توجد مدخلات بعد.",
-
-    hide: "Hide / إخفاء",
-    reveal: "Reveal / إظهار",
-    copy: "Copy / نسخ",
-    copied: "Copied / تم النسخ",
-    identify: "Identify / تعريف",
-
-    identify_modal_title: "Identify Entry / تعريف وتعديل",
-    identify_modal_desc: "Clarify the category type and unique name for this vault entry to make it searchable and organized.",
-    identify_placeholder_name: "e.g. bAlfaris_1 or MyDatabaseKey / مثال: اسم التوكن",
-    identify_placeholder_type: "e.g. telegram bot token or postgres password / مثال: نوع التوكن",
-    identify_save_btn: "Save to Vault / حفظ في الخزنة",
-    identify_cancel_btn: "Cancel / إلغاء",
-
-    ask_placeholder: "what is my Telegram ID؟ · توكن بوت bAlfaris_1",
-    ask_header_placeholder: "Ask: Telegram ID · توكن بوت bAlfaris_1 · my bot token?",
-    search_btn: "Search / بحث",
-    ask_btn: "Ask / اسأل",
-    assistant_answer: "Assistant Answer / إجابة المساعد",
-    no_results: "No results yet. Try Arabic or English / لا توجد نتائج بعد.",
-
-    folder_watcher_title: "Watch / scan folder into portable vault",
-    folder_watcher_desc: "Reads supported text/config files under a folder, extracts secrets, tokens, commands, and notes. Nothing is written to the vault until you review the brief and choose save / identify / discard.",
-    folder_path_placeholder: "Absolute folder path e.g. G:\\secrets or D:\\env",
-    browse_btn: "Browse / تصفح…",
-    scan_folder_btn: "Scan folder / فحص",
-    scanning_btn: "Scanning… / جاري الفحص",
-    folder_disc_note: "The app reads the folder in place on disk (no upload). Browse navigates this machine’s filesystem through the local server.",
-    keep_watching: "Keep watching for new/changed files / مراقبة مستمرة",
-    use_ai_file: "Use AI per file (slower; default is fast heuristics) / استخدام الذكاء الاصطناعي",
-    tracked_folders: "Tracked folders / المجلدات المراقبة",
-    not_watching: "Not watching / غير مراقب",
-    last_scan: "last scan / آخر فحص",
-    use_btn: "Use / استخدام",
-    remove_btn: "Remove / إزالة",
-    scan_brief: "Scan brief / ملخص الفحص",
-    files_included: "Files included / مشمولة",
-    files_skipped: "Not included / غير مشمولة",
-    candidates_ready: "Ready / جاهز",
-    candidates_needs_review: "Need type/name / مراجعة",
-    skipped_files_toggle: "Not included files — click to expand / الملفات غير المشمولة",
-    bulk_label: "Bulk / جماعي:",
-    mark_all_save: "Mark all save / حفظ الكل",
-    mark_all_park: "Mark all park / مراجعة الكل",
-    mark_all_discard: "Mark all discard / تجاهل الكل",
-    apply_changes: "Apply / تطبيق",
-    applying: "Applying… / جاري التطبيق",
-    discard_scan: "Discard / إلغاء",
-
-    library_filter_all: "All / الكل",
-    library_filter_secrets: "Secrets / الأسرار",
-    library_filter_commands: "Commands / الأوامر",
-    library_filter_notes: "Notes / الملاحظات",
-    library_search_placeholder: "Search library by name, type, source file, or value…",
-    no_library_entries: "No entries match your filters / لا توجد نتائج مطابقة.",
-
-    ai_provider_choice: "AI provider (user choice) / اختيار مزود الذكاء",
-    active_now: "Active now / النشط حالياً",
-    auto_desc: "Auto uses Ollama when online, else Gemini API / تلقائي يستخدم أولاما ثم جميناي",
-    local_ollama_title: "Local Ollama models / نماذج أولاما",
-    online: "online / متصل",
-    offline: "offline / منفصل",
-    ollama_base_url: "Ollama base URL / رابط أولاما",
-    llm_classify: "LLM (classify / extract) / نموذج التصنيف والاستخراج",
-    embed_search: "Embed (search vectors) / نموذج البحث والمتجهات",
-    ollama_placeholder: "or type model name / أو اكتب اسم النموذج",
-    ollama_llm_desc: "Paste/Analyze uses the LLM. Ask search uses embed. Click Load LLM so ollama ps shows both.",
-    load_llm_btn: "Load LLM into memory / تحميل في الذاكرة",
-    cloud_api_title: "Cloud API (Gemini) / جميناي كلاود",
-    api_key_desc: "Add a Gemini API key below, then Save. Without a key, analyze falls back to heuristics only.",
-    gemini_api_key_label: "Gemini API key / مفتاح",
-    gemini_llm_label: "Gemini LLM",
-    gemini_embed_label: "Gemini embed",
-    vault_data_location: "All vault data lives in data/ and settings in config/ next to the app — copy the whole folder to a USB drive and run anywhere.",
-    save_settings_btn: "Save settings / حفظ الإعدادات",
-    ui_language_label: "UI Language / لغة الواجهة",
-    ui_language_desc: "Select display language / اختيار لغة الواجهة والتحكم بالاتجاه",
-
-    // New keys
-    candidates_title: "Extraction Candidates / المرشحون المستخرجون",
-    save_selected_btn: "Save Selected / حفظ المحدد",
-    park_incomplete_title: "Park Incomplete Items / تأجيل غير المكتمل",
-    park_incomplete_btn: "Park & Review / تأجيل ومراجعة",
-    confidence_label: "Confidence / مستوى الثقة",
-    needs_type_label: "Needs Category Type / بحاجة للفئة",
-    needs_name_label: "Needs Unique Name / بحاجة لاسم",
-    ready_label: "Ready / جاهز",
-    type_label: "Type / الفئة",
-    type_placeholder: "e.g. API Token / مثال: مفتاح API",
-    name_label_secrets: "Name / الاسم الفريد",
-    name_placeholder: "e.g. production_db / الاسم الفريد",
-    analyze_tab_desc: "Paste snippet and classify secrets / لصق وتصنيف الأسرار",
-    assistant_answer_title: "Assistant Answer / إجابة المساعد",
-    bilingual_synth_footer: "Bilingual Synthesizer / المُخلق ثنائي اللغة",
-    no_ask_results: "No results yet / لا توجد نتائج بعد",
-    folder_watch_title: "Watch & Scan Folders / مراقبة وفحص المجلدات",
-    folder_watch_desc: "Scan system folders for keys and scripts / فحص المجلدات للأسرار",
-    folder_watch_placeholder: "Enter folder path / أدخل مسار المجلد",
-    scanning_label: "Scanning... / جاري الفحص",
-    folder_watch_disk_desc: "Local-first disk scan / فحص محلي بالكامل",
-    folder_watch_keep: "Keep watching / استمر في المراقبة",
-    folder_watch_ai: "Deep AI Parsing / تحليل عميق بالذكاء الاصطناعي",
-    tracked_folders_title: "Watched Folders / المجلدات المراقبة",
-    live_watch_label: "LIVE WATCHING / مراقبة نشطة",
-    not_watching_label: "NOT WATCHING / غير مراقب",
-    scan_brief_title: "Scan Brief / ملخص الفحص",
-    reset_btn: "Reset / إعادة تعيين",
-    discard_review_btn: "Discard Session / إلغاء الجلسة",
-    applying_label: "Applying... / جاري التطبيق",
-    apply_to_vault_btn: "Apply to Vault / تطبيق وحفظ",
-    apply_brief_desc: "Apply items to vault / تطبيق وحفظ العناصر",
-    no_candidates_msg: "No candidates / لم يتم العثور على عناصر مرشحة",
-    scan_folder_hint: "Specify a directory and scan / حدد مجلدًا للفحص",
-    lib_all: "All / الكل",
-    lib_keys: "Keys / الأسرار",
-    lib_commands: "Commands / الأوامر",
-    lib_notes: "Notes / الملاحظات",
-    lib_unidentified: "Unidentified / غير معروف",
-    lib_needs_review: "Review / يحتاج مراجعة",
-    lib_search_placeholder: "Filter by name, type / تصفية بالاسم والنوع",
-    lib_empty: "Vault is empty / الخزنة فارغة",
-    lib_no_match: "No entries match / لا توجد نتائج مطابقة",
-    fs_modal_title: "Select folder on this machine / اختر مجلدًا على هذا الجهاز",
-    fs_modal_subtitle: "Reads in place · no upload / القراءة من المصدر مباشرة دون رفع",
-    fs_up_btn: "↑ Up / للأعلى",
-    fs_roots_btn: "Roots / الجذور",
-    fs_loading: "Loading… / جاري التحميل",
-    fs_no_subfolders: "No subfolders here / لا توجد مجلدات فرعية",
-    fs_use_path_btn: "Use path / استخدام هذا المسار",
-    fs_scan_folder_btn: "Scan folder / افحص المجلد",
-    fs_close_btn: "Close / إغلاق",
-    sec_title: "Security & Encryption / الأمان والتشفير",
-    sec_locked_title: "Vault is Locked / الخزنة مقفلة",
-    sec_locked_subtitle: "Enter master password to access / أدخل كلمة المرور الرئيسية للوصول",
-    sec_password_label: "Master Password / كلمة المرور الرئيسية",
-    sec_password_placeholder: "Enter password / أدخل كلمة المرور...",
-    sec_unlock_btn: "Unlock Vault / فتح الخزنة",
-    sec_lock_btn: "Lock Vault / قفل الخزنة",
-    sec_setup_title: "Enable Vault Encryption / تفعيل تشفير الخزنة",
-    sec_setup_subtitle: "Encrypt your vault with AES-256-GCM / تشفير الخزنة بـ AES-256-GCM",
-    sec_setup_btn: "Enable Encryption / تفعيل التشفير",
-    sec_remove_btn: "Disable Encryption / إلغاء التشفير",
-    sec_error_incorrect: "Incorrect password / كلمة مرور غير صحيحة",
-    sec_error_length: "Password too short (min 4) / كلمة مرور قصيرة جداً",
-    sec_status_enabled: "Encrypted (AES-256-GCM) / مشفرة",
-    sec_status_disabled: "Unencrypted (Plain JSON) / غير مشفرة",
+    find_duplicates_btn: "البحث عن المكررات",
+    duplicates_found: "تم العثور على مكررات",
+    duplicates_desc: "هذه المدخلات لها قيم متطابقة. يُقترح إزالة المكررات.",
+    remove_duplicate_btn: "إزالة",
+    select_all: "تحديد الكل",
+    remove_selected_btn: "إزالة المحدد",
+    lib_archived: "مؤرشف",
   },
 };
 
 export function getTranslation(settings: Settings | null, key: keyof TranslationDict): string {
-  const lang: UiLanguage = settings?.ui_language || "both";
-  const dict = translations[lang] || translations.both;
-  return dict[key] || translations.both[key] || "";
+  const lang: UiLanguage = settings?.ui_language || "en";
+  const dict = translations[lang] || translations.en;
+  return dict[key] || translations.en[key] || "";
 }

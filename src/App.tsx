@@ -11,6 +11,11 @@ import {
   KeyRound,
   ChevronRight,
   Lock,
+  Sun,
+  Moon,
+  Globe,
+  Menu,
+  X,
 } from "lucide-react";
 
 import {
@@ -41,14 +46,35 @@ import { LockScreen } from "./components/LockScreen";
 // Modals
 import { FsBrowserModal } from "./components/FsBrowserModal";
 import { ClarifyModal } from "./components/ClarifyModal";
+import { ConfirmModal } from "./components/ConfirmModal";
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("home");
+  const [tab, setTab] = useState<Tab>(() => {
+    const saved = localStorage.getItem("indexarc-tab");
+    return (saved === "home" || saved === "paste" || saved === "folders" || saved === "library" || saved === "ask" || saved === "settings" || saved === "logs")
+      ? (saved as Tab)
+      : "home";
+  });
+  useEffect(() => {
+    localStorage.setItem("indexarc-tab", tab);
+  }, [tab]);
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    const saved = localStorage.getItem("indexarc-theme");
+    return (saved === "light" || saved === "dark") ? saved : "dark";
+  });
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [attention, setAttention] = useState<VaultEntry[]>([]);
   const [logs, setLogs] = useState<{ time: string; type: string; message: string }[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [toasts, setToasts] = useState<{ id: number; message: string; type: "success" | "error" | "info" }[]>([]);
+  const toastIdRef = useRef(0);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const showToast = useCallback((message: string, type: "success" | "error" | "info" = "info") => {
+    const id = ++toastIdRef.current;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
+  }, []);
 
   const t = useCallback(
     (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key),
@@ -99,8 +125,47 @@ export default function App() {
   const [clarify, setClarify] = useState<VaultEntry | null>(null);
   const [clarifyType, setClarifyType] = useState("");
   const [clarifyName, setClarifyName] = useState("");
+  const [clarifyValue, setClarifyValue] = useState("");
+
+  // confirm modal
+  const [confirmState, setConfirmState] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void; onCancel?: () => void; confirmText?: string } | null>(null);
+  const showConfirm = useCallback((title: string, message: string, onConfirm: () => void, confirmText?: string): Promise<void> => {
+    return new Promise<void>((resolve, reject) => {
+      setConfirmState({
+        open: true,
+        title,
+        message,
+        confirmText,
+        onConfirm: async () => {
+          await onConfirm();
+          resolve();
+        },
+        onCancel: () => reject(),
+      });
+    });
+  }, []);
+  const closeConfirm = useCallback(() => setConfirmState(null), []);
 
   const [vaultStatus, setVaultStatus] = useState<{ is_locked: boolean; encryption_enabled: boolean } | null>(null);
+
+  // Theme management
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("indexarc-theme", theme);
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  }, []);
+
+  const toggleLanguage = useCallback(() => {
+    setSettings((prev) => {
+      if (!prev) return prev;
+      const current = prev.ui_language || "en";
+      const next = current === "en" ? "ar" : "en";
+      return { ...prev, ui_language: next };
+    });
+  }, []);
 
   const fetchVaultStatus = useCallback(async () => {
     try {
@@ -161,19 +226,19 @@ export default function App() {
       }
 
       const [st, en, att, lg, se, folders] = await Promise.all([
-        fetch("/api/status").then((r) => r.json()),
-        fetch("/api/entries").then((r) => r.json()),
-        fetch("/api/entries?status=attention").then((r) => r.json()),
-        fetch("/api/logs").then((r) => r.json()),
-        fetch("/api/settings").then((r) => r.json()),
+        fetch("/api/status").then((r) => r.json()).catch(() => null),
+        fetch("/api/entries").then((r) => r.json()).catch(() => []),
+        fetch("/api/entries?status=attention").then((r) => r.json()).catch(() => []),
+        fetch("/api/logs").then((r) => r.json()).catch(() => []),
+        fetch("/api/settings").then((r) => r.json()).catch(() => null),
         fetch("/api/folders").then((r) => r.json()).catch(() => ({ folders: [] })),
       ]);
       setStatus(st);
-      setEntries(en);
-      setAttention(att);
+      if (Array.isArray(en)) setEntries(en);
+      if (Array.isArray(att)) setAttention(att);
       setLogs(lg);
       // Only load settings from server when form is clean (not mid-edit)
-      if (!settingsDirtyRef.current) {
+      if (!settingsDirtyRef.current && se) {
         setSettings(se);
       }
       setWatchedFolders(folders.folders || []);
@@ -225,7 +290,7 @@ export default function App() {
       setSelected(sel);
       setTab("paste");
     } catch (e: any) {
-      alert(e.message);
+      showToast(e.message, "error");
     } finally {
       setAnalyzing(false);
       fetchAll();
@@ -276,7 +341,7 @@ export default function App() {
       setTab("home");
     } else {
       const err = await res.json();
-      alert(err.error || "Save failed");
+      showToast(err.error || "Save failed", "error");
     }
   };
 
@@ -311,18 +376,19 @@ export default function App() {
     setClarify(entry);
     setClarifyType(entry.type === "unidentified" ? "" : entry.type);
     setClarifyName(entry.name === "unnamed" ? "" : entry.name);
+    setClarifyValue(entry.value);
   };
 
   const submitClarify = async () => {
     if (!clarify) return;
     if (!clarifyType.trim() || !clarifyName.trim()) {
-      alert("Type and name are required / النوع والاسم مطلوبان");
+      showToast("Type and name are required / النوع والاسم مطلوبان", "error");
       return;
     }
     const res = await fetch(`/api/entries/${clarify.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: clarifyType.trim(), name: clarifyName.trim() }),
+      body: JSON.stringify({ type: clarifyType.trim(), name: clarifyName.trim(), value: clarifyValue.trim() }),
     });
     if (res.ok) {
       setClarify(null);
@@ -330,10 +396,37 @@ export default function App() {
     }
   };
 
+  const removeEntriesLocally = useCallback((ids: string[]) => {
+    const idSet = new Set(ids);
+    setEntries((prev) => prev.filter((e) => !idSet.has(e.id)));
+    setAttention((prev) => prev.filter((e) => !idSet.has(e.id)));
+  }, []);
+
   const deleteEntry = async (id: string) => {
-    if (!confirm("Delete this entry permanently?")) return;
-    await fetch(`/api/entries/${id}`, { method: "DELETE" });
-    fetchAll();
+    showConfirm("Delete Entry", "Delete this entry permanently?", async () => {
+      await fetch(`/api/entries/${id}`, { method: "DELETE" });
+      removeEntriesLocally([id]);
+      await fetchAll();
+    }, "Delete");
+  };
+
+  const bulkDeleteEntries = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    return showConfirm(
+      "Delete Entries",
+      `Delete ${ids.length} selected entr${ids.length === 1 ? "y" : "ies"} permanently?`,
+      async () => {
+        // Optimistic update first so the UI reflects the deletion immediately.
+        removeEntriesLocally(ids);
+        await fetch("/api/entries/bulk-delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+        await fetchAll();
+      },
+      "Delete"
+    );
   };
 
   const saveSettings = async () => {
@@ -357,7 +450,7 @@ export default function App() {
       }
     }
     fetchAll();
-    alert("Settings saved · تم الحفظ");
+    showToast("Settings saved · تم الحفظ", "success");
   };
 
   const warmOllama = async () => {
@@ -365,10 +458,10 @@ export default function App() {
       const res = await fetch("/api/ollama/warm", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Warm failed");
-      alert(`LLM loaded: ${data.model}\nCheck: ollama ps`);
+      showToast(`LLM loaded: ${data.model}`, "success");
       fetchAll();
     } catch (e: any) {
-      alert(e.message || "Could not load Ollama LLM");
+      showToast(e.message || "Could not load Ollama LLM", "error");
     }
   };
 
@@ -425,7 +518,7 @@ export default function App() {
       setTab("folders");
       fetchAll();
     } catch (e: any) {
-      alert(e.message);
+      showToast(e.message, "error");
     } finally {
       setScanning(false);
     }
@@ -482,14 +575,14 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Apply failed");
-      alert(
-        `Saved ${data.saved_count} · Unidentified ${data.parked_count} · Discarded ${data.discarded_count}`
+      showToast(
+        `Saved ${data.saved_count} · Unidentified ${data.parked_count} · Discarded ${data.discarded_count}`, "success"
       );
       setScanSession(null);
       fetchAll();
       setTab("home");
     } catch (e: any) {
-      alert(e.message);
+      showToast(e.message, "error");
     } finally {
       setApplyingScan(false);
     }
@@ -497,10 +590,11 @@ export default function App() {
 
   const discardScanSession = async () => {
     if (!scanSession) return;
-    if (!confirm("Discard this entire scan review? Nothing will be saved.")) return;
-    await fetch(`/api/folders/sessions/${scanSession.id}/discard`, { method: "POST" });
-    setScanSession(null);
-    fetchAll();
+    showConfirm("Discard Scan", "Discard this entire scan review? Nothing will be saved.", async () => {
+      await fetch(`/api/folders/sessions/${scanSession.id}/discard`, { method: "POST" });
+      setScanSession(null);
+      fetchAll();
+    }, "Discard");
   };
 
   const nav: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = useMemo(
@@ -535,246 +629,411 @@ export default function App() {
 
   return (
     <div
-      className="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased flex flex-col"
-      dir={settings?.ui_language === "ar" ? "rtl" : "ltr"}
+      className="h-full font-sans antialiased flex flex-col relative overflow-hidden"
+      style={{ background: "var(--bg-root)", color: "var(--text)" }}
     >
-      {/* ribbon */}
-      <div className="bg-slate-900 border-b border-slate-800 text-xs py-2 px-6 flex flex-wrap justify-between items-center gap-3">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-slate-300">{t("ribbon_portable")}</span>
-          {status && (
-            <span className="text-slate-500 font-mono hidden md:inline truncate max-w-md" title={status.portable_root}>
-              {status.portable_root}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-4">
-          {vaultStatus?.encryption_enabled && !vaultStatus?.is_locked && (
-            <button
-              onClick={handleLockVault}
-              className="flex items-center gap-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded border border-rose-500/20 transition-all text-[11px] font-medium"
-            >
-              <Lock className="w-3 h-3" />
-              <span>{t("sec_lock_btn")}</span>
-            </button>
-          )}
-          <span className="text-slate-500">
-            {t("ai_status")}:{" "}
-            <span className="text-amber-400 font-mono">
-              {status?.active_provider || "…"} ({status?.ai_provider || "auto"})
-            </span>
-          </span>
-          <span
-            className={`font-mono text-[11px] px-1.5 py-0.5 rounded ${
-              status?.is_ollama_online
-                ? "text-emerald-400 bg-emerald-500/10 border border-emerald-500/20"
-                : "text-slate-400 bg-slate-800 border border-slate-700"
-            }`}
-          >
-            {status?.is_ollama_online ? t("ollama_status_on") : t("ollama_status_off")}
-          </span>
-          <span
-            className={`font-mono text-[11px] px-1.5 py-0.5 rounded ${
-              status?.is_gemini_configured
-                ? "text-indigo-300 bg-indigo-500/10 border border-indigo-500/20"
-                : "text-slate-400 bg-slate-800 border border-slate-700"
-            }`}
-          >
-            {status?.is_gemini_configured ? t("api_key_configured") : t("api_key_empty")}
-          </span>
-        </div>
+      {/* Animated Background */}
+      <div className="bg-canvas">
+        <div className="bg-grid" />
+        <div className="bg-glow" />
+        <div className="bg-orb bg-orb-1" />
+        <div className="bg-orb bg-orb-2" />
+        <div className="bg-orb bg-orb-3" />
       </div>
+      <div className="scanline" />
 
-      <header className="px-6 py-5 bg-slate-900/50 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-400 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Layers className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-white flex items-center gap-2">
-              {t("app_title")}
-              <span className="text-[10px] bg-slate-800 text-slate-300 font-mono px-1.5 py-0.5 rounded border border-slate-700">
-                Vault 2.0
-              </span>
-            </h1>
-            <p className="text-xs text-slate-400">
-              {t("app_subtitle")}
-            </p>
-          </div>
-        </div>
-        <form onSubmit={handleAsk} className="flex gap-2 w-full max-w-xl">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("ask_header_placeholder")}
-            className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+      {/* Mobile sidebar overlay */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 z-40 md:hidden"
+            style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+            onClick={() => setSidebarOpen(false)}
+            aria-hidden="true"
           />
-          <button
-            type="submit"
-            disabled={asking}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"
+        )}
+
+        {/* Main App Shell */}
+        <div className="relative z-10 flex flex-1 min-h-0" style={{ paddingTop: "0" }}>
+          {/* Sidebar - desktop: always visible, mobile: drawer */}
+          <aside
+            className={`
+              w-60 flex-shrink-0 flex flex-col border-r 
+              ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} 
+              md:translate-x-0
+              transition-transform duration-250 ease-out
+              z-50 md:z-auto
+              fixed md:static inset-y-0 left-0
+            `}
+            style={{
+              background: "var(--glass)",
+              backdropFilter: "blur(20px)",
+              borderColor: "var(--border)",
+            }}
           >
-            <Search className="w-4 h-4" />
-            {asking ? "…" : t("ask_btn")}
-          </button>
-        </form>
-      </header>
-
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <nav className="space-y-1">
-          {nav.map((n) => (
-            <button
-              key={n.id}
-              type="button"
-              onClick={() => setTab(n.id)}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                tab === n.id
-                  ? "bg-slate-800 text-white border-l-4 border-indigo-500"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/60"
-              }`}
+          {/* Navigation */}
+          <nav className="flex-1 p-3 flex flex-col gap-0.5">
+            <div
+              className="text-[10px] font-semibold uppercase tracking-wider px-3 pt-3 pb-1.5 flex items-center gap-2"
+              style={{ color: "var(--text-muted)" }}
             >
-              <span className="flex items-center gap-3">
-                {n.icon}
-                {n.label}
-              </span>
-              {n.badge ? (
-                <span className="text-[10px] bg-amber-500 text-slate-950 font-bold px-1.5 py-0.5 rounded-full">
-                  {n.badge}
-                </span>
-              ) : tab === n.id ? (
-                <ChevronRight className="w-4 h-4 opacity-50" />
-              ) : null}
-            </button>
-          ))}
+              Vault
+              <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
+            </div>
+            {nav.map((n) => (
+              <button
+                key={n.id}
+                type="button"
+                onClick={() => setTab(n.id)}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all relative overflow-hidden"
+                style={{
+                  color: tab === n.id ? "var(--accent-bright)" : "var(--text-dim)",
+                  background: tab === n.id ? "var(--bg-active)" : "transparent",
+                }}
+              >
+                {tab === n.id && (
+                  <div
+                    className="absolute left-0 top-1/4 bottom-1/4 w-0.5 rounded-r"
+                    style={{ background: "var(--accent)", boxShadow: "0 0 8px var(--accent-glow)" }}
+                  />
+                )}
+                <span className="opacity-60">{n.icon}</span>
+                <span className="flex-1 text-left">{n.label}</span>
+                {n.badge ? (
+                  <span
+                    className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                    style={{ background: "var(--amber-bg)", color: "var(--amber)" }}
+                  >
+                    {n.badge}
+                  </span>
+                ) : null}
+              </button>
+            ))}
 
-          <div className="mt-6 p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2 text-xs">
-            <div className="text-slate-500 uppercase tracking-wider text-[10px]">Vault stats</div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="bg-slate-950 rounded-lg p-2 border border-slate-800">
-                <div className="text-lg font-bold text-white">{status?.stats.total_saved ?? 0}</div>
-                <div className="text-slate-500">Saved</div>
-              </div>
-              <div className="bg-slate-950 rounded-lg p-2 border border-slate-800">
-                <div className="text-lg font-bold text-amber-400">{status?.stats.needs_attention ?? 0}</div>
-                <div className="text-slate-500">Unidentified</div>
-              </div>
-              <div className="bg-slate-950 rounded-lg p-2 border border-slate-800">
-                <div className="text-lg font-bold text-sky-400">{status?.stats.total_secrets ?? 0}</div>
-                <div className="text-slate-500">Secrets</div>
-              </div>
-              <div className="bg-slate-950 rounded-lg p-2 border border-slate-800">
-                <div className="text-lg font-bold text-teal-400">{status?.stats.total_commands ?? 0}</div>
-                <div className="text-slate-500">Commands</div>
-              </div>
+            <div
+              className="text-[10px] font-semibold uppercase tracking-wider px-3 pt-4 pb-1.5 flex items-center gap-2"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Tools
+              <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
+            </div>
+          </nav>
+
+          {/* Stats */}
+          <div
+            className="mx-3 mb-3 p-4 rounded-xl border"
+            style={{ background: "var(--bg-surface)", borderColor: "var(--border)", backdropFilter: "blur(10px)" }}
+          >
+            <div
+              className="text-[10px] font-semibold uppercase tracking-wider mb-2.5"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Vault Overview
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {[
+                { val: status?.stats.total_saved ?? 0, lbl: "Saved" },
+                { val: status?.stats.needs_attention ?? 0, lbl: "Pending" },
+                { val: status?.stats.total_secrets ?? 0, lbl: "Secrets" },
+                { val: status?.stats.total_commands ?? 0, lbl: "Commands" },
+              ].map((s) => (
+                <div
+                  key={s.lbl}
+                  className="text-center py-1.5 rounded-lg border"
+                  style={{ background: "var(--accent-bg)", borderColor: "rgba(37, 99, 235, 0.06)" }}
+                >
+                  <div
+                    className="text-lg font-bold"
+                    style={{
+                      background: "linear-gradient(135deg, var(--accent-bright), var(--cyan))",
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                    }}
+                  >
+                    {s.val}
+                  </div>
+                  <div className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+                    {s.lbl}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
-        </nav>
+        </aside>
 
-        <section className="lg:col-span-3 space-y-6">
-          {tab === "home" && (
-            <HomeTab
-              paste={paste}
-              setPaste={setPaste}
-              onAnalyze={handleAnalyze}
-              analyzing={analyzing}
-              attention={attention}
-              entries={entries}
-              onOpenClarify={openClarify}
-              onDeleteEntry={deleteEntry}
-              settings={settings}
-            />
-          )}
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+          {/* Top Bar - Fixed Layout */}
+          <header
+            className="flex items-center gap-4 px-6 py-3 border-b flex-shrink-0"
+            style={{
+              background: "var(--glass)",
+              backdropFilter: "blur(12px)",
+              borderColor: "var(--border)",
+            }}
+          >
+            {/* Brand/Title - hidden on mobile, shown on desktop */}
+            <div className="flex items-center gap-3 flex-shrink-0 hidden md:flex">
+              <img
+                src="/Logo1.png"
+                alt="IndexArc"
+                className="w-9 h-9 rounded-xl object-contain"
+                style={{ boxShadow: "0 0 20px var(--accent-glow)" }}
+              />
+              <div>
+                <h1
+                  className="text-base font-bold"
+                  style={{
+                    background: "linear-gradient(135deg, var(--text), var(--accent-bright))",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                  }}
+                >
+                  IndexArc
+                </h1>
+                <span className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+                  Portable Vault
+                </span>
+              </div>
+            </div>
 
-          {tab === "paste" && (
-            <AnalyzeTab
-              paste={paste}
-              setPaste={setPaste}
-              onAnalyze={handleAnalyze}
-              analyzing={analyzing}
-              providerUsed={providerUsed}
-              candidates={candidates}
-              selected={selected}
-              setSelected={setSelected}
-              onSaveSelected={handleSaveSelected}
-              onUpdateCandidate={updateCandidate}
-              settings={settings}
-            />
-          )}
+            {/* Mobile brand - shown only on mobile */}
+            <div className="flex items-center gap-2 flex-shrink-0 md:hidden">
+              <img
+                src="/Logo1.png"
+                alt="IndexArc"
+                className="w-8 h-8 rounded-xl object-contain"
+                style={{ boxShadow: "0 0 20px var(--accent-glow)" }}
+              />
+              <span className="text-sm font-bold" style={{ color: "var(--text)" }}>IndexArc</span>
+            </div>
 
-          {tab === "folders" && (
-            <FoldersTab
-              folderPath={folderPath}
-              setFolderPath={setFolderPath}
-              onPickFolder={pickFolder}
-              onFolderScan={handleFolderScan}
-              scanning={scanning}
-              folderWatch={folderWatch}
-              setFolderWatch={setFolderWatch}
-              folderUseAi={folderUseAi}
-              setFolderUseAi={setFolderUseAi}
-              watchedFolders={watchedFolders}
-              scanSession={scanSession}
-              onRemoveWatchedFolder={async (id) => {
-                await fetch(`/api/folders/${id}`, { method: "DELETE" });
-                fetchAll();
-              }}
-              onSetAllDecisions={setAllDecisions}
-              onDiscardScanSession={discardScanSession}
-              onApplyScanSession={applyScanSession}
-              applyingScan={applyingScan}
-              onPatchScanCandidate={patchScanCandidate}
-              isElectron={isElectron}
-              settings={settings}
-            />
-          )}
+            {/* Search - Center */}
+            <div className="flex-1 max-w-2xl relative order-3 md:order-none md:max-w-xl">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--text-muted)" }} />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAsk(e)}
+                placeholder={t("ask_header_placeholder") || "Search entries, tokens, commands..."}
+                className="w-full pl-9 pr-16 py-2.5 rounded-xl text-sm focus:outline-none transition-all"
+                style={{
+                  background: "var(--bg-input)",
+                  border: "1px solid var(--border-input)",
+                  color: "var(--text)",
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = "var(--border-glow)";
+                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(37, 99, 235, 0.08)";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "var(--border-input)";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              />
+              <span
+                className="absolute right-3 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded text-[10px]"
+                style={{
+                  background: "var(--accent-bg)",
+                  border: "1px solid rgba(37, 99, 235, 0.15)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                Ctrl K
+              </span>
+            </div>
 
-          {tab === "ask" && (
-            <AskTab
-              query={query}
-              setQuery={setQuery}
-              onAsk={handleAsk}
-              asking={asking}
-              askResults={askResults}
-              answer={askAnswer}
-              providerUsed={askAnswerProvider}
-              onOpenClarify={openClarify}
-              onDeleteEntry={deleteEntry}
-              settings={settings}
-            />
-          )}
+            {/* Right Controls */}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {/* Mobile Menu Toggle */}
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="p-2 rounded-xl border transition-all md:hidden"
+                style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
+                aria-label={sidebarOpen ? "Close menu" : "Open menu"}
+              >
+                {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
+              {/* AI Status */}
+              {status?.is_ollama_online && (
+                <div
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold border"
+                  style={{ borderColor: "var(--border)", background: "var(--bg-surface)" }}
+                >
+                  <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--emerald)" }} />
+                  <span className="font-mono" style={{ color: "var(--text-dim)" }}>
+                    {status?.ai_provider || "auto"}
+                  </span>
+                </div>
+              )}
 
-          {tab === "library" && (
-            <LibraryTab
-              entries={entries}
-              libraryFilter={libraryFilter}
-              setLibraryFilter={setLibraryFilter}
-              libraryQuery={libraryQuery}
-              setLibraryQuery={setLibraryQuery}
-              onFetchAll={fetchAll}
-              onOpenClarify={openClarify}
-              onDeleteEntry={deleteEntry}
-              settings={settings}
-            />
-          )}
+              {/* Encryption Badge */}
+              {vaultStatus?.encryption_enabled && (
+                <div
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold border"
+                  style={{
+                    background: "var(--emerald-bg)",
+                    color: "var(--emerald)",
+                    borderColor: "rgba(52, 211, 153, 0.12)",
+                  }}
+                >
+                  <Lock className="w-3 h-3" />
+                  AES-256
+                </div>
+              )}
 
-          {tab === "settings" && settings && (
-            <SettingsTab
-              settings={settings}
-              onPatchSettings={patchSettings}
-              status={status}
-              onWarmOllama={warmOllama}
-              onSaveSettings={saveSettings}
-              vaultStatus={vaultStatus}
-              onRefreshVaultStatus={fetchVaultStatus}
-            />
-          )}
+              {/* Lock Button */}
+              {vaultStatus?.encryption_enabled && !vaultStatus?.is_locked && (
+                <button
+                  onClick={handleLockVault}
+                  className="p-2 rounded-xl border transition-all"
+                  style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
+                  title={t("sec_lock_btn") || "Lock vault"}
+                >
+                  <Lock className="w-4 h-4" />
+                </button>
+              )}
 
-          {tab === "logs" && (
-            <LogsTab logs={logs} />
-          )}
-        </section>
-      </main>
+              {/* Theme Toggle */}
+              <button
+                onClick={toggleTheme}
+                className="p-2 rounded-xl border transition-all"
+                style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
+                title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+              >
+                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </button>
+
+              {/* Language Toggle */}
+              <button
+                onClick={toggleLanguage}
+                className="p-2 rounded-xl border transition-all"
+                style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
+                title={`Switch to ${settings?.ui_language === "ar" ? "English" : "Arabic"}`}
+              >
+                <Globe className="w-4 h-4" />
+              </button>
+
+              {/* New Entry */}
+              <button
+                onClick={() => setTab("paste")}
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
+                style={{
+                  background: "linear-gradient(135deg, var(--accent), #1d4ed8)",
+                  boxShadow: "0 0 20px var(--accent-glow), 0 2px 8px rgba(0,0,0,0.3)",
+                }}
+              >
+                + New
+              </button>
+            </div>
+          </header>
+
+          {/* Content Area */}
+          <main dir={settings?.ui_language === "ar" ? "rtl" : "ltr"} className="flex-1 min-h-0 overflow-y-auto px-8 py-6">
+            {tab === "home" && (
+              <HomeTab
+                paste={paste}
+                setPaste={setPaste}
+                onAnalyze={handleAnalyze}
+                analyzing={analyzing}
+                attention={attention}
+                entries={entries}
+                onOpenClarify={openClarify}
+                onDeleteEntry={deleteEntry}
+                settings={settings}
+              />
+            )}
+
+            {tab === "paste" && (
+              <AnalyzeTab
+                paste={paste}
+                setPaste={setPaste}
+                onAnalyze={handleAnalyze}
+                analyzing={analyzing}
+                providerUsed={providerUsed}
+                candidates={candidates}
+                selected={selected}
+                setSelected={setSelected}
+                onSaveSelected={handleSaveSelected}
+                onUpdateCandidate={updateCandidate}
+                settings={settings}
+              />
+            )}
+
+            {tab === "folders" && (
+              <FoldersTab
+                folderPath={folderPath}
+                setFolderPath={setFolderPath}
+                onPickFolder={pickFolder}
+                onFolderScan={handleFolderScan}
+                scanning={scanning}
+                folderWatch={folderWatch}
+                setFolderWatch={setFolderWatch}
+                folderUseAi={folderUseAi}
+                setFolderUseAi={setFolderUseAi}
+                watchedFolders={watchedFolders}
+                scanSession={scanSession}
+                onRemoveWatchedFolder={async (id) => {
+                  await fetch(`/api/folders/${id}`, { method: "DELETE" });
+                  fetchAll();
+                }}
+                onSetAllDecisions={setAllDecisions}
+                onDiscardScanSession={discardScanSession}
+                onApplyScanSession={applyScanSession}
+                applyingScan={applyingScan}
+                onPatchScanCandidate={patchScanCandidate}
+                isElectron={isElectron}
+                settings={settings}
+              />
+            )}
+
+            {tab === "ask" && (
+              <AskTab
+                query={query}
+                setQuery={setQuery}
+                onAsk={handleAsk}
+                asking={asking}
+                askResults={askResults}
+                answer={askAnswer}
+                providerUsed={askAnswerProvider}
+                onOpenClarify={openClarify}
+                onDeleteEntry={deleteEntry}
+                settings={settings}
+              />
+            )}
+
+            {tab === "library" && (
+              <LibraryTab
+                entries={entries}
+                libraryFilter={libraryFilter}
+                setLibraryFilter={setLibraryFilter}
+                libraryQuery={libraryQuery}
+                setLibraryQuery={setLibraryQuery}
+                onFetchAll={fetchAll}
+                onOpenClarify={openClarify}
+                onDeleteEntry={deleteEntry}
+                onBulkDeleteEntries={bulkDeleteEntries}
+                settings={settings}
+              />
+            )}
+
+            {tab === "settings" && settings && (
+              <SettingsTab
+                settings={settings}
+                onPatchSettings={patchSettings}
+                status={status}
+                onWarmOllama={warmOllama}
+                onSaveSettings={saveSettings}
+                vaultStatus={vaultStatus}
+                onRefreshVaultStatus={fetchVaultStatus}
+              />
+            )}
+
+            {tab === "logs" && (
+              <LogsTab logs={logs} />
+            )}
+          </main>
+        </div>
+      </div>
 
       {/* Server filesystem browser — pick folder in place */}
       <FsBrowserModal
@@ -806,6 +1065,35 @@ export default function App() {
           settings={settings}
         />
       )}
+
+      {/* Confirm modal */}
+      {confirmState && (
+        <ConfirmModal
+          isOpen={confirmState.open}
+          onClose={() => {
+            confirmState.onCancel?.();
+            closeConfirm();
+          }}
+          onConfirm={confirmState.onConfirm}
+          title={confirmState.title}
+          message={confirmState.message}
+          confirmText={confirmState.confirmText}
+        />
+      )}
+
+      {/* Toast notifications */}
+      <div className="toast-wrap">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.type}`}>
+            <div className="toast-icon">
+              {t.type === "success" && "✓"}
+              {t.type === "error" && "✕"}
+              {t.type === "info" && "i"}
+            </div>
+            <span>{t.message}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

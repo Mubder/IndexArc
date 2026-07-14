@@ -31,6 +31,11 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
+// Serve the app logo as the favicon to avoid 404s on /favicon.ico
+app.get("/favicon.ico", (_req, res) => {
+  res.sendFile(path.resolve("public", "Logo1.png"));
+});
+
 // --- Vault Lock Middleware & Routes ---
 function checkVaultUnlocked(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (store.isLocked()) {
@@ -349,6 +354,14 @@ app.delete("/api/entries/:id", (req, res) => {
   if (!ok) return res.status(404).json({ error: "Not found" });
   addLog("VAULT", `Deleted entry ${req.params.id.slice(0, 8)}`);
   res.json({ success: true });
+});
+
+app.post("/api/entries/bulk-delete", (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  if (ids.length === 0) return res.json({ success: true, removed: 0 });
+  const removed = store.bulkDeleteEntries(ids);
+  addLog("VAULT", `Bulk deleted ${removed} entries`);
+  res.json({ success: true, removed });
 });
 
 // --- Folder scan & watch ---
@@ -678,6 +691,82 @@ app.post("/api/ask", async (req, res) => {
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// --- Rewrite / Rephrase text ---
+app.post("/api/rewrite", async (req, res) => {
+  const text = String(req.body?.text ?? "").trim();
+  const style = String(req.body?.style ?? "professional") as
+    | "human"
+    | "professional"
+    | "technical"
+    | "concise"
+    | "formal"
+    | "casual";
+  if (!text) return res.status(400).json({ error: "Text is required" });
+
+  const stylePrompts: Record<string, string> = {
+    human: "Rewrite the following text to sound natural, warm, and conversational — like a real person wrote it. Avoid robotic phrasing. Keep the meaning intact but make it flow naturally.",
+    professional: "Rewrite the following text in a professional, polished tone suitable for business communication. Be clear, confident, and concise.",
+    technical: "Rewrite the following text in a precise technical style. Use exact terminology, be concise, and prioritize clarity over flair.",
+    concise: "Rewrite the following text to be as short and clear as possible. Remove all fluff, redundancy, and unnecessary words while keeping the core meaning.",
+    formal: "Rewrite the following text in formal, academic-style language. Use proper grammar, avoid contractions, and maintain a serious tone.",
+    casual: "Rewrite the following text in a relaxed, casual tone. Use friendly language, contractions, and a conversational feel.",
+  };
+
+  const systemPrompt =
+    stylePrompts[style] ?? stylePrompts.professional;
+
+  try {
+    const { generateText } = await import("./server/ai/providers.js");
+    const result = await generateText(store.getSettings(), text, systemPrompt);
+    if (!result) {
+      return res.status(503).json({
+        error: "No AI provider available for rewriting. Configure Ollama or Gemini in Settings.",
+      });
+    }
+    res.json({
+      original: text,
+      rewritten: result.text,
+      style,
+      provider_used: result.provider_used,
+    });
+  } catch (e: any) {
+    addLog("REWRITE", `Rewrite failed: ${e.message}`);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Duplicate check ---
+app.post("/api/entries/check-duplicate", (req, res) => {
+  const value = String(req.body?.value ?? "").trim();
+  if (!value) return res.status(400).json({ error: "Value is required" });
+
+  const entries = store.listEntries();
+  const exactMatch = entries.find((e) => e.value === value);
+  if (exactMatch) {
+    return res.json({
+      is_duplicate: true,
+      existing_entry: exactMatch,
+      match_type: "exact_value",
+    });
+  }
+
+  const name = String(req.body?.name ?? "").trim().toLowerCase();
+  if (name) {
+    const similarName = entries.find(
+      (e) => e.name.toLowerCase() === name && e.family !== "note" && e.family !== "command"
+    );
+    if (similarName) {
+      return res.json({
+        is_duplicate: true,
+        existing_entry: similarName,
+        match_type: "similar_name",
+      });
+    }
+  }
+
+  res.json({ is_duplicate: false });
 });
 
 // Legacy aliases for older UI bits

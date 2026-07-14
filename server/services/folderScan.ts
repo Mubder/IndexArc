@@ -13,6 +13,11 @@ import type {
 import { heuristicAnalyze } from "../ai/heuristics.js";
 import { analyzePaste } from "../ai/providers.js";
 import { addLog } from "../logs.js";
+import * as mammoth from "mammoth";
+import pdfParse from "pdf-parse/lib/pdf-parse.js";
+import * as XLSX from "xlsx";
+
+const XLSXmod: any = (XLSX as any).default ?? XLSX;
 
 const IGNORE_DIRS = new Set([
   "node_modules",
@@ -83,6 +88,11 @@ const SUPPORTED_EXT = new Set([
   ".secret",
   ".token",
   ".credentials",
+  ".docx",
+  ".pdf",
+  ".xlsx",
+  ".jsonl",
+  ".ndjson",
 ]);
 
 // extensionless names often used for secrets/config
@@ -151,6 +161,92 @@ function readTextFile(filePath: string): { ok: true; text: string } | { ok: fals
   } catch (e: any) {
     return { ok: false, reason: e.message || "Read failed" };
   }
+}
+
+const MAX_DOC_BYTES = 5 * 1024 * 1024; // 5MB for binary documents
+
+/**
+ * Extract searchable text from a file. Handles binary document formats
+ * (.docx/.pdf/.xlsx) and JSON-Lines (.jsonl/.ndjson); falls back to the
+ * plain-text reader for everything else.
+ */
+async function extractText(
+  filePath: string
+): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
+  const ext = path.extname(filePath).toLowerCase();
+
+  // JSON Lines / NDJSON: one JSON object per line
+  if (ext === ".jsonl" || ext === ".ndjson") {
+    const r = readTextFile(filePath);
+    if (!r.ok) return r;
+    const out = r.text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => {
+        try {
+          return flattenJson(JSON.parse(l));
+        } catch {
+          return l;
+        }
+      })
+      .join("\n");
+    return { ok: true, text: out };
+  }
+
+  // Microsoft Word (.docx)
+  if (ext === ".docx") {
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.size === 0) return { ok: false, reason: "Empty file" };
+      if (stat.size > MAX_DOC_BYTES)
+        return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
+      const res = await mammoth.extractRawText({ path: filePath });
+      const text = (res.value || "").trim();
+      return text ? { ok: true, text } : { ok: false, reason: "No extractable text" };
+    } catch (e: any) {
+      return { ok: false, reason: `DOCX read failed: ${e.message}` };
+    }
+  }
+
+  // PDF
+  if (ext === ".pdf") {
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.size === 0) return { ok: false, reason: "Empty file" };
+      if (stat.size > MAX_DOC_BYTES)
+        return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
+      const buf = fs.readFileSync(filePath);
+      const data = await pdfParse(buf);
+      const text = ((data && data.text) || "").trim();
+      return text ? { ok: true, text } : { ok: false, reason: "No extractable text" };
+    } catch (e: any) {
+      return { ok: false, reason: `PDF read failed: ${e.message}` };
+    }
+  }
+
+  // Excel (.xlsx)
+  if (ext === ".xlsx") {
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.size === 0) return { ok: false, reason: "Empty file" };
+      if (stat.size > MAX_DOC_BYTES)
+        return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
+      const wb = XLSXmod.readFile(filePath);
+      const parts: string[] = [];
+      for (const name of wb.SheetNames) {
+        parts.push(`## Sheet: ${name}`);
+        parts.push(XLSXmod.utils.sheet_to_csv(wb.Sheets[name]));
+      }
+      const text = parts.join("\n").trim();
+      return text ? { ok: true, text } : { ok: false, reason: "No extractable text" };
+    } catch (e: any) {
+      return { ok: false, reason: `XLSX read failed: ${e.message}` };
+    }
+  }
+
+  // Default: plain-text file
+  return readTextFile(filePath);
 }
 
 /** Flatten JSON to KEY=value lines for heuristic multi-extract */
@@ -265,7 +361,7 @@ export async function scanFolder(
       continue;
     }
 
-    const read = readTextFile(filePath);
+    const read = await extractText(filePath);
     if (read.ok === false) {
       skipped.push({ path: filePath, name, reason: read.reason });
       continue;
@@ -421,7 +517,7 @@ export async function scanFileIntoSession(
   if (!isSupportedFile(filePath)) return session;
 
   const name = path.basename(filePath);
-  const read = readTextFile(filePath);
+  const read = await extractText(filePath);
   if (read.ok === false) {
     const skipped = [
       ...session.skipped_files.filter((s) => s.path !== filePath),

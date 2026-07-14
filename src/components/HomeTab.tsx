@@ -30,23 +30,25 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
   return (
-    <>
-      <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5 space-y-3">
-        <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-          <Plus className="w-4 h-4 text-teal-400" /> {t("quick_paste")}
+    <div className="space-y-6">
+      <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", backdropFilter: "blur(10px)" }}>
+        <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--text)" }}>
+          <Plus className="w-4 h-4" style={{ color: "var(--cyan)" }} /> {t("quick_paste")}
         </h2>
         <textarea
           value={paste}
           onChange={(e) => setPaste(e.target.value)}
           rows={4}
           placeholder={t("paste_placeholder")}
-          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:border-teal-500"
+          className="w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors resize-none"
+          style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
         />
         <button
           type="button"
           onClick={onAnalyze}
           disabled={analyzing || !paste.trim()}
-          className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-sm font-medium disabled:opacity-50 flex items-center gap-2"
+          className="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center gap-2 transition-all"
+          style={{ background: "linear-gradient(135deg, var(--accent), #1d4ed8)", boxShadow: "0 0 20px var(--accent-glow)" }}
         >
           <Sparkles className="w-4 h-4" />
           {analyzing ? t("analyzing") : t("analyze_btn")}
@@ -55,11 +57,11 @@ export const HomeTab: React.FC<HomeTabProps> = ({
 
       {attention.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-amber-300 flex items-center gap-2">
+          <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--amber)" }}>
             <Inbox className="w-4 h-4" />
             {t("attention_title")} ({attention.length})
           </h2>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
             {t("attention_desc")}
           </p>
           <div className="space-y-2">
@@ -77,7 +79,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       )}
 
       <div className="space-y-3">
-        <h2 className="text-sm font-semibold text-slate-300">{t("recent_saved")}</h2>
+        <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("recent_saved")}</h2>
         <div className="space-y-2">
           {entries
             .filter((e) => e.status === "saved")
@@ -92,10 +94,10 @@ export const HomeTab: React.FC<HomeTabProps> = ({
               />
             ))}
           {!entries.filter((e) => e.status === "saved").length && (
-            <p className="text-sm text-slate-500 italic">{t("no_saved")}</p>
+            <p className="text-sm italic" style={{ color: "var(--text-muted)" }}>{t("no_saved")}</p>
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 };

@@ -3,7 +3,19 @@ const { fork, spawn } = require("child_process");
 const path = require("path");
 const http = require("http");
 const fs = require("fs");
+const os = require("os");
 const { execSync } = require("child_process");
+
+function logCrash(tag, e) {
+  try {
+    fs.appendFileSync(
+      path.join(os.tmpdir(), "indexarc-crash.log"),
+      `[${new Date().toISOString()}] [${tag}] ${e && e.stack ? e.stack : e}\n`
+    );
+  } catch {}
+}
+process.on("uncaughtException", (e) => logCrash("uncaughtException", e));
+process.on("unhandledRejection", (e) => logCrash("unhandledRejection", e));
 
 let serverProcess = null;
 let ollamaProcess = null;
@@ -26,8 +38,18 @@ function getPortableRoot() {
     // Separate from G:/…/IndexArc/data (real vault) so desktop testing is clean
     return path.join(process.cwd(), ".desktop-sandbox");
   }
-  // Portable: empty data/config created next to IndexArc.exe on first run
-  return path.dirname(process.execPath);
+  // Portable: empty data/config created next to IndexArc.exe on first run.
+  // But if the exe lives in a protected dir (e.g. Program Files) where a
+  // standard user can't write, fall back to the user-writable AppData folder.
+  const exeDir = path.dirname(process.execPath);
+  try {
+    const probe = path.join(exeDir, ".indexarc-write-test");
+    fs.writeFileSync(probe, "");
+    fs.unlinkSync(probe);
+    return exeDir;
+  } catch {
+    return app.getPath("userData");
+  }
 }
 
 function getResourcePath() {
@@ -197,9 +219,13 @@ ipcMain.handle("select-folder", async () => {
 });
 
 app.on("ready", async () => {
-  await startOllamaIfNeeded();
-  startBackendServer();
-  createWindow();
+  try {
+    await startOllamaIfNeeded();
+    startBackendServer();
+    createWindow();
+  } catch (e) {
+    logCrash("ready", e);
+  }
 });
 
 app.on("window-all-closed", () => {

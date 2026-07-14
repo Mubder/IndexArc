@@ -64,7 +64,7 @@ export interface Settings {
   local_openai_base_url?: string;
   local_openai_api_key?: string;
   local_openai_llm_model?: string;
-  ui_language: "en" | "ar" | "both";
+  ui_language: "en" | "ar";
 }
 
 export type Tab = "home" | "paste" | "folders" | "library" | "ask" | "settings" | "logs";
@@ -120,4 +120,25 @@ export interface LogEntry {
   time: string;
   type: string;
   message: string;
+}
+
+export type RewriteStyle = "human" | "professional" | "technical" | "concise" | "formal" | "casual";
+
+export interface RewriteRequest {
+  text: string;
+  style: RewriteStyle;
+  language?: "en" | "ar" | "auto";
+}
+
+export interface RewriteResult {
+  original: string;
+  rewritten: string;
+  style: RewriteStyle;
+  provider_used: string;
+}
+
+export interface DuplicateCheck {
+  is_duplicate: boolean;
+  existing_entry?: VaultEntry;
+  match_type: "exact_value" | "similar_name" | "same_source";
 }
