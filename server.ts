@@ -9,6 +9,7 @@ import {
   pullOllamaModel,
   resolveActiveProvider,
   warmOllamaLlm,
+  warmOllamaEmbed,
 } from "./server/ai/providers.js";
 import { askVault } from "./server/services/ask.js";
 import {
@@ -221,8 +222,17 @@ app.post("/api/ollama/ensure", async (_req, res) => {
   }
   // Actually load the LLM into VRAM (not just the embedder)
   const warmed = await warmOllamaLlm(s);
+  const embedWarmed =
+    s.ollama_embed_model && s.ollama_embed_model !== s.ollama_llm_model
+      ? await warmOllamaEmbed(s)
+      : warmed;
   const updated = await checkOllama(s.ollama_base_url);
-  res.json({ status: "success", models: updated.models, llm_loaded: warmed });
+  res.json({
+    status: "success",
+    models: updated.models,
+    llm_loaded: warmed,
+    embed_loaded: embedWarmed,
+  });
 });
 
 app.post("/api/ollama/warm", async (_req, res) => {
@@ -230,7 +240,16 @@ app.post("/api/ollama/warm", async (_req, res) => {
   const ollama = await checkOllama(s.ollama_base_url);
   if (!ollama.online) return res.status(503).json({ error: "Ollama is not running" });
   const ok = await warmOllamaLlm(s);
-  res.json({ status: ok ? "success" : "failed", model: s.ollama_llm_model });
+  const embedOk =
+    s.ollama_embed_model && s.ollama_embed_model !== s.ollama_llm_model
+      ? await warmOllamaEmbed(s)
+      : ok;
+  res.json({
+    status: ok || embedOk ? "success" : "failed",
+    model: s.ollama_llm_model,
+    embed_model: s.ollama_embed_model,
+    embed_loaded: embedOk,
+  });
 });
 
 // --- Analyze (multi-extract, no save yet) ---

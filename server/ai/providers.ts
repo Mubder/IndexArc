@@ -153,6 +153,36 @@ export async function warmOllamaLlm(settings: AppSettings): Promise<boolean> {
   }
 }
 
+/** Load the embed model into memory so scan/analyze doesn't pull it on demand */
+export async function warmOllamaEmbed(settings: AppSettings): Promise<boolean> {
+  const base = settings.ollama_base_url.replace(/\/$/, "");
+  try {
+    addLog("OLLAMA", `Warming embed model ${settings.ollama_embed_model}…`);
+    const res = await fetch(`${base}/api/embed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: settings.ollama_embed_model,
+        input: "warm",
+        keep_alive: "30m",
+      }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!res.ok) {
+      addLog(
+        "OLLAMA",
+        `embed warm failed HTTP ${res.status} (model may not support embeddings)`
+      );
+      return false;
+    }
+    addLog("OLLAMA", `Embed model ${settings.ollama_embed_model} is loaded (keep_alive 30m)`);
+    return true;
+  } catch (e: any) {
+    addLog("OLLAMA", `embed warm failed: ${e.message}`);
+    return false;
+  }
+}
+
 function isGarbageCandidate(c: AnalyzeCandidate): boolean {
   const bad = /freeform type|short stable name|e\.g\.|example|required for secrets|needs_type|model_notes/i;
   if (bad.test(c.type) || bad.test(c.name) || bad.test(c.value)) return true;
