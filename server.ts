@@ -114,9 +114,23 @@ app.post("/api/vault/remove-password", (req, res) => {
 addLog("SYSTEM", `IndexArc Vault portable root: ${paths.root}`);
 addLog("SYSTEM", `Data → ${paths.dataDir} | Config → ${paths.configDir}`);
 
+// Automatic timestamped backup on every startup (keeps the last 10 copies).
+try {
+  const backup = store.backupVault(10);
+  if (backup) {
+    addLog("SYSTEM", `Vault backed up → ${backup}`);
+  }
+} catch {
+  /* backups are best-effort; never block startup */
+}
+
 // --- Status ---
 app.get("/api/ping", (_req, res) => {
   res.json({ status: "ok" });
+});
+
+app.get("/api/backups", (_req, res) => {
+  res.json({ backups: store.listBackups(), dir: paths.backupsDir });
 });
 
 app.get("/api/status", async (_req, res) => {

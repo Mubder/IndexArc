@@ -5,6 +5,7 @@ export type UiLanguage = "en" | "ar";
 export interface TranslationDict {
   tab_home: string;
   tab_paste: string;
+  tab_scratchpad: string;
   tab_folders: string;
   tab_ask: string;
   tab_library: string;
@@ -46,6 +47,8 @@ export interface TranslationDict {
   identify_placeholder_value: string;
   identify_save_btn: string;
   identify_cancel_btn: string;
+  identify_key_label: string;
+  identify_keep_hint: string;
 
   ask_placeholder: string;
   ask_header_placeholder: string;
@@ -204,12 +207,60 @@ export interface TranslationDict {
   select_all: string;
   remove_selected_btn: string;
   lib_archived: string;
+
+  scratchpad_add: string;
+  scratchpad_placeholder: string;
+  scratchpad_detect: string;
+  scratchpad_detecting: string;
+  scratchpad_save_secret: string;
+  scratchpad_save_note: string;
+  scratchpad_saving: string;
+  scratchpad_saved_ok: string;
+  scratchpad_save_err: string;
+  scratchpad_rephrase: string;
+  scratchpad_rewriting: string;
+  scratchpad_rephrased: string;
+  scratchpad_rewrite_err: string;
+  scratchpad_clear: string;
+  scratchpad_copy: string;
+  scratchpad_copied: string;
+  scratchpad_rename: string;
+  scratchpad_ai_detected: string;
+  scratchpad_no_detection: string;
+
+  setup_title: string;
+  setup_collapse: string;
+  setup_all_set: string;
+  setup_needs_attention: string;
+  setup_ollama: string;
+  setup_ollama_installed: string;
+  setup_ollama_not_installed: string;
+  setup_ollama_online: string;
+  setup_ollama_offline: string;
+  setup_ollama_no_model: string;
+  setup_install_ollama: string;
+  setup_start_ollama: string;
+  setup_pull_model: string;
+  setup_configure_ai: string;
+  setup_ai_ready: string;
+  setup_ai_missing: string;
+  setup_installing: string;
+  setup_starting: string;
+  setup_pulling: string;
+  setup_install_failed: string;
+  setup_open_download: string;
+  setup_howto_title: string;
+  setup_portable_note: string;
+  setup_installer_note: string;
+  setup_dismiss: string;
+  setup_pull_done: string;
 }
 
 export const translations: Record<UiLanguage, TranslationDict> = {
   en: {
     tab_home: "Home",
     tab_paste: "Paste & Analyze",
+    tab_scratchpad: "Scratchpad",
     tab_folders: "Folder Watcher",
     tab_ask: "Ask Assistant",
     tab_library: "Library",
@@ -251,6 +302,8 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     identify_placeholder_value: "Enter the secret value",
     identify_save_btn: "Save to Vault",
     identify_cancel_btn: "Cancel",
+    identify_key_label: "Key / Value",
+    identify_keep_hint: "Leave empty to keep the current secret",
 
     ask_placeholder: "Search: token name, key type, or ask a question...",
     ask_header_placeholder: "Ask: What is my Telegram token and ID?",
@@ -409,10 +462,58 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     select_all: "Select All",
     remove_selected_btn: "Remove Selected",
     lib_archived: "Archived",
+
+    scratchpad_add: "New scratch",
+    scratchpad_placeholder: "Paste anything — secrets, notes, code, commands. AI auto-detects on paste.",
+    scratchpad_detect: "Detect",
+    scratchpad_detecting: "Detecting…",
+    scratchpad_save_secret: "Save secret to Vault",
+    scratchpad_save_note: "Save as Note",
+    scratchpad_saving: "Saving…",
+    scratchpad_saved_ok: "Saved to vault",
+    scratchpad_save_err: "Save failed",
+    scratchpad_rephrase: "Rephrase",
+    scratchpad_rewriting: "Rephrasing…",
+    scratchpad_rephrased: "Rephrased",
+    scratchpad_rewrite_err: "Rephrase failed",
+    scratchpad_clear: "Clear",
+    scratchpad_copy: "Copy",
+    scratchpad_copied: "Copied",
+    scratchpad_rename: "Rename tab",
+    scratchpad_ai_detected: "AI detected",
+    scratchpad_no_detection: "Nothing detected yet — paste or click Detect",
+
+    setup_title: "Setup & Dependencies",
+    setup_collapse: "Details",
+    setup_all_set: "Everything is set up — you're ready to go",
+    setup_needs_attention: "Setup needs attention",
+    setup_ollama: "Local AI (Ollama)",
+    setup_ollama_installed: "Ollama installed",
+    setup_ollama_not_installed: "Ollama not installed",
+    setup_ollama_online: "Running with local models",
+    setup_ollama_offline: "Installed but not running",
+    setup_ollama_no_model: "No model pulled yet",
+    setup_install_ollama: "Install Ollama",
+    setup_start_ollama: "Start Ollama",
+    setup_pull_model: "Pull {model}",
+    setup_configure_ai: "Configure AI provider",
+    setup_ai_ready: "AI provider ready",
+    setup_ai_missing: "No AI provider configured",
+    setup_installing: "Installing Ollama…",
+    setup_starting: "Starting Ollama…",
+    setup_pulling: "Pulling model… (this may take a few minutes)",
+    setup_install_failed: "Automatic install failed",
+    setup_open_download: "Open Ollama download page",
+    setup_howto_title: "How to run IndexArc",
+    setup_portable_note: "Portable: runs from the .exe, data lives next to it (USB-friendly).",
+    setup_installer_note: "Installer: installs to your PC, data stored in AppData.",
+    setup_dismiss: "Dismiss",
+    setup_pull_done: "Model pulled — local AI is ready",
   },
   ar: {
     tab_home: "الرئيسية",
     tab_paste: "لصق وتحليل",
+    tab_scratchpad: "المسودة",
     tab_folders: "مراقب المجلدات",
     tab_ask: "اسأل المساعد",
     tab_library: "المكتبة",
@@ -454,6 +555,8 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     identify_placeholder_value: "أدخل القيمة",
     identify_save_btn: "حفظ في الخزنة",
     identify_cancel_btn: "إلغاء",
+    identify_key_label: "المفتاح / القيمة",
+    identify_keep_hint: "اتركه فارغاً للاحتفاظ بالسر الحالي",
 
     ask_placeholder: "ابحث: اسم التوكن، نوع المفتاح، أو اطرح سؤالاً...",
     ask_header_placeholder: "اسأل: ما هو توكن ومفتاح التليجرام؟",
@@ -612,6 +715,53 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     select_all: "تحديد الكل",
     remove_selected_btn: "إزالة المحدد",
     lib_archived: "مؤرشف",
+
+    scratchpad_add: "مسودة جديدة",
+    scratchpad_placeholder: "الصق أي شيء — أسرار، ملاحظات، أكواد، أوامر. الذكاء يكتشف تلقائياً عند اللصق.",
+    scratchpad_detect: "اكتشاف",
+    scratchpad_detecting: "جاري الاكتشاف…",
+    scratchpad_save_secret: "حفظ السر في الخزنة",
+    scratchpad_save_note: "حفظ كملاحظة",
+    scratchpad_saving: "جاري الحفظ…",
+    scratchpad_saved_ok: "تم الحفظ في الخزنة",
+    scratchpad_save_err: "فشل الحفظ",
+    scratchpad_rephrase: "إعادة صياغة",
+    scratchpad_rewriting: "جاري إعادة الصياغة…",
+    scratchpad_rephrased: "تمت إعادة الصياغة",
+    scratchpad_rewrite_err: "فشلت إعادة الصياغة",
+    scratchpad_clear: "مسح",
+    scratchpad_copy: "نسخ",
+    scratchpad_copied: "تم النسخ",
+    scratchpad_rename: "إعادة تسمية التبويب",
+    scratchpad_ai_detected: "اكتشف الذكاء",
+    scratchpad_no_detection: "لم يُكتشف شيء بعد — الصق أو اضغط اكتشاف",
+
+    setup_title: "الإعداد والاعتماديات",
+    setup_collapse: "التفاصيل",
+    setup_all_set: "كل شيء جاهز — يمكنك البدء",
+    setup_needs_attention: "الإعداد يحتاج اهتماماً",
+    setup_ollama: "الذكاء المحلي (Ollama)",
+    setup_ollama_installed: "أولاما مثبّت",
+    setup_ollama_not_installed: "أولاما غير مثبّت",
+    setup_ollama_online: "يعمل بنماذج محلية",
+    setup_ollama_offline: "مثبّت لكنه لا يعمل",
+    setup_ollama_no_model: "لم يتم تنزيل أي نموذج بعد",
+    setup_install_ollama: "تثبيت Ollama",
+    setup_start_ollama: "تشغيل Ollama",
+    setup_pull_model: "تنزيل {model}",
+    setup_configure_ai: "إعداد مزود الذكاء",
+    setup_ai_ready: "مزود الذكاء جاهز",
+    setup_ai_missing: "لم يتم إعداد أي مزود ذكاء",
+    setup_installing: "جاري تثبيت أولاما…",
+    setup_starting: "جاري تشغيل أولاما…",
+    setup_pulling: "جاري تنزيل النموذج… (قد يستغرق بضع دقائق)",
+    setup_install_failed: "فشل التثبيت التلقائي",
+    setup_open_download: "فتح صفحة تنزيل Ollama",
+    setup_howto_title: "طريقة تشغيل IndexArc",
+    setup_portable_note: "النسخة المحمولة: تعمل من ملف .exe، والبيانات بجانبها (مناسبة للفلاش).",
+    setup_installer_note: "المثبّت: يثبّت على جهازك، والبيانات في AppData.",
+    setup_dismiss: "تجاهل",
+    setup_pull_done: "تم تنزيل النموذج — الذكاء المحلي جاهز",
   },
 };
 

@@ -352,6 +352,100 @@ export class VaultStore {
     return this.paths.root;
   }
 
+  /**
+   * Copy the vault (and vectors) files verbatim into backups/ with a timestamp.
+   * Copies raw on-disk bytes, so an encrypted vault stays encrypted in the
+   * backup. Skips if the vault is empty/missing or unchanged since the last
+   * backup, and prunes to the most recent `keep` copies.
+   */
+  backupVault(keep = 10): string | null {
+    try {
+      const src = this.paths.vaultFile;
+      if (!fs.existsSync(src)) return null;
+      const raw = fs.readFileSync(src);
+      if (raw.length === 0) return null;
+
+      const dir = this.paths.backupsDir;
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+      // Skip if identical to the newest existing backup (avoid churn on
+      // every restart when nothing changed).
+      const existing = fs
+        .readdirSync(dir)
+        .filter((f) => /^vault-.*\.json$/.test(f))
+        .sort();
+      const newest = existing[existing.length - 1];
+      if (newest) {
+        try {
+          const prev = fs.readFileSync(path.join(dir, newest));
+          if (prev.equals(raw)) return null;
+        } catch {}
+      }
+
+      const stamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")
+        .replace("T", "_")
+        .replace("Z", "");
+      const dest = path.join(dir, `vault-${stamp}.json`);
+      fs.writeFileSync(dest, raw);
+
+      // Also back up vectors alongside (best effort, same stamp).
+      try {
+        if (fs.existsSync(this.paths.vectorsFile)) {
+          const v = fs.readFileSync(this.paths.vectorsFile);
+          if (v.length > 0) {
+            fs.writeFileSync(path.join(dir, `vectors-${stamp}.json`), v);
+          }
+        }
+      } catch {}
+
+      this.pruneBackups(keep);
+      return dest;
+    } catch {
+      return null;
+    }
+  }
+
+  private pruneBackups(keep: number) {
+    try {
+      const dir = this.paths.backupsDir;
+      const prune = (prefix: string) => {
+        const files = fs
+          .readdirSync(dir)
+          .filter((f) => f.startsWith(prefix) && f.endsWith(".json"))
+          .sort();
+        while (files.length > keep) {
+          const old = files.shift();
+          if (old) {
+            try {
+              fs.unlinkSync(path.join(dir, old));
+            } catch {}
+          }
+        }
+      };
+      prune("vault-");
+      prune("vectors-");
+    } catch {}
+  }
+
+  listBackups(): { name: string; size: number; created_at: string }[] {
+    try {
+      const dir = this.paths.backupsDir;
+      if (!fs.existsSync(dir)) return [];
+      return fs
+        .readdirSync(dir)
+        .filter((f) => /^vault-.*\.json$/.test(f))
+        .map((f) => {
+          const st = fs.statSync(path.join(dir, f));
+          return { name: f, size: st.size, created_at: st.mtime.toISOString() };
+        })
+        .sort((a, b) => b.name.localeCompare(a.name));
+    } catch {
+      return [];
+    }
+  }
+
   // --- Watched folders (portable) ---
   listWatchedFolders(): WatchedFolder[] {
     return readJson<{ folders: WatchedFolder[] }>(this.paths.watchedFoldersFile, {

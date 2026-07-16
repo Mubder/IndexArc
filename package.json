@@ -59,6 +59,7 @@
     "electronDist": "node_modules/electron/dist",
     "files": [
       "dist/**/*",
+      "public/**/*",
       "electron-main.cjs",
       "preload.cjs",
       "package.json",
@@ -68,6 +69,7 @@
       "!config{,/**/*}",
       "!logs{,/**/*}",
       "!tmp{,/**/*}",
+      "!backups{,/**/*}",
       "!.desktop-sandbox{,/**/*}",
       "!dist-desktop{,/**/*}",
       "!dist-desktop2{,/**/*}",

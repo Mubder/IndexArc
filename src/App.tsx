@@ -7,6 +7,7 @@ import {
   Sparkles,
   Settings as SettingsIcon,
   Terminal,
+  StickyNote,
   Folder,
   KeyRound,
   ChevronRight,
@@ -36,12 +37,14 @@ import { getTranslation } from "./utils/i18n";
 // Subcomponents
 import { HomeTab } from "./components/HomeTab";
 import { AnalyzeTab } from "./components/AnalyzeTab";
+import { ScratchpadTab } from "./components/ScratchpadTab";
 import { FoldersTab } from "./components/FoldersTab";
 import { AskTab } from "./components/AskTab";
 import { LibraryTab } from "./components/LibraryTab";
 import { SettingsTab } from "./components/SettingsTab";
 import { LogsTab } from "./components/LogsTab";
 import { LockScreen } from "./components/LockScreen";
+import { SetupChecker } from "./components/SetupChecker";
 
 // Modals
 import { FsBrowserModal } from "./components/FsBrowserModal";
@@ -51,7 +54,7 @@ import { ConfirmModal } from "./components/ConfirmModal";
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => {
     const saved = localStorage.getItem("indexarc-tab");
-    return (saved === "home" || saved === "paste" || saved === "folders" || saved === "library" || saved === "ask" || saved === "settings" || saved === "logs")
+    return (saved === "home" || saved === "paste" || saved === "scratchpad" || saved === "folders" || saved === "library" || saved === "ask" || saved === "settings" || saved === "logs")
       ? (saved as Tab)
       : "home";
   });
@@ -376,19 +379,20 @@ export default function App() {
     setClarify(entry);
     setClarifyType(entry.type === "unidentified" ? "" : entry.type);
     setClarifyName(entry.name === "unnamed" ? "" : entry.name);
-    setClarifyValue(entry.value);
+    setClarifyValue("");
   };
 
   const submitClarify = async () => {
     if (!clarify) return;
-    if (!clarifyType.trim() || !clarifyName.trim()) {
-      showToast("Type and name are required / النوع والاسم مطلوبان", "error");
+    if (!clarifyName.trim()) {
+      showToast("Name is required / الاسم مطلوب", "error");
       return;
     }
+    const value = clarifyValue.trim() || clarify.value;
     const res = await fetch(`/api/entries/${clarify.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: clarifyType.trim(), name: clarifyName.trim(), value: clarifyValue.trim() }),
+      body: JSON.stringify({ type: clarifyType.trim(), name: clarifyName.trim(), value }),
     });
     if (res.ok) {
       setClarify(null);
@@ -603,6 +607,7 @@ export default function App() {
     () => [
       { id: "home", label: t("tab_home"), icon: <Layers className="w-4 h-4" />, badge: attention.length || undefined },
       { id: "paste", label: t("tab_paste"), icon: <Plus className="w-4 h-4" /> },
+      { id: "scratchpad", label: t("tab_scratchpad"), icon: <StickyNote className="w-4 h-4" /> },
       {
         id: "folders",
         label: t("tab_folders"),
@@ -931,6 +936,13 @@ export default function App() {
 
           {/* Content Area */}
           <main dir={settings?.ui_language === "ar" ? "rtl" : "ltr"} className="flex-1 min-h-0 overflow-y-auto px-8 py-6">
+            <SetupChecker
+              status={status}
+              settings={settings}
+              onConfigureAI={() => setTab("settings")}
+              onRefresh={fetchAll}
+            />
+
             {tab === "home" && (
               <HomeTab
                 paste={paste}
@@ -959,6 +971,10 @@ export default function App() {
                 onUpdateCandidate={updateCandidate}
                 settings={settings}
               />
+            )}
+
+            {tab === "scratchpad" && (
+              <ScratchpadTab settings={settings} />
             )}
 
             {tab === "folders" && (

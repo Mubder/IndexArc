@@ -10,6 +10,7 @@ data/
 config/
 logs/
 tmp/
+backups/
 .env
 .env.*
 

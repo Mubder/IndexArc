@@ -1,0 +1,496 @@
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Plus,
+  X,
+  Save,
+  Wand2,
+  KeyRound,
+  Trash2,
+  Loader2,
+  Copy,
+  Sparkles,
+  Pencil,
+} from "lucide-react";
+import { AnalyzeCandidate, Settings } from "../types";
+import { getTranslation } from "../utils/i18n";
+
+interface ScratchTab {
+  id: string;
+  title: string;
+  content: string;
+}
+
+interface Detection {
+  families: string[];
+  candidates: AnalyzeCandidate[];
+  provider: string;
+}
+
+interface Busy {
+  analyze?: boolean;
+  save?: boolean;
+  rewrite?: boolean;
+}
+
+type RewriteStyle = "human" | "professional" | "technical" | "concise" | "formal" | "casual";
+
+const STORAGE_KEY = "indexarc-scratchpad";
+const REWRITE_STYLES: RewriteStyle[] = ["human", "professional", "technical", "concise", "formal", "casual"];
+const REWRITE_STYLE_KEYS: Record<RewriteStyle, string> = {
+  human: "rewrite_style_human",
+  professional: "rewrite_style_professional",
+  technical: "rewrite_style_technical",
+  concise: "rewrite_style_concise",
+  formal: "rewrite_style_formal",
+  casual: "rewrite_style_casual",
+};
+
+function uid(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `t_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+function loadTabs(): ScratchTab[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) {
+        return parsed.map((x: any) => ({
+          id: x.id || uid(),
+          title: x.title || "Scratch",
+          content: x.content || "",
+        }));
+      }
+    }
+  } catch {}
+  return [{ id: uid(), title: "Scratch 1", content: "" }];
+}
+
+export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ settings }) => {
+  const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
+
+  const initial = useRef(loadTabs());
+  const [tabs, setTabs] = useState<ScratchTab[]>(initial.current);
+  const [activeId, setActiveId] = useState<string>(initial.current[0].id);
+  const [detections, setDetections] = useState<Record<string, Detection>>({});
+  const [busy, setBusy] = useState<Record<string, Busy>>({});
+  const [statusMsg, setStatusMsg] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [style, setStyle] = useState<RewriteStyle>("professional");
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const titleTouched = useRef<Record<string, boolean>>({});
+
+  const pasteFlag = useRef<Record<string, boolean>>({});
+
+  const active = tabs.find((x) => x.id === activeId) || tabs[0];
+  const b = busy[activeId] || {};
+  const detection = detections[activeId];
+  const hasSecret =
+    !!detection &&
+    (detection.families.includes("secret") || detection.families.includes("unknown"));
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
+  }, [tabs]);
+
+  const setStatus = useCallback((msg: string) => {
+    setStatusMsg(msg);
+    if (msg) setTimeout(() => setStatusMsg(""), 3200);
+  }, []);
+
+  const analyze = useCallback(async (id: string, content: string) => {
+    const text = content.trim();
+    if (!text) {
+      setDetections((d) => {
+        const n = { ...d };
+        delete n[id];
+        return n;
+      });
+      return;
+    }
+    setBusy((prev) => ({ ...prev, [id]: { ...prev[id], analyze: true } }));
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: text }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const candidates: AnalyzeCandidate[] = data.candidates || [];
+        const families = Array.from(new Set(candidates.map((c) => c.family)));
+        setDetections((d) => ({ ...d, [id]: { families, candidates, provider: data.provider_used || "" } }));
+      }
+    } catch {
+      /* ignore analysis errors */
+    } finally {
+      setBusy((prev) => ({ ...prev, [id]: { ...prev[id], analyze: false } }));
+    }
+  }, []);
+
+  const setContent = useCallback((id: string, content: string) => {
+    setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, content } : x)));
+  }, []);
+
+  const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setContent(activeId, value);
+    if (pasteFlag.current[activeId]) {
+      pasteFlag.current[activeId] = false;
+      analyze(activeId, value);
+    }
+    if (value.trim() && !titleTouched.current[activeId]) {
+      const firstLine = value.split("\n").map((l) => l.trim()).find(Boolean) || "";
+      const auto = firstLine.slice(0, 40) || active.title;
+      setTabs((prev) => prev.map((x) => (x.id === activeId ? { ...x, title: auto } : x)));
+    }
+  };
+
+  const onPaste = () => {
+    pasteFlag.current[activeId] = true;
+  };
+
+  const nextTitle = useCallback((prev: ScratchTab[]) => {
+    let n = prev.length + 1;
+    const used = new Set(prev.map((x) => x.title));
+    while (used.has(`Scratch ${n}`)) n++;
+    return `Scratch ${n}`;
+  }, []);
+
+  const addTab = () => {
+    const id = uid();
+    setTabs((prev) => [...prev, { id, title: nextTitle(prev), content: "" }]);
+    setActiveId(id);
+  };
+
+  const closeTab = (id: string) => {
+    if (tabs.length === 1) {
+      const fresh = { id: uid(), title: "Scratch 1", content: "" };
+      setTabs([fresh]);
+      setActiveId(fresh.id);
+      setDetections({});
+      titleTouched.current = {};
+      return;
+    }
+    setTabs((prev) => {
+      const next = prev.filter((x) => x.id !== id);
+      if (id === activeId) setActiveId(next[0].id);
+      return next;
+    });
+    delete titleTouched.current[id];
+    setDetections((d) => {
+      const n = { ...d };
+      delete n[id];
+      return n;
+    });
+  };
+
+  const commitRename = (id: string) => {
+    const name = renameValue.trim();
+    if (name) {
+      titleTouched.current[id] = true;
+      setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, title: name } : x)));
+    }
+    setRenameId(null);
+    setRenameValue("");
+  };
+
+  const startRename = (id: string) => {
+    const cur = tabs.find((x) => x.id === id);
+    setRenameId(id);
+    setRenameValue(cur?.title || "");
+  };
+
+  const handleSaveSecret = async () => {
+    const text = active.content.trim();
+    if (!text) return;
+    const secretItems: Array<Partial<AnalyzeCandidate> & { notes?: string }> =
+      detection?.candidates?.filter((c) => c.family === "secret" || c.family === "unknown") || [];
+    const items: Array<Partial<AnalyzeCandidate> & { notes?: string }> =
+      secretItems.length > 0
+        ? secretItems
+        : [
+            {
+              value: text,
+              type: "note",
+              name: active.title,
+              raw_fragment: text,
+              labels: [],
+              type_aliases: ["note"],
+              family: "note",
+              notes: text,
+            },
+          ];
+    setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], save: true } }));
+    setStatus(t("scratchpad_saving"));
+    try {
+      const res = await fetch("/api/entries/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidates: items.map((c) => ({
+            value: c.value,
+            type: c.type,
+            name: c.name,
+            raw_fragment: c.raw_fragment,
+            labels: c.labels,
+            type_aliases: c.type_aliases,
+            family: c.family,
+          })),
+        }),
+      });
+      if (res.ok) {
+        setStatus(t("scratchpad_saved_ok"));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setStatus(err.error || t("scratchpad_save_err"));
+      }
+    } catch (e: any) {
+      setStatus(e?.message || t("scratchpad_save_err"));
+    } finally {
+      setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], save: false } }));
+    }
+  };
+
+  const handleRephrase = async () => {
+    const text = active.content.trim();
+    if (!text) return;
+    setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], rewrite: true } }));
+    setStatus(t("scratchpad_rewriting"));
+    try {
+      const res = await fetch("/api/rewrite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, style }),
+      });
+      const data = await res.json();
+      if (res.ok && data.rewritten) {
+        setContent(activeId, data.rewritten);
+        setStatus(t("scratchpad_rephrased"));
+        analyze(activeId, data.rewritten);
+      } else {
+        setStatus(data.error || t("scratchpad_rewrite_err"));
+      }
+    } catch (e: any) {
+      setStatus(e?.message || t("scratchpad_rewrite_err"));
+    } finally {
+      setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], rewrite: false } }));
+    }
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(active.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  };
+
+  const handleContextMenu = (e: React.MouseEvent<HTMLTextAreaElement>) => {
+    // Allow the native editing context menu (spelling suggestions, etc.)
+    // to appear on right-click instead of the default browser menu.
+    e.preventDefault();
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Internal tabs */}
+      <div className="flex items-center gap-1 flex-wrap">
+        {tabs.map((tab) => {
+          const isActive = tab.id === activeId;
+          const renaming = renameId === tab.id;
+          return (
+            <div
+              key={tab.id}
+              onClick={() => setActiveId(tab.id)}
+              className="group flex items-center gap-1 pl-3 pr-1.5 py-1.5 rounded-xl cursor-pointer text-xs font-medium transition-all"
+              style={{
+                background: isActive ? "var(--bg-active)" : "transparent",
+                color: isActive ? "var(--accent-bright)" : "var(--text-dim)",
+                border: `1px solid ${isActive ? "var(--border-glow)" : "var(--border)"}`,
+              }}
+            >
+              {renaming ? (
+                <input
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitRename(tab.id);
+                    if (e.key === "Escape") { setRenameId(null); setRenameValue(""); }
+                  }}
+                  onBlur={() => commitRename(tab.id)}
+                  className="bg-transparent outline-none w-28"
+                  style={{ color: "var(--text)" }}
+                />
+              ) : (
+                <span onDoubleClick={(e) => { e.stopPropagation(); startRename(tab.id); }}>{tab.title}</span>
+              )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  startRename(tab.id);
+                }}
+                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+                aria-label={t("scratchpad_rename")}
+                title={t("scratchpad_rename")}
+              >
+                <Pencil className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(tab.id);
+                }}
+                className="opacity-50 hover:opacity-100 transition-opacity"
+                aria-label="Close tab"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          );
+        })}
+        <button
+          type="button"
+          onClick={addTab}
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all"
+          style={{ color: "var(--text-muted)", border: "1px dashed var(--border)" }}
+          title={t("scratchpad_add")}
+        >
+          <Plus className="w-3.5 h-3.5" /> {t("scratchpad_add")}
+        </button>
+      </div>
+
+      {/* Editor + actions */}
+      <div
+        className="rounded-2xl p-4 space-y-3"
+        style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => analyze(activeId, active.content)}
+            disabled={b.analyze || !active.content.trim()}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
+            style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
+          >
+            {b.analyze ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            {b.analyze ? t("scratchpad_detecting") : t("scratchpad_detect")}
+          </button>
+
+          {hasSecret ? (
+            <button
+              type="button"
+              onClick={handleSaveSecret}
+              disabled={b.save}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
+              style={{ background: "var(--emerald-bg)", color: "var(--emerald)", border: "1px solid rgba(52, 211, 153, 0.2)" }}
+            >
+              {b.save ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
+              {b.save ? t("scratchpad_saving") : t("scratchpad_save_secret")}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSaveSecret}
+              disabled={b.save}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
+              style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
+            >
+              {b.save ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              {b.save ? t("scratchpad_saving") : t("scratchpad_save_note")}
+            </button>
+          )}
+
+          <div className="flex items-center gap-1">
+            <select
+              value={style}
+              onChange={(e) => setStyle(e.target.value as RewriteStyle)}
+              className="rounded-lg px-2 py-1.5 text-xs focus:outline-none"
+              style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
+            >
+              {REWRITE_STYLES.map((s) => (
+                <option key={s} value={s}>
+                  {t(REWRITE_STYLE_KEYS[s] as Parameters<typeof getTranslation>[1])}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={handleRephrase}
+              disabled={b.rewrite || !active.content.trim()}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
+              style={{ background: "var(--bg-active)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
+            >
+              {b.rewrite ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+              {b.rewrite ? t("scratchpad_rewriting") : t("scratchpad_rephrase")}
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
+            style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+          >
+            <Copy className="w-3.5 h-3.5" />
+            {copied ? t("scratchpad_copied") : t("scratchpad_copy")}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setContent(activeId, "")}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
+            style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            {t("scratchpad_clear")}
+          </button>
+
+          <div className="flex-1" />
+
+          {detection ? (
+            <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+              {t("scratchpad_ai_detected")}: {detection.families.join(", ")}
+              {detection.provider ? ` · ${detection.provider}` : ""}
+            </span>
+          ) : (
+            <span className="text-[10px]" style={{ color: "var(--text-dim)" }}>
+              {t("scratchpad_no_detection")}
+            </span>
+          )}
+        </div>
+
+        {statusMsg && (
+          <p className="text-xs" style={{ color: "var(--accent-bright)" }}>
+            {statusMsg}
+          </p>
+        )}
+
+        <textarea
+          value={active.content}
+          onChange={onChange}
+          onPaste={onPaste}
+          onContextMenu={handleContextMenu}
+          spellCheck={true}
+          rows={14}
+          className="w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors resize-none"
+          style={{
+            background: "var(--bg-input)",
+            border: "1px solid var(--border-input)",
+            color: "var(--text)",
+            fontFamily: "var(--font-mono)",
+          }}
+          placeholder={t("scratchpad_placeholder")}
+        />
+      </div>
+    </div>
+  );
+};
+
+export default ScratchpadTab;

@@ -4,6 +4,16 @@
 
 All data stays in **one folder** (USB-safe). Copy the whole directory anywhere and run.
 
+## Documentation
+
+Full documentation lives in [`docs/`](./docs/README.md):
+
+- [User Guide](./docs/USER_GUIDE.md) — install, use, encrypt, back up, AI setup, troubleshooting
+- [Developer Guide](./docs/DEVELOPER_GUIDE.md) — stack, layout, dev workflow, how to add a feature
+- [Architecture & Data Model](./docs/ARCHITECTURE.md) — process model, portable root, encryption, backups
+- [API Reference](./docs/API_REFERENCE.md) — every `/api/*` endpoint
+- [Build & Release](./docs/BUILD_AND_RELEASE.md) — builds, installer, signing, data safety
+
 ## Features
 
 | Capability | Behavior |
