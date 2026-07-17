@@ -1,9 +1,36 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
+/* ── Arabic glyphs: map Calibri ONLY to Arabic codepoints via an aliased
+   @font-face with unicode-range. Because this alias is added to the FRONT of
+   every font stack (sans/mono/arabic), Arabic text renders in Calibri
+   everywhere — regardless of the UI language — while Latin text keeps
+   Inter / JetBrains Mono untouched. ── */
+@font-face {
+  font-family: "ArabicGlyphs";
+  src: local("Calibri"), local("Segoe UI"), local("Tahoma");
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-089F, U+08A0-08FF,
+    U+FB50-FDFF, U+FE70-FEFF, U+0640, U+200C-200F;
+}
+
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-sans: "ArabicGlyphs", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "ArabicGlyphs", "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-arabic: "ArabicGlyphs", "Calibri", "Segoe UI", "Tahoma", ui-sans-serif, sans-serif;
+}
+
+/* ── Spellcheck overlay (Scratchpad): sizing/metrics that must mirror the
+   underlying textarea so the red underlines line up. ── */
+.ar-spell-overlay {
+  line-height: inherit;
+  letter-spacing: inherit;
+  tab-size: inherit;
+}
+
+.ar-spell-overlay .ar-misspell {
+  text-decoration: underline wavy #f87171;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
 }
 
 /* ── Dark Theme (default) ── */

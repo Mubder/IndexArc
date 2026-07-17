@@ -89,12 +89,70 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const pasteFlag = useRef<Record<string, boolean>>({});
   const serverLoaded = useRef(false);
 
+  // Arabic spellcheck overlay (Electron only): set of misspelled Arabic words
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const [misspelledAr, setMisspelledAr] = useState<Set<string>>(new Set());
+
   const active = tabs.find((x) => x.id === activeId) || tabs[0];
   const b = busy[activeId] || {};
   const detection = detections[activeId];
   const hasSecret =
     !!detection &&
     (detection.families.includes("secret") || detection.families.includes("unknown"));
+
+  const spellApi =
+    typeof window !== "undefined" ? window.electronAPI?.spellcheckArabic : undefined;
+
+  // Debounced Arabic spellcheck of the active tab's content. Runs regardless of
+  // the UI language — it is driven by the CONTENT (any Arabic text), so writing
+  // Arabic while the interface is English still gets red-underline marking.
+  useEffect(() => {
+    if (!spellApi) {
+      setMisspelledAr((prev) => (prev.size ? new Set<string>() : prev));
+      return;
+    }
+    const text = active?.content || "";
+    const matches: string[] = text.match(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g) || [];
+    const words: string[] = Array.from(new Set(matches));
+    if (!words.length) {
+      setMisspelledAr((prev) => (prev.size ? new Set<string>() : prev));
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const bad = await spellApi(words);
+        if (!cancelled) setMisspelledAr(new Set(bad));
+      } catch {
+        /* ignore */
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [active?.content, spellApi]);
+
+  const syncOverlayScroll = useCallback(() => {
+    if (overlayRef.current && textareaRef.current) {
+      overlayRef.current.scrollTop = textareaRef.current.scrollTop;
+      overlayRef.current.scrollLeft = textareaRef.current.scrollLeft;
+    }
+  }, []);
+
+  // Build the highlighted HTML for the overlay: misspelled Arabic words get a
+  // red wavy underline; everything else is transparent so the textarea shows.
+  const overlayHtml = React.useMemo(() => {
+    const text = active?.content || "";
+    if (!misspelledAr.size) return "";
+    const esc = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return esc(text).replace(
+      /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g,
+      (w) => (misspelledAr.has(w) ? `<span class="ar-misspell">${w}</span>` : w)
+    );
+  }, [active?.content, misspelledAr]);
 
   // Load tabs from the server (portable, survives reinstall/update). The
   // server copy is authoritative when it has content; localStorage is a cache.
@@ -378,12 +436,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     } catch {}
   };
 
-  const handleContextMenu = (e: React.MouseEvent<HTMLTextAreaElement>) => {
-    // Allow the native editing context menu (spelling suggestions, etc.)
-    // to appear on right-click instead of the default browser menu.
-    e.preventDefault();
-  };
-
   return (
     <div className="space-y-4">
       {/* Internal tabs */}
@@ -565,22 +617,40 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           </p>
         )}
 
-        <textarea
-          value={active.content}
-          onChange={onChange}
-          onPaste={onPaste}
-          onContextMenu={handleContextMenu}
-          spellCheck={true}
-          rows={14}
-          className="w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors resize-none"
-          style={{
-            background: "var(--bg-input)",
-            border: "1px solid var(--border-input)",
-            color: "var(--text)",
-            fontFamily: "var(--font-mono)",
-          }}
-          placeholder={t("scratchpad_placeholder")}
-        />
+        <div className="relative">
+          {overlayHtml && (
+            <div
+              ref={overlayRef}
+              aria-hidden="true"
+              dir="auto"
+              className="ar-spell-overlay absolute inset-0 z-0 w-full rounded-xl px-3 py-2 text-sm overflow-auto pointer-events-none whitespace-pre-wrap break-words"
+              style={{
+                border: "1px solid var(--border-input)",
+                color: "transparent",
+                fontFamily: "var(--font-mono)",
+              }}
+              dangerouslySetInnerHTML={{ __html: overlayHtml + "\n" }}
+            />
+          )}
+          <textarea
+            ref={textareaRef}
+            value={active.content}
+            onChange={onChange}
+            onPaste={onPaste}
+            onScroll={syncOverlayScroll}
+            spellCheck={true}
+            dir="auto"
+            rows={14}
+            className="relative z-10 w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors resize-none"
+            style={{
+              background: overlayHtml ? "transparent" : "var(--bg-input)",
+              border: "1px solid var(--border-input)",
+              color: "var(--text)",
+              fontFamily: "var(--font-mono)",
+            }}
+            placeholder={t("scratchpad_placeholder")}
+          />
+        </div>
 
         {/* Detection status, moved to underneath the text box. */}
         {detection ? (

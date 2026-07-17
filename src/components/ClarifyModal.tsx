@@ -12,6 +12,8 @@ interface ClarifyModalProps {
   setClarifyName: (v: string) => void;
   clarifyValue: string;
   setClarifyValue: (v: string) => void;
+  clarifyFamily: VaultEntry["family"];
+  setClarifyFamily: (v: VaultEntry["family"]) => void;
   onSubmitClarify: () => Promise<void>;
   settings?: Settings | null;
 }
@@ -26,6 +28,8 @@ export const ClarifyModal: React.FC<ClarifyModalProps> = ({
   setClarifyName,
   clarifyValue,
   setClarifyValue,
+  clarifyFamily,
+  setClarifyFamily,
   onSubmitClarify,
   settings = null,
 }) => {
@@ -52,8 +56,26 @@ export const ClarifyModal: React.FC<ClarifyModalProps> = ({
         <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t("identify_modal_desc")}</p>
 
         <label className="block text-xs space-y-1">
+          <span style={{ color: "var(--text-dim)" }}>{t("identify_category_label")}</span>
+          <select
+            value={clarifyFamily}
+            onChange={(e) => setClarifyFamily(e.target.value as VaultEntry["family"])}
+            className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none"
+            style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
+          >
+            <option value="secret">{t("family_secret")}</option>
+            <option value="command">{t("family_command")}</option>
+            <option value="note">{t("family_note")}</option>
+            <option value="unknown">{t("family_unknown")}</option>
+          </select>
+        </label>
+
+        <label className="block text-xs space-y-1">
           <span style={{ color: "var(--text-dim)" }}>
-            {t("name_label_secrets")} <span style={{ color: "var(--danger)" }}>*</span>
+            {t("name_label_secrets")}{" "}
+            {(clarifyFamily === "secret" || clarifyFamily === "unknown") && (
+              <span style={{ color: "var(--danger)" }}>*</span>
+            )}
           </span>
           <input
             value={clarifyName}

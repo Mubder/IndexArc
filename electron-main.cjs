@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, Tray, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, Menu, MenuItem, dialog, ipcMain, Tray, nativeImage, shell } = require("electron");
 const { fork, spawn } = require("child_process");
 const path = require("path");
 const http = require("http");
@@ -6,6 +6,36 @@ const https = require("https");
 const fs = require("fs");
 const os = require("os");
 const { execSync } = require("child_process");
+
+// ── Arabic spellchecker (Hunspell via nspell) ──
+// Chromium's built-in spellchecker has no Arabic dictionary, so we load a
+// bundled Hunspell dictionary and check Arabic words ourselves, surfacing
+// suggestions through the right-click context menu.
+let arSpell = null;
+const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
+
+function loadArabicSpellchecker() {
+  try {
+    const nspell = require("nspell");
+    const dir = path.join(getResourcePath(), "dictionaries", "ar");
+    const affPath = path.join(dir, "ar.aff");
+    const dicPath = path.join(dir, "ar.dic");
+    if (!fs.existsSync(affPath) || !fs.existsSync(dicPath)) {
+      console.log(`[spellcheck] Arabic dictionary not found at ${dir}`);
+      return;
+    }
+    const aff = fs.readFileSync(affPath);
+    const dic = fs.readFileSync(dicPath);
+    arSpell = nspell({ aff, dic });
+    console.log("[spellcheck] Arabic dictionary loaded");
+  } catch (e) {
+    console.log(`[spellcheck] Arabic dictionary load failed: ${e && e.message ? e.message : e}`);
+  }
+}
+
+function isArabicWord(word) {
+  return typeof word === "string" && ARABIC_RE.test(word);
+}
 
 function logCrash(tag, e) {
   try {
@@ -327,6 +357,19 @@ ipcMain.handle("open-external", async (_e, url) => {
   }
 });
 
+// Check a batch of Arabic words; returns the list of misspelled ones.
+ipcMain.handle("spellcheck-ar", async (_e, words) => {
+  if (!arSpell || !Array.isArray(words)) return [];
+  const bad = [];
+  const seen = new Set();
+  for (const w of words) {
+    if (typeof w !== "string" || seen.has(w)) continue;
+    seen.add(w);
+    if (isArabicWord(w) && !arSpell.correct(w)) bad.push(w);
+  }
+  return bad;
+});
+
 async function startOllamaIfNeeded() {
   try {
     const res = await fetch("http://127.0.0.1:11434/api/tags", {
@@ -463,6 +506,98 @@ function createWindow() {
   });
 
   Menu.setApplicationMenu(null);
+
+  try {
+    const ses = mainWindow.webContents.session;
+    const available = ses.availableSpellCheckerLanguages || [];
+    // Prefer English + Arabic; fall back to whatever Chromium actually ships.
+    // Note: Chromium's Hunspell spellchecker may not include Arabic on all
+    // platforms, so we filter against the available list to avoid errors.
+    const wanted = ["en-US", "ar"];
+    const langs = wanted.filter((l) => available.includes(l));
+    if (langs.length) ses.setSpellCheckerLanguages(langs);
+    console.log(`[spellcheck] enabled: ${langs.join(", ") || "none"} (available: ${available.length})`);
+  } catch (_) {
+    /* spellchecker language setup is best-effort */
+  }
+
+  // Right-click spelling suggestions + standard edit actions
+  mainWindow.webContents.on("context-menu", (_event, params) => {
+    const menu = new Menu();
+
+    // English (and other Chromium-supported languages): native suggestions.
+    for (const suggestion of params.dictionarySuggestions) {
+      menu.append(
+        new MenuItem({
+          label: suggestion,
+          click: () => mainWindow.webContents.replaceMisspelling(suggestion),
+        })
+      );
+    }
+
+    if (params.misspelledWord) {
+      if (params.dictionarySuggestions.length) {
+        menu.append(new MenuItem({ type: "separator" }));
+      } else {
+        menu.append(new MenuItem({ label: "No suggestions", enabled: false }));
+        menu.append(new MenuItem({ type: "separator" }));
+      }
+      menu.append(
+        new MenuItem({
+          label: `Add "${params.misspelledWord}" to dictionary`,
+          click: () =>
+            mainWindow.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord),
+        })
+      );
+      menu.append(new MenuItem({ type: "separator" }));
+    }
+
+    // Arabic: Chromium doesn't flag it, so check the word under the cursor
+    // ourselves. The preload selects that word on right-click and exposes it
+    // via params.selectionText.
+    if (arSpell && params.isEditable && !params.misspelledWord) {
+      const word = (params.selectionText || "").trim();
+      if (isArabicWord(word) && !arSpell.correct(word)) {
+        const suggestions = arSpell.suggest(word).slice(0, 6);
+        if (suggestions.length) {
+          for (const s of suggestions) {
+            menu.append(
+              new MenuItem({
+                label: s,
+                click: () => mainWindow.webContents.replace(s),
+              })
+            );
+          }
+        } else {
+          menu.append(new MenuItem({ label: "No suggestions", enabled: false }));
+        }
+        menu.append(new MenuItem({ type: "separator" }));
+        menu.append(
+          new MenuItem({
+            label: `Add "${word}" to dictionary`,
+            click: () => {
+              try {
+                arSpell.add(word);
+              } catch (_) {
+                /* best-effort */
+              }
+            },
+          })
+        );
+        menu.append(new MenuItem({ type: "separator" }));
+      }
+    }
+
+    const canEdit = params.isEditable;
+    menu.append(new MenuItem({ label: "Cut", role: "cut", enabled: canEdit && !!params.selectionText }));
+    menu.append(new MenuItem({ label: "Copy", role: "copy", enabled: !!params.selectionText }));
+    menu.append(new MenuItem({ label: "Paste", role: "paste", enabled: canEdit }));
+    menu.append(new MenuItem({ type: "separator" }));
+    menu.append(new MenuItem({ label: "Select All", role: "selectAll" }));
+
+    menu.popup({ window: mainWindow });
+  });
+
   pollServerAndLoad(`http://127.0.0.1:${PORT}`, mainWindow);
 
   // Closing the window sends the app to the tray instead of quitting.
@@ -491,6 +626,7 @@ ipcMain.handle("select-folder", async () => {
 
 app.on("ready", async () => {
   try {
+    loadArabicSpellchecker();
     await startOllamaIfNeeded();
     startBackendServer();
     createWindow();

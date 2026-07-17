@@ -418,6 +418,7 @@ app.patch("/api/entries/:id", async (req, res) => {
     name: req.body?.name,
     notes: req.body?.notes,
     labels: req.body?.labels,
+    family: req.body?.family,
   });
   if (!updated) return res.status(404).json({ error: "Not found" });
   res.json(updated);

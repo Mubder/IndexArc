@@ -50,6 +50,11 @@ export interface TranslationDict {
   identify_cancel_btn: string;
   identify_key_label: string;
   identify_keep_hint: string;
+  identify_category_label: string;
+  family_secret: string;
+  family_command: string;
+  family_note: string;
+  family_unknown: string;
 
   ask_placeholder: string;
   ask_header_placeholder: string;
@@ -319,6 +324,11 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     identify_cancel_btn: "Cancel",
     identify_key_label: "Key / Value",
     identify_keep_hint: "Leave empty to keep the current secret",
+    identify_category_label: "Category",
+    family_secret: "Secret",
+    family_command: "Command",
+    family_note: "Note",
+    family_unknown: "Unidentified",
 
     ask_placeholder: "Search: token name, key type, or ask a question...",
     ask_header_placeholder: "Ask: What is my Telegram token and ID?",
@@ -586,6 +596,11 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     identify_cancel_btn: "إلغاء",
     identify_key_label: "المفتاح / القيمة",
     identify_keep_hint: "اتركه فارغاً للاحتفاظ بالسر الحالي",
+    identify_category_label: "الفئة",
+    family_secret: "سر",
+    family_command: "أمر",
+    family_note: "ملاحظة",
+    family_unknown: "غير محدد",
 
     ask_placeholder: "ابحث: اسم التوكن، نوع المفتاح، أو اطرح سؤالاً...",
     ask_header_placeholder: "اسأل: ما هو توكن ومفتاح التليجرام؟",

@@ -125,6 +125,7 @@ export default function App() {
   const [clarifyType, setClarifyType] = useState("");
   const [clarifyName, setClarifyName] = useState("");
   const [clarifyValue, setClarifyValue] = useState("");
+  const [clarifyFamily, setClarifyFamily] = useState<VaultEntry["family"]>("secret");
 
   // confirm modal
   const [confirmState, setConfirmState] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void; onCancel?: () => void; confirmText?: string } | null>(null);
@@ -153,16 +154,44 @@ export default function App() {
     localStorage.setItem("indexarc-theme", theme);
   }, [theme]);
 
+  // Language / direction management (drives Arabic font via CSS)
+  useEffect(() => {
+    const isAr = settings?.ui_language === "ar";
+    document.documentElement.setAttribute("lang", isAr ? "ar" : "en");
+    document.documentElement.setAttribute("dir", isAr ? "rtl" : "ltr");
+  }, [settings?.ui_language]);
+
   const toggleTheme = useCallback(() => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
   }, []);
+
+  /** Prevent poll/refresh from wiping in-progress Settings form edits */
+  const settingsDirtyRef = useRef(false);
 
   const toggleLanguage = useCallback(() => {
     setSettings((prev) => {
       if (!prev) return prev;
       const current = prev.ui_language || "en";
       const next = current === "en" ? "ar" : "en";
-      return { ...prev, ui_language: next };
+      const updated = { ...prev, ui_language: next };
+      // Persist immediately so the background poll doesn't revert the change
+      settingsDirtyRef.current = true;
+      fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
+      })
+        .then((r) => r.json())
+        .then((saved) => {
+          settingsDirtyRef.current = false;
+          if (saved && typeof saved === "object" && (saved as Settings).ai_provider) {
+            setSettings(saved as Settings);
+          }
+        })
+        .catch(() => {
+          settingsDirtyRef.current = false;
+        });
+      return updated;
     });
   }, []);
 
@@ -189,9 +218,6 @@ export default function App() {
       console.error(e);
     }
   };
-
-  /** Prevent poll/refresh from wiping in-progress Settings form edits */
-  const settingsDirtyRef = useRef(false);
 
   const patchSettings = useCallback((patch: Partial<Settings>) => {
     settingsDirtyRef.current = true;
@@ -375,11 +401,13 @@ export default function App() {
     setClarifyType(entry.type === "unidentified" ? "" : entry.type);
     setClarifyName(entry.name === "unnamed" ? "" : entry.name);
     setClarifyValue("");
+    setClarifyFamily(entry.family || "secret");
   };
 
   const submitClarify = async () => {
     if (!clarify) return;
-    if (!clarifyName.trim()) {
+    const secretLike = clarifyFamily === "secret" || clarifyFamily === "unknown";
+    if (secretLike && !clarifyName.trim()) {
       showToast("Name is required / الاسم مطلوب", "error");
       return;
     }
@@ -387,7 +415,12 @@ export default function App() {
     const res = await fetch(`/api/entries/${clarify.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: clarifyType.trim(), name: clarifyName.trim(), value }),
+      body: JSON.stringify({
+        type: clarifyType.trim(),
+        name: clarifyName.trim(),
+        value,
+        family: clarifyFamily,
+      }),
     });
     if (res.ok) {
       setClarify(null);
@@ -1065,6 +1098,10 @@ export default function App() {
           setClarifyType={setClarifyType}
           clarifyName={clarifyName}
           setClarifyName={setClarifyName}
+          clarifyValue={clarifyValue}
+          setClarifyValue={setClarifyValue}
+          clarifyFamily={clarifyFamily}
+          setClarifyFamily={setClarifyFamily}
           onSubmitClarify={submitClarify}
           settings={settings}
         />

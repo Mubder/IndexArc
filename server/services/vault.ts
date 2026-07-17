@@ -149,7 +149,13 @@ export async function clarifyEntry(
   store: VaultStore,
   settings: AppSettings,
   id: string,
-  patch: { type?: string; name?: string; notes?: string; labels?: string[] }
+  patch: {
+    type?: string;
+    name?: string;
+    notes?: string;
+    labels?: string[];
+    family?: VaultEntry["family"];
+  }
 ): Promise<VaultEntry | null> {
   const existing = store.getEntry(id);
   if (!existing) return null;
@@ -157,14 +163,20 @@ export async function clarifyEntry(
   const type = (patch.type ?? existing.type).trim();
   const name = (patch.name ?? existing.name).trim();
   let status: EntryStatus = "saved";
-  let family = existing.family;
+  let family = patch.family ?? existing.family;
 
-  if (!type || type === "unidentified") status = "needs_type";
-  else if (!name || name === "unnamed") status = "needs_name";
-  else status = "saved";
+  const isSecretLike = family === "secret" || family === "unknown";
+  if (isSecretLike) {
+    if (!type || type === "unidentified") status = "needs_type";
+    else if (!name || name === "unnamed") status = "needs_name";
+    else status = "saved";
 
-  if (status === "saved" && (family === "unknown" || !family)) {
-    family = "secret";
+    if (status === "saved" && (family === "unknown" || !family)) {
+      family = "secret";
+    }
+  } else {
+    // notes and commands do not require a type; treat as complete
+    status = "saved";
   }
 
   const aliases = new Set([
