@@ -10,6 +10,7 @@ import {
   Copy,
   Sparkles,
   Pencil,
+  Undo2,
 } from "lucide-react";
 import { AnalyzeCandidate, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
@@ -80,9 +81,13 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [style, setStyle] = useState<RewriteStyle>("professional");
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  // Per-tab undo stack for rephrase: each entry is a previous version of the
+  // content, so the user can step back through their edits.
+  const [rephraseUndo, setRephraseUndo] = useState<Record<string, string[]>>({});
   const titleTouched = useRef<Record<string, boolean>>({});
 
   const pasteFlag = useRef<Record<string, boolean>>({});
+  const serverLoaded = useRef(false);
 
   const active = tabs.find((x) => x.id === activeId) || tabs[0];
   const b = busy[activeId] || {};
@@ -91,8 +96,67 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     !!detection &&
     (detection.families.includes("secret") || detection.families.includes("unknown"));
 
+  // Load tabs from the server (portable, survives reinstall/update). The
+  // server copy is authoritative when it has content; localStorage is a cache.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/scratchpad");
+        if (!res.ok) return;
+        const data = await res.json();
+        const serverTabs: ScratchTab[] = Array.isArray(data.tabs)
+          ? data.tabs
+              .filter((x: any) => x && typeof x === "object")
+              .map((x: any) => ({
+                id: x.id || uid(),
+                title: x.title || "Scratch",
+                content: x.content || "",
+              }))
+          : [];
+        if (cancelled) return;
+        if (serverTabs.length) {
+          // Server has the durable copy — it wins over the localStorage cache.
+          setTabs(serverTabs);
+          setActiveId(serverTabs[0].id);
+        } else {
+          // First run on this vault: migrate existing localStorage tabs up so
+          // they become durable and survive future reinstalls.
+          const local = initial.current;
+          const hasContent = local.some((x) => x.content.trim() || x.title !== "Scratch 1");
+          if (hasContent) {
+            fetch("/api/scratchpad", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ tabs: local }),
+            }).catch(() => {});
+          }
+        }
+      } catch {
+        /* offline / locked — keep localStorage tabs */
+      } finally {
+        if (!cancelled) serverLoaded.current = true;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist to localStorage (fast cache) + the server (durable) on change.
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
+    if (!serverLoaded.current) return;
+    const handle = setTimeout(() => {
+      fetch("/api/scratchpad", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tabs }),
+      }).catch(() => {
+        /* best-effort; localStorage still holds the copy */
+      });
+    }, 600);
+    return () => clearTimeout(handle);
   }, [tabs]);
 
   const setStatus = useCallback((msg: string) => {
@@ -171,6 +235,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       setTabs([fresh]);
       setActiveId(fresh.id);
       setDetections({});
+      setRephraseUndo({});
       titleTouched.current = {};
       return;
     }
@@ -182,6 +247,11 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     delete titleTouched.current[id];
     setDetections((d) => {
       const n = { ...d };
+      delete n[id];
+      return n;
+    });
+    setRephraseUndo((u) => {
+      const n = { ...u };
       delete n[id];
       return n;
     });
@@ -255,7 +325,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   };
 
   const handleRephrase = async () => {
-    const text = active.content.trim();
+    const original = active.content;
+    const text = original.trim();
     if (!text) return;
     setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], rewrite: true } }));
     setStatus(t("scratchpad_rewriting"));
@@ -267,6 +338,12 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       });
       const data = await res.json();
       if (res.ok && data.rewritten) {
+        // Push the pre-rephrase text onto this tab's undo stack so the change
+        // can be reverted (and re-reverted through earlier edits).
+        setRephraseUndo((prev) => ({
+          ...prev,
+          [activeId]: [...(prev[activeId] || []), original],
+        }));
         setContent(activeId, data.rewritten);
         setStatus(t("scratchpad_rephrased"));
         analyze(activeId, data.rewritten);
@@ -278,6 +355,19 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     } finally {
       setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], rewrite: false } }));
     }
+  };
+
+  const handleUndoRephrase = () => {
+    const stack = rephraseUndo[activeId] || [];
+    if (stack.length === 0) return;
+    const previous = stack[stack.length - 1];
+    setRephraseUndo((prev) => ({
+      ...prev,
+      [activeId]: stack.slice(0, -1),
+    }));
+    setContent(activeId, previous);
+    setStatus(t("scratchpad_rephrase_undone"));
+    analyze(activeId, previous);
   };
 
   const handleCopy = async () => {
@@ -407,7 +497,43 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
             </button>
           )}
 
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
+            style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+          >
+            <Copy className="w-3.5 h-3.5" />
+            {copied ? t("scratchpad_copied") : t("scratchpad_copy")}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setContent(activeId, "")}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
+            style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            {t("scratchpad_clear")}
+          </button>
+
+          <div className="flex-1" />
+
+          {/* Rephrase controls, moved to the right side. */}
           <div className="flex items-center gap-1">
+            {(rephraseUndo[activeId]?.length ?? 0) > 0 && (
+              <button
+                type="button"
+                onClick={handleUndoRephrase}
+                disabled={b.rewrite}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
+                style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+                title={t("scratchpad_rephrase_undo")}
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+                {t("scratchpad_rephrase_undo")}
+              </button>
+            )}
             <select
               value={style}
               onChange={(e) => setStyle(e.target.value as RewriteStyle)}
@@ -431,39 +557,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               {b.rewrite ? t("scratchpad_rewriting") : t("scratchpad_rephrase")}
             </button>
           </div>
-
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
-            style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
-          >
-            <Copy className="w-3.5 h-3.5" />
-            {copied ? t("scratchpad_copied") : t("scratchpad_copy")}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setContent(activeId, "")}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
-            style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            {t("scratchpad_clear")}
-          </button>
-
-          <div className="flex-1" />
-
-          {detection ? (
-            <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
-              {t("scratchpad_ai_detected")}: {detection.families.join(", ")}
-              {detection.provider ? ` · ${detection.provider}` : ""}
-            </span>
-          ) : (
-            <span className="text-[10px]" style={{ color: "var(--text-dim)" }}>
-              {t("scratchpad_no_detection")}
-            </span>
-          )}
         </div>
 
         {statusMsg && (
@@ -488,6 +581,18 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           }}
           placeholder={t("scratchpad_placeholder")}
         />
+
+        {/* Detection status, moved to underneath the text box. */}
+        {detection ? (
+          <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+            {t("scratchpad_ai_detected")}: {detection.families.join(", ")}
+            {detection.provider ? ` · ${detection.provider}` : ""}
+          </span>
+        ) : (
+          <span className="text-[10px]" style={{ color: "var(--text-dim)" }}>
+            {t("scratchpad_no_detection")}
+          </span>
+        )}
       </div>
     </div>
   );

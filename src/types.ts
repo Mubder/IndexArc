@@ -42,6 +42,7 @@ export interface SystemStatus {
     total_commands: number;
     total_notes: number;
     total_secrets: number;
+    total_unknown: number;
   };
 }
 
@@ -67,7 +68,7 @@ export interface Settings {
   ui_language: "en" | "ar";
 }
 
-export type Tab = "home" | "paste" | "scratchpad" | "folders" | "library" | "ask" | "settings" | "logs";
+export type Tab = "home" | "scratchpad" | "folders" | "library" | "ask" | "settings";
 
 export type LibraryFilter = "all" | "secret" | "command" | "note" | "unknown" | "attention";
 

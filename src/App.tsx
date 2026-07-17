@@ -2,11 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Layers,
   Search,
-  Plus,
   Server,
   Sparkles,
   Settings as SettingsIcon,
-  Terminal,
   StickyNote,
   Folder,
   KeyRound,
@@ -36,13 +34,11 @@ import { getTranslation } from "./utils/i18n";
 
 // Subcomponents
 import { HomeTab } from "./components/HomeTab";
-import { AnalyzeTab } from "./components/AnalyzeTab";
 import { ScratchpadTab } from "./components/ScratchpadTab";
 import { FoldersTab } from "./components/FoldersTab";
 import { AskTab } from "./components/AskTab";
 import { LibraryTab } from "./components/LibraryTab";
 import { SettingsTab } from "./components/SettingsTab";
-import { LogsTab } from "./components/LogsTab";
 import { LockScreen } from "./components/LockScreen";
 import { SetupChecker } from "./components/SetupChecker";
 
@@ -54,7 +50,7 @@ import { ConfirmModal } from "./components/ConfirmModal";
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => {
     const saved = localStorage.getItem("indexarc-tab");
-    return (saved === "home" || saved === "paste" || saved === "scratchpad" || saved === "folders" || saved === "library" || saved === "ask" || saved === "settings" || saved === "logs")
+    return (saved === "home" || saved === "scratchpad" || saved === "folders" || saved === "library" || saved === "ask" || saved === "settings")
       ? (saved as Tab)
       : "home";
   });
@@ -108,7 +104,7 @@ export default function App() {
   // folder scan
   const [folderPath, setFolderPath] = useState("");
   const [folderWatch, setFolderWatch] = useState(true);
-  const [folderUseAi, setFolderUseAi] = useState(false);
+  const [folderUseAi, setFolderUseAi] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [scanSession, setScanSession] = useState<FolderScanSession | null>(null);
   const [watchedFolders, setWatchedFolders] = useState<WatchedFolderRow[]>([]);
@@ -291,7 +287,6 @@ export default function App() {
       const sel: Record<string, boolean> = {};
       for (const c of data.candidates || []) sel[c.temp_id] = true;
       setSelected(sel);
-      setTab("paste");
     } catch (e: any) {
       showToast(e.message, "error");
     } finally {
@@ -606,18 +601,16 @@ export default function App() {
   const nav: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = useMemo(
     () => [
       { id: "home", label: t("tab_home"), icon: <Layers className="w-4 h-4" />, badge: attention.length || undefined },
-      { id: "paste", label: t("tab_paste"), icon: <Plus className="w-4 h-4" /> },
       { id: "scratchpad", label: t("tab_scratchpad"), icon: <StickyNote className="w-4 h-4" /> },
+      { id: "ask", label: t("tab_ask"), icon: <Search className="w-4 h-4" /> },
+      { id: "library", label: t("tab_library"), icon: <KeyRound className="w-4 h-4" /> },
       {
         id: "folders",
         label: t("tab_folders"),
         icon: <Folder className="w-4 h-4" />,
         badge: scanSession?.status === "review" ? scanSession.summary.candidates_needs_review || undefined : undefined,
       },
-      { id: "ask", label: t("tab_ask"), icon: <Search className="w-4 h-4" /> },
-      { id: "library", label: t("tab_library"), icon: <KeyRound className="w-4 h-4" /> },
       { id: "settings", label: t("tab_settings"), icon: <SettingsIcon className="w-4 h-4" /> },
-      { id: "logs", label: t("tab_logs"), icon: <Terminal className="w-4 h-4" /> },
     ],
     [attention.length, scanSession, t]
   );
@@ -737,16 +730,22 @@ export default function App() {
               Vault Overview
             </div>
             <div className="grid grid-cols-2 gap-1.5">
-              {[
-                { val: status?.stats.total_saved ?? 0, lbl: "Saved" },
-                { val: status?.stats.needs_attention ?? 0, lbl: "Pending" },
-                { val: status?.stats.total_secrets ?? 0, lbl: "Secrets" },
-                { val: status?.stats.total_commands ?? 0, lbl: "Commands" },
-              ].map((s) => (
-                <div
+              {([
+                { val: status?.stats.total_saved ?? 0, lbl: "Saved", filter: "all" },
+                { val: status?.stats.needs_attention ?? 0, lbl: "Pending", filter: "attention" },
+                { val: status?.stats.total_secrets ?? 0, lbl: "Secrets", filter: "secret" },
+                { val: status?.stats.total_commands ?? 0, lbl: "Commands", filter: "command" },
+              ] as { val: number; lbl: string; filter: LibraryFilter }[]).map((s) => (
+                <button
                   key={s.lbl}
-                  className="text-center py-1.5 rounded-lg border"
+                  type="button"
+                  onClick={() => {
+                    setLibraryFilter(s.filter);
+                    setTab("library");
+                  }}
+                  className="text-center py-1.5 rounded-lg border transition-all hover:brightness-125 cursor-pointer"
                   style={{ background: "var(--accent-bg)", borderColor: "rgba(37, 99, 235, 0.06)" }}
+                  title={`Open ${s.lbl} in Library`}
                 >
                   <div
                     className="text-lg font-bold"
@@ -761,7 +760,7 @@ export default function App() {
                   <div className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
                     {s.lbl}
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -922,7 +921,7 @@ export default function App() {
 
               {/* New Entry */}
               <button
-                onClick={() => setTab("paste")}
+                onClick={() => setTab("home")}
                 className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
                 style={{
                   background: "linear-gradient(135deg, var(--accent), #1d4ed8)",
@@ -949,26 +948,16 @@ export default function App() {
                 setPaste={setPaste}
                 onAnalyze={handleAnalyze}
                 analyzing={analyzing}
-                attention={attention}
-                entries={entries}
-                onOpenClarify={openClarify}
-                onDeleteEntry={deleteEntry}
-                settings={settings}
-              />
-            )}
-
-            {tab === "paste" && (
-              <AnalyzeTab
-                paste={paste}
-                setPaste={setPaste}
-                onAnalyze={handleAnalyze}
-                analyzing={analyzing}
                 providerUsed={providerUsed}
                 candidates={candidates}
                 selected={selected}
                 setSelected={setSelected}
                 onSaveSelected={handleSaveSelected}
                 onUpdateCandidate={updateCandidate}
+                attention={attention}
+                entries={entries}
+                onOpenClarify={openClarify}
+                onDeleteEntry={deleteEntry}
                 settings={settings}
               />
             )}
@@ -1043,11 +1032,8 @@ export default function App() {
                 onSaveSettings={saveSettings}
                 vaultStatus={vaultStatus}
                 onRefreshVaultStatus={fetchVaultStatus}
+                logs={logs}
               />
-            )}
-
-            {tab === "logs" && (
-              <LogsTab logs={logs} />
             )}
           </main>
         </div>

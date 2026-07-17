@@ -1,5 +1,5 @@
 import React from "react";
-import { Server, Sparkles, Shield, Lock, Unlock } from "lucide-react";
+import { Server, Sparkles, Shield, Lock, Unlock, LifeBuoy, Save, RotateCcw, HardDriveDownload, Terminal } from "lucide-react";
 import { Settings, SystemStatus } from "../types";
 import { getTranslation } from "../utils/i18n";
 
@@ -11,6 +11,7 @@ interface SettingsTabProps {
   onSaveSettings: () => Promise<void>;
   vaultStatus: { is_locked: boolean; encryption_enabled: boolean } | null;
   onRefreshVaultStatus: () => void;
+  logs: { time: string; type: string; message: string }[];
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
@@ -21,11 +22,91 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   onSaveSettings,
   vaultStatus,
   onRefreshVaultStatus,
+  logs,
 }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
   const [secPassword, setSecPassword] = React.useState("");
   const [secError, setSecError] = React.useState("");
+
+  type EmergencySnapshot = {
+    name: string;
+    size: number;
+    created_at: string;
+    encrypted: boolean;
+    locations: string[];
+  };
+  const [snapshots, setSnapshots] = React.useState<EmergencySnapshot[]>([]);
+  const [emgBusy, setEmgBusy] = React.useState(false);
+  const [emgMsg, setEmgMsg] = React.useState("");
+  const [confirmRestore, setConfirmRestore] = React.useState<string | null>(null);
+
+  const loadSnapshots = React.useCallback(async () => {
+    try {
+      const res = await fetch("/api/emergency");
+      const data = await res.json();
+      setSnapshots(Array.isArray(data.snapshots) ? data.snapshots : []);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  React.useEffect(() => {
+    loadSnapshots();
+  }, [loadSnapshots]);
+
+  const handleCreateSnapshot = async () => {
+    setEmgBusy(true);
+    setEmgMsg("");
+    try {
+      const res = await fetch("/api/emergency/create", { method: "POST" });
+      const data = await res.json();
+      setEmgMsg(
+        data.ok
+          ? t("emergency_created")
+          : t("emergency_nochange")
+      );
+      await loadSnapshots();
+    } catch (err: any) {
+      setEmgMsg(err.message || "Failed");
+    } finally {
+      setEmgBusy(false);
+    }
+  };
+
+  const handleRestoreSnapshot = async (name: string) => {
+    setEmgBusy(true);
+    setEmgMsg("");
+    try {
+      const res = await fetch("/api/emergency/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setEmgMsg(t("emergency_restored"));
+        onRefreshVaultStatus();
+        await loadSnapshots();
+        setTimeout(() => window.location.reload(), 1200);
+      } else {
+        setEmgMsg(data.error || "Restore failed");
+      }
+    } catch (err: any) {
+      setEmgMsg(err.message || "Failed");
+    } finally {
+      setEmgBusy(false);
+      setConfirmRestore(null);
+    }
+  };
+
+  const fmtDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleString();
+    } catch {
+      return iso;
+    }
+  };
 
   const handleSetupPassword = async () => {
     if (!secPassword || secPassword.length < 4) {
@@ -569,9 +650,137 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         )}
       </div>
 
+      <div className="space-y-4 rounded-xl p-5 mt-4" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+        <h3 className="text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5 pb-2" style={{ color: "var(--accent-bright)", borderBottom: "1px solid var(--border)" }}>
+          <LifeBuoy className="w-4 h-4" /> {t("emergency_title")}
+        </h3>
+        <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-dim)" }}>
+          {t("emergency_desc")}
+        </p>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={emgBusy}
+            onClick={handleCreateSnapshot}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 disabled:opacity-50"
+            style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
+          >
+            <Save className="w-3.5 h-3.5" /> {t("emergency_create_btn")}
+          </button>
+          <button
+            type="button"
+            disabled={emgBusy}
+            onClick={loadSnapshots}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 disabled:opacity-50"
+            style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+          >
+            <RotateCcw className="w-3.5 h-3.5" /> {t("emergency_refresh_btn")}
+          </button>
+        </div>
+
+        {emgMsg && (
+          <p className="text-[10px] font-mono" style={{ color: "var(--emerald)" }}>{emgMsg}</p>
+        )}
+
+        <div className="space-y-1.5 max-h-64 overflow-y-auto">
+          {snapshots.length === 0 && (
+            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+              {t("emergency_empty")}
+            </p>
+          )}
+          {snapshots.map((s) => (
+            <div
+              key={s.name}
+              className="flex items-center justify-between gap-2 rounded-lg px-3 py-2"
+              style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}
+            >
+              <div className="min-w-0">
+                <div className="text-[11px] flex items-center gap-1.5" style={{ color: "var(--text)" }}>
+                  <HardDriveDownload className="w-3 h-3 shrink-0" style={{ color: "var(--cyan)" }} />
+                  <span className="truncate" style={{ fontFamily: "var(--font-mono)" }}>{fmtDate(s.created_at)}</span>
+                  {s.encrypted && (
+                    <Lock className="w-3 h-3 shrink-0" style={{ color: "var(--emerald)" }} />
+                  )}
+                </div>
+                <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                  {(s.size / 1024).toFixed(1)} KB · {s.locations.length} {t("emergency_copies")}
+                </div>
+              </div>
+              {confirmRestore === s.name ? (
+                <div className="flex gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    disabled={emgBusy}
+                    onClick={() => handleRestoreSnapshot(s.name)}
+                    className="px-2 py-1 rounded text-[10px] font-medium disabled:opacity-50"
+                    style={{ background: "var(--danger-bg)", color: "var(--danger)", border: "1px solid rgba(248, 113, 113, 0.2)" }}
+                  >
+                    {t("emergency_confirm_restore")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmRestore(null)}
+                    className="px-2 py-1 rounded text-[10px] font-medium"
+                    style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+                  >
+                    {t("identify_cancel_btn")}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={emgBusy}
+                  onClick={() => setConfirmRestore(s.name)}
+                  className="px-2.5 py-1 rounded text-[10px] font-medium shrink-0 disabled:opacity-50"
+                  style={{ background: "transparent", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
+                >
+                  {t("emergency_restore_btn")}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
       <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
         {t("vault_data_location")}
       </p>
+
+      <div className="space-y-3 pt-2" style={{ borderTop: "1px solid var(--border)" }}>
+        <div className="flex items-center justify-between gap-2 pt-3">
+          <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--text)" }}>
+            <Terminal className="w-4 h-4" style={{ color: "var(--accent-bright)" }} /> {t("tab_logs")}
+            <span className="text-[10px] font-normal px-1.5 py-0.5 rounded-full" style={{ background: "var(--bg-active)", color: "var(--text-muted)" }}>
+              {logs.length}
+            </span>
+          </h2>
+          <button
+            type="button"
+            disabled={!logs.length}
+            onClick={() => {
+              const text = logs.map((l) => `${l.time}\t${l.type}\t${l.message}`).join("\n");
+              navigator.clipboard?.writeText(text);
+            }}
+            className="px-2.5 py-1 rounded-lg text-[10px] font-medium disabled:opacity-40"
+            style={{ background: "transparent", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
+          >
+            {t("logs_copy_all")}
+          </button>
+        </div>
+        <div className="rounded-xl p-4 font-mono text-[11px] h-[60vh] min-h-[320px] overflow-y-auto" style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}>
+          {!logs.length && (
+            <p className="text-center py-6" style={{ color: "var(--text-muted)" }}>No logs yet</p>
+          )}
+          {logs.slice().reverse().map((l, i) => (
+            <div key={i} className="flex gap-3 py-1 border-b items-start" style={{ borderColor: "var(--border)" }}>
+              <span className="shrink-0 whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{l.time}</span>
+              <span className="shrink-0 w-24" style={{ color: "var(--accent-bright)" }}>{l.type}</span>
+              <span className="break-all whitespace-pre-wrap" style={{ color: "var(--text-dim)" }}>{l.message}</span>
+            </div>
+          ))}
+        </div>
+      </div>
 
       <button
         type="button"

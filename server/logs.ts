@@ -5,11 +5,12 @@ export interface SystemLog {
 }
 
 const systemLogs: SystemLog[] = [];
-const MAX = 300;
+const MAX = 2000;
 
 export function addLog(type: string, message: string) {
+  const now = new Date();
   systemLogs.push({
-    time: new Date().toLocaleTimeString(),
+    time: `${now.toLocaleDateString()} ${now.toLocaleTimeString()}`,
     type,
     message,
   });

@@ -1,4 +1,5 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { randomUUID } from "crypto";
 import type { PortablePaths } from "./paths.js";
@@ -285,7 +286,10 @@ export class VaultStore {
       needs_attention: needs.length,
       total_commands: entries.filter((e) => e.family === "command").length,
       total_notes: entries.filter((e) => e.family === "note").length,
-      total_secrets: entries.filter((e) => e.family === "secret" || e.family === "unknown").length,
+      // Count only the "secret" family so this matches the Library "Secrets &
+      // Keys" filter exactly (unknown-family entries live under "Unidentified").
+      total_secrets: entries.filter((e) => e.family === "secret").length,
+      total_unknown: entries.filter((e) => e.family === "unknown").length,
       total: entries.length,
     };
   }
@@ -352,6 +356,42 @@ export class VaultStore {
     return this.paths.root;
   }
 
+  // --- Scratchpad tabs (portable, survives reinstall/update) ---
+  getScratchpad(): any[] {
+    return readJson<{ tabs: any[] }>(this.paths.scratchpadFile, { tabs: [] }).tabs;
+  }
+
+  saveScratchpad(tabs: any[], opts: { force?: boolean } = {}): any[] {
+    const safe = Array.isArray(tabs) ? tabs : [];
+
+    // DATA-LOSS GUARD: never let an empty/partial save silently wipe existing
+    // tabs. If the incoming set is empty but a non-empty file already exists,
+    // refuse (unless explicitly forced, e.g. the user really deleted all tabs).
+    if (safe.length === 0 && !opts.force) {
+      const existing = this.getScratchpad();
+      if (existing.length > 0) {
+        return existing;
+      }
+    }
+
+    // Keep a rolling one-step-back copy before every overwrite, so even a
+    // forced/mistaken save can be undone.
+    try {
+      if (fs.existsSync(this.paths.scratchpadFile)) {
+        const prev = fs.readFileSync(this.paths.scratchpadFile);
+        if (prev.length > 0) {
+          fs.writeFileSync(this.paths.scratchpadFile + ".prev", prev);
+        }
+      }
+    } catch {}
+
+    atomicWrite(
+      this.paths.scratchpadFile,
+      JSON.stringify({ version: 1, tabs: safe }, null, 2)
+    );
+    return safe;
+  }
+
   /**
    * Copy the vault (and vectors) files verbatim into backups/ with a timestamp.
    * Copies raw on-disk bytes, so an encrypted vault stays encrypted in the
@@ -390,15 +430,21 @@ export class VaultStore {
       const dest = path.join(dir, `vault-${stamp}.json`);
       fs.writeFileSync(dest, raw);
 
-      // Also back up vectors alongside (best effort, same stamp).
-      try {
-        if (fs.existsSync(this.paths.vectorsFile)) {
-          const v = fs.readFileSync(this.paths.vectorsFile);
-          if (v.length > 0) {
-            fs.writeFileSync(path.join(dir, `vectors-${stamp}.json`), v);
+      // Also back up companion files alongside (best effort, same stamp) so a
+      // restore brings back everything, not just the secrets.
+      const companion = (file: string, prefix: string) => {
+        try {
+          if (fs.existsSync(file)) {
+            const buf = fs.readFileSync(file);
+            if (buf.length > 0) {
+              fs.writeFileSync(path.join(dir, `${prefix}-${stamp}.json`), buf);
+            }
           }
-        }
-      } catch {}
+        } catch {}
+      };
+      companion(this.paths.vectorsFile, "vectors");
+      companion(this.paths.scratchpadFile, "scratchpad");
+      companion(this.paths.settingsFile, "settings");
 
       this.pruneBackups(keep);
       return dest;
@@ -426,6 +472,8 @@ export class VaultStore {
       };
       prune("vault-");
       prune("vectors-");
+      prune("scratchpad-");
+      prune("settings-");
     } catch {}
   }
 
@@ -527,5 +575,226 @@ export class VaultStore {
     };
     this.writeSessions(sessions);
     return sessions[idx];
+  }
+
+  // ==========================================================================
+  // EMERGENCY PLAN
+  // --------------------------------------------------------------------------
+  // A self-contained, single-file snapshot of EVERYTHING that matters (vault,
+  // vectors, scratchpad, settings) bundled together as raw on-disk bytes. The
+  // vault stays encrypted if it was encrypted — we never decrypt for a backup.
+  //
+  // Snapshots are written to MULTIPLE stable, redundant locations that survive
+  // an uninstall, a moved/USB exe, and a fresh reinstall:
+  //   1) <root>/backups/emergency         (portable — travels with the folder)
+  //   2) %APPDATA%/IndexArc/emergency     (machine — survives folder deletion)
+  //   3) ~/.IndexArc/emergency            (home — last-ditch fallback)
+  // Each snapshot has the same filename in every location, so a restore can pull
+  // from whichever survived.
+  // ==========================================================================
+
+  private emergencyDirs(): string[] {
+    const dirs = [
+      path.join(this.paths.backupsDir, "emergency"),
+      path.join(process.env.APPDATA || os.homedir(), "IndexArc", "emergency"),
+      path.join(os.homedir(), ".IndexArc", "emergency"),
+    ];
+    const uniq: string[] = [];
+    for (const d of dirs) {
+      const r = path.resolve(d);
+      if (!uniq.includes(r)) uniq.push(r);
+    }
+    return uniq;
+  }
+
+  private buildSnapshot(): { payload: string; encrypted: boolean } {
+    const readB64 = (file: string): string | null => {
+      try {
+        if (fs.existsSync(file)) {
+          const buf = fs.readFileSync(file);
+          if (buf.length > 0) return buf.toString("base64");
+        }
+      } catch {}
+      return null;
+    };
+    const snapshot = {
+      format: "indexarc-emergency",
+      version: 1 as const,
+      created_at: new Date().toISOString(),
+      encrypted: this.isEncryptionEnabled(),
+      files: {
+        vault: readB64(this.paths.vaultFile),
+        vectors: readB64(this.paths.vectorsFile),
+        scratchpad: readB64(this.paths.scratchpadFile),
+        settings: readB64(this.paths.settingsFile),
+      },
+    };
+    return { payload: JSON.stringify(snapshot), encrypted: snapshot.encrypted };
+  }
+
+  /**
+   * Write a fresh emergency snapshot to every redundant location.
+   * Skips if nothing changed since the newest existing snapshot. Keeps the
+   * most recent `keep` per location. Returns the snapshot filename (or null).
+   */
+  createEmergencySnapshot(keep = 15): string | null {
+    try {
+      if (!fs.existsSync(this.paths.vaultFile)) return null;
+      const { payload } = this.buildSnapshot();
+
+      const stamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")
+        .replace("T", "_")
+        .replace("Z", "");
+      const name = `indexarc-emergency-${stamp}.iabak`;
+
+      let wroteAny = false;
+      for (const dir of this.emergencyDirs()) {
+        try {
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+          // Skip if identical to the newest snapshot already here.
+          const existing = fs
+            .readdirSync(dir)
+            .filter((f) => f.endsWith(".iabak"))
+            .sort();
+          const newest = existing[existing.length - 1];
+          if (newest) {
+            try {
+              const prev = fs.readFileSync(path.join(dir, newest), "utf-8");
+              const prevData = JSON.parse(prev);
+              const curData = JSON.parse(payload);
+              // Compare file contents only (ignore created_at).
+              if (JSON.stringify(prevData.files) === JSON.stringify(curData.files)) {
+                continue;
+              }
+            } catch {}
+          }
+
+          fs.writeFileSync(path.join(dir, name), payload, "utf-8");
+          wroteAny = true;
+
+          // Prune to keep newest N.
+          const after = fs
+            .readdirSync(dir)
+            .filter((f) => f.endsWith(".iabak"))
+            .sort();
+          while (after.length > keep) {
+            const old = after.shift();
+            if (old) {
+              try {
+                fs.unlinkSync(path.join(dir, old));
+              } catch {}
+            }
+          }
+        } catch {}
+      }
+      return wroteAny ? name : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * List all emergency snapshots across every location, newest first,
+   * de-duplicated by filename (same snapshot may exist in several dirs).
+   */
+  listEmergencySnapshots(): {
+    name: string;
+    size: number;
+    created_at: string;
+    encrypted: boolean;
+    locations: string[];
+  }[] {
+    const byName = new Map<
+      string,
+      { name: string; size: number; created_at: string; encrypted: boolean; locations: string[] }
+    >();
+    for (const dir of this.emergencyDirs()) {
+      try {
+        if (!fs.existsSync(dir)) continue;
+        for (const f of fs.readdirSync(dir)) {
+          if (!f.endsWith(".iabak")) continue;
+          const full = path.join(dir, f);
+          const st = fs.statSync(full);
+          let created_at = st.mtime.toISOString();
+          let encrypted = false;
+          try {
+            const parsed = JSON.parse(fs.readFileSync(full, "utf-8"));
+            if (parsed?.created_at) created_at = parsed.created_at;
+            encrypted = !!parsed?.encrypted;
+          } catch {}
+          const prev = byName.get(f);
+          if (prev) {
+            prev.locations.push(dir);
+          } else {
+            byName.set(f, {
+              name: f,
+              size: st.size,
+              created_at,
+              encrypted,
+              locations: [dir],
+            });
+          }
+        }
+      } catch {}
+    }
+    return [...byName.values()].sort((a, b) => b.name.localeCompare(a.name));
+  }
+
+  /**
+   * Restore from a named emergency snapshot. Before overwriting, the CURRENT
+   * state is snapshotted first (so a restore is itself undoable). Returns true
+   * on success.
+   */
+  restoreEmergencySnapshot(name: string): boolean {
+    // Locate the file in any location.
+    let payload: string | null = null;
+    for (const dir of this.emergencyDirs()) {
+      const full = path.join(dir, name);
+      try {
+        if (fs.existsSync(full)) {
+          payload = fs.readFileSync(full, "utf-8");
+          break;
+        }
+      } catch {}
+    }
+    if (!payload) return false;
+
+    let snapshot: any;
+    try {
+      snapshot = JSON.parse(payload);
+    } catch {
+      return false;
+    }
+    if (snapshot?.format !== "indexarc-emergency" || !snapshot.files) return false;
+
+    // Safety net: snapshot the current state before we clobber it.
+    try {
+      this.createEmergencySnapshot();
+    } catch {}
+
+    const writeB64 = (file: string, b64: string | null) => {
+      if (b64 == null) return;
+      try {
+        const buf = Buffer.from(b64, "base64");
+        const dir = path.dirname(file);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.tmp`);
+        fs.writeFileSync(tmp, buf);
+        fs.renameSync(tmp, file);
+      } catch {}
+    };
+
+    writeB64(this.paths.vaultFile, snapshot.files.vault);
+    writeB64(this.paths.vectorsFile, snapshot.files.vectors);
+    writeB64(this.paths.scratchpadFile, snapshot.files.scratchpad);
+    writeB64(this.paths.settingsFile, snapshot.files.settings);
+
+    // The restored vault may be encrypted; drop any in-memory key so the user
+    // is prompted to unlock with the restored vault's password.
+    this.encryptionKey = null;
+    return true;
   }
 }

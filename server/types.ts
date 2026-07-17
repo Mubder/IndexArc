@@ -200,5 +200,6 @@ export interface SystemStatus {
     total_commands: number;
     total_notes: number;
     total_secrets: number;
+    total_unknown: number;
   };
 }

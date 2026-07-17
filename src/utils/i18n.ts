@@ -11,6 +11,7 @@ export interface TranslationDict {
   tab_library: string;
   tab_settings: string;
   tab_logs: string;
+  logs_copy_all: string;
 
   app_title: string;
   app_subtitle: string;
@@ -129,6 +130,17 @@ export interface TranslationDict {
   gemini_llm_label: string;
   gemini_embed_label: string;
   vault_data_location: string;
+  emergency_title: string;
+  emergency_desc: string;
+  emergency_create_btn: string;
+  emergency_refresh_btn: string;
+  emergency_restore_btn: string;
+  emergency_confirm_restore: string;
+  emergency_created: string;
+  emergency_nochange: string;
+  emergency_restored: string;
+  emergency_empty: string;
+  emergency_copies: string;
   save_settings_btn: string;
   ui_language_label: string;
   ui_language_desc: string;
@@ -218,6 +230,8 @@ export interface TranslationDict {
   scratchpad_saved_ok: string;
   scratchpad_save_err: string;
   scratchpad_rephrase: string;
+  scratchpad_rephrase_undo: string;
+  scratchpad_rephrase_undone: string;
   scratchpad_rewriting: string;
   scratchpad_rephrased: string;
   scratchpad_rewrite_err: string;
@@ -266,6 +280,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     tab_library: "Library",
     tab_settings: "Settings",
     tab_logs: "Logs",
+    logs_copy_all: "Copy all",
 
     app_title: "IndexArc",
     app_subtitle: "Paste · Extract · Name · Ask · Single-folder portable secure vault",
@@ -384,6 +399,17 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     gemini_llm_label: "Gemini LLM",
     gemini_embed_label: "Gemini embed",
     vault_data_location: "All vault data lives in data/ and settings in config/ next to the app — copy the whole folder to a USB drive and run anywhere.",
+    emergency_title: "Emergency Plan",
+    emergency_desc: "Self-contained snapshots of everything (vault, notes, settings) are saved automatically to several safe locations that survive uninstalls, updates, and moving the app folder. Restore any snapshot below if data is ever lost.",
+    emergency_create_btn: "Create snapshot now",
+    emergency_refresh_btn: "Refresh",
+    emergency_restore_btn: "Restore",
+    emergency_confirm_restore: "Confirm restore",
+    emergency_created: "Snapshot created and copied to all safe locations.",
+    emergency_nochange: "No changes since the last snapshot.",
+    emergency_restored: "Restored. Reloading...",
+    emergency_empty: "No snapshots yet — one is created automatically on startup.",
+    emergency_copies: "safe copies",
     save_settings_btn: "Save settings",
     ui_language_label: "UI Language",
     ui_language_desc: "Select the display language for the application interface.",
@@ -473,6 +499,8 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_saved_ok: "Saved to vault",
     scratchpad_save_err: "Save failed",
     scratchpad_rephrase: "Rephrase",
+    scratchpad_rephrase_undo: "Undo",
+    scratchpad_rephrase_undone: "Reverted to previous text",
     scratchpad_rewriting: "Rephrasing…",
     scratchpad_rephrased: "Rephrased",
     scratchpad_rewrite_err: "Rephrase failed",
@@ -519,6 +547,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     tab_library: "المكتبة",
     tab_settings: "الإعدادات",
     tab_logs: "السجلات",
+    logs_copy_all: "نسخ الكل",
 
     app_title: "IndexArc",
     app_subtitle: "لصق · استخراج · تسمية · سؤال · خزنة محمولة آمنة لمجلد فردي",
@@ -637,6 +666,17 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     gemini_llm_label: "نموذج جميناي (LLM)",
     gemini_embed_label: "نموذج المتجهات (Embed)",
     vault_data_location: "تخزن جميع بيانات الخزنة في المجلد data/ والإعدادات في المجلد config/ بجانب التطبيق — انسخ المجلد بالكامل لفلاش USB وشغله في أي مكان.",
+    emergency_title: "خطة الطوارئ",
+    emergency_desc: "يتم حفظ نسخ احتياطية كاملة ومستقلة لكل شيء (الخزنة، الملاحظات، الإعدادات) تلقائياً في عدة مواقع آمنة تبقى رغم إلغاء التثبيت والتحديثات ونقل مجلد التطبيق. استعد أي نسخة أدناه إذا فُقدت البيانات.",
+    emergency_create_btn: "إنشاء نسخة الآن",
+    emergency_refresh_btn: "تحديث",
+    emergency_restore_btn: "استعادة",
+    emergency_confirm_restore: "تأكيد الاستعادة",
+    emergency_created: "تم إنشاء النسخة ونسخها إلى جميع المواقع الآمنة.",
+    emergency_nochange: "لا تغييرات منذ آخر نسخة.",
+    emergency_restored: "تمت الاستعادة. جارٍ إعادة التحميل...",
+    emergency_empty: "لا توجد نسخ بعد — تُنشأ واحدة تلقائياً عند بدء التشغيل.",
+    emergency_copies: "نسخ آمنة",
     save_settings_btn: "حفظ الإعدادات",
     ui_language_label: "لغة الواجهة",
     ui_language_desc: "اختر لغة عرض واجهة المستخدم الخاصة بالتطبيق.",
@@ -726,6 +766,8 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_saved_ok: "تم الحفظ في الخزنة",
     scratchpad_save_err: "فشل الحفظ",
     scratchpad_rephrase: "إعادة صياغة",
+    scratchpad_rephrase_undo: "تراجع",
+    scratchpad_rephrase_undone: "تم الرجوع إلى النص السابق",
     scratchpad_rewriting: "جاري إعادة الصياغة…",
     scratchpad_rephrased: "تمت إعادة الصياغة",
     scratchpad_rewrite_err: "فشلت إعادة الصياغة",

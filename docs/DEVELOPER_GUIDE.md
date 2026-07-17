@@ -166,15 +166,13 @@ State lives primarily in **`App.tsx`**, the shell/orchestrator (~1100 lines). It
 
 | File | Role |
 |------|------|
-| `HomeTab.tsx` | Quick-paste + "Needs Review" inbox + recent entries. |
-| `AnalyzeTab.tsx` | Multi-extract review: candidate cards, type/name editors, Save/Park. |
+| `HomeTab.tsx` | Quick-paste + inline multi-extract candidate review (type/name editors, Save/Park) + "Needs Review" inbox + recent entries. |
 | `ScratchpadTab.tsx` | Multi-tab notepad (localStorage), auto-analyze, save secret/note, rephrase, rename, spellcheck. |
 | `FoldersTab.tsx` | Folder scan/watch UI + review session decisions. |
 | `LibraryTab.tsx` | Full vault browser, filter chips, duplicate finder, bulk delete. |
 | `AskTab.tsx` | Search (hybrid) + Rewrite (style selector). |
-| `SettingsTab.tsx` | Language, AI provider config, encryption setup/remove. |
+| `SettingsTab.tsx` | Language, AI provider config, encryption setup/remove, emergency snapshots, and the **Logs** viewer section. |
 | `LockScreen.tsx` | Master-password unlock screen when vault is encrypted+locked. |
-| `LogsTab.tsx` | System log stream. |
 | `SetupChecker.tsx` | AI/Ollama readiness banner (install/start/pull in Electron). |
 | `EntryCard.tsx` | Reusable entry card (status, masked value, actions). |
 | `FsBrowserModal.tsx` | Server-side folder picker (web). |

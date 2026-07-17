@@ -272,7 +272,9 @@ Authoritative types are in `server/types.ts`; `src/types.ts` mirrors them for th
 `temp_id`, `value`, `type`, `name`, `raw_fragment`, `labels`, `type_aliases`, `family`, `confidence`, `needs_type`, `needs_name`, `ready`, `model_notes?`, `source_file?`, `source_name?`, `decision?`.
 
 ### Frontend `Tab`
-`home | paste | scratchpad | folders | library | ask | settings | logs`.
+`home | scratchpad | folders | library | ask | settings`.
+
+Sidebar order is **Home → Scratchpad → Ask → Library → Folders → Settings**. The paste/analyze candidate-review flow is embedded in `HomeTab`, and the logs viewer is a section inside `SettingsTab` (no dedicated `paste`/`logs` tabs).
 
 ---
 

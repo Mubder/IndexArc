@@ -94,8 +94,25 @@ function loadPortableRoot() {
   return null;
 }
 
+function isWritableDir(dir) {
+  try {
+    const probe = path.join(dir, ".indexarc-write-test");
+    fs.writeFileSync(probe, "");
+    fs.unlinkSync(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// PORTABLE-FIRST root resolution.
+// The whole point of this app is a self-contained folder you can copy or run
+// from a USB stick. So the folder next to the executable ALWAYS wins when it
+// already holds data (or can hold it). The registry/AppData marker is only a
+// SECONDARY safety net for the installed build, used when the exe folder can't
+// be the home (e.g. installed into Program Files under a read-only location).
 function getPortableRoot() {
-  // 1) Explicit override always wins.
+  // 1) Explicit override always wins (dev, tests, power users).
   if (process.env.INDEXARC_ROOT) {
     const r = path.resolve(process.env.INDEXARC_ROOT);
     savePortableRoot(r);
@@ -105,41 +122,41 @@ function getPortableRoot() {
   if (!app.isPackaged) {
     return path.join(process.cwd(), ".desktop-sandbox");
   }
-  // 3) Restored root from a previous run (survives reinstall/update). If it
-  //    still holds the user's data, always reuse it — never start fresh.
-  const restored = loadPortableRoot();
-  if (restored) return restored;
-  // 4) First real run: place the vault next to the exe if writable, else
-  //    fall back to the user-writable AppData folder.
+
   const exeDir = path.dirname(process.execPath);
-  let chosen = exeDir;
+
+  // 3) PORTABLE: if the exe folder already has a vault, it is the home. Period.
+  if (findExistingVaultRoot([exeDir])) {
+    savePortableRoot(exeDir);
+    return exeDir;
+  }
+
+  // 4) No data next to the exe yet. Before creating a fresh one, look for an
+  //    existing vault anywhere we might have left it, so an update/reinstall or
+  //    a moved exe never orphans the user's data. Portable-preferred order.
+  let prevInstall = null;
   try {
-    const probe = path.join(exeDir, ".indexarc-write-test");
-    fs.writeFileSync(probe, "");
-    fs.unlinkSync(probe);
-  } catch {
-    chosen = app.getPath("userData");
+    const out = execSync(`reg query "HKCU\\Software\\IndexArc" /v InstallLocation`, {
+      windowsHide: true, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    const m = out.match(/REG_SZ\s+(.+)$/m);
+    if (m) prevInstall = m[1].trim();
+  } catch {}
+  const existing = findExistingVaultRoot([
+    loadPortableRoot(),
+    prevInstall,
+    app.getPath("userData"),
+    path.join(os.homedir(), ".IndexArc"),
+    path.dirname(getMarkerPath()),
+  ]);
+  if (existing) {
+    savePortableRoot(existing);
+    return existing;
   }
-  // 5) Migration safety: if the chosen location is empty but a prior location
-  //    (previous install dir, userData, or the AppData marker's parent) already
-  //    has data, use that instead so updating never loses the vault.
-  if (!findExistingVaultRoot([chosen])) {
-    let prevInstall = null;
-    try {
-      const out = execSync(`reg query "HKCU\\Software\\IndexArc" /v InstallLocation`, {
-        windowsHide: true, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-      });
-      const m = out.match(/REG_SZ\s+(.+)$/m);
-      if (m) prevInstall = m[1].trim();
-    } catch {}
-    const alt = findExistingVaultRoot([
-      prevInstall,
-      app.getPath("userData"),
-      path.join(os.homedir(), ".IndexArc"),
-      path.dirname(getMarkerPath()),
-    ]);
-    if (alt) chosen = alt;
-  }
+
+  // 5) Genuine first run: prefer the portable location (next to the exe) if it
+  //    is writable; otherwise fall back to a user-writable AppData folder.
+  const chosen = isWritableDir(exeDir) ? exeDir : app.getPath("userData");
   savePortableRoot(chosen);
   return chosen;
 }

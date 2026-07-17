@@ -50,6 +50,7 @@ app.use("/api/analyze", checkVaultUnlocked);
 app.use("/api/folders", checkVaultUnlocked);
 app.use("/api/ask", checkVaultUnlocked);
 app.use("/api/snippets", checkVaultUnlocked);
+app.use("/api/scratchpad", checkVaultUnlocked);
 
 app.get("/api/vault/status", (_req, res) => {
   res.json({
@@ -124,6 +125,17 @@ try {
   /* backups are best-effort; never block startup */
 }
 
+// Emergency snapshot on startup: a self-contained copy of everything, written
+// to redundant machine locations that survive uninstall / moved folder.
+try {
+  const snap = store.createEmergencySnapshot();
+  if (snap) {
+    addLog("SYSTEM", `Emergency snapshot created → ${snap}`);
+  }
+} catch {
+  /* best-effort */
+}
+
 // --- Status ---
 app.get("/api/ping", (_req, res) => {
   res.json({ status: "ok" });
@@ -131,6 +143,35 @@ app.get("/api/ping", (_req, res) => {
 
 app.get("/api/backups", (_req, res) => {
   res.json({ backups: store.listBackups(), dir: paths.backupsDir });
+});
+
+// --- Emergency plan (portable, redundant, self-contained snapshots) ---
+app.get("/api/emergency", (_req, res) => {
+  res.json({ snapshots: store.listEmergencySnapshots() });
+});
+
+app.post("/api/emergency/create", (_req, res) => {
+  const name = store.createEmergencySnapshot();
+  if (name) addLog("SYSTEM", `Emergency snapshot created (manual) → ${name}`);
+  res.json({ ok: !!name, name });
+});
+
+app.post("/api/emergency/restore", (req, res) => {
+  const name = String(req.body?.name ?? "").trim();
+  if (!name) return res.status(400).json({ ok: false, error: "name required" });
+  const ok = store.restoreEmergencySnapshot(name);
+  if (ok) addLog("SYSTEM", `Restored from emergency snapshot → ${name}`);
+  res.json({ ok, locked: store.isLocked() });
+});
+
+app.get("/api/scratchpad", (_req, res) => {
+  res.json({ tabs: store.getScratchpad() });
+});
+
+app.post("/api/scratchpad", (req, res) => {
+  const tabs = Array.isArray(req.body?.tabs) ? req.body.tabs : [];
+  const force = req.body?.force === true;
+  res.json({ tabs: store.saveScratchpad(tabs, { force }) });
 });
 
 app.get("/api/status", async (_req, res) => {

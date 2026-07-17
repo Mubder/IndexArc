@@ -75,7 +75,7 @@ Then open <http://127.0.0.1:3000>. The server binds to `127.0.0.1` only — it i
 
 ## The interface
 
-- **Sidebar** — navigation between tabs: Home, Paste/Analyze, Scratchpad, Folders, Library, Ask, Settings, Logs.
+- **Sidebar** — navigation between tabs, in order: **Home**, **Scratchpad**, **Ask Assistant**, **Library**, **Folder Watcher**, **Settings**. (Paste & analyze is built into **Home**; **Logs** live inside **Settings**.)
 - **Top bar** — search, AI provider status, an **AES-256** badge (shows when encryption is on), and quick toggles for **lock**, **theme** (dark/light), and **language** (EN/AR).
 - **Main area** — the active tab.
 
@@ -85,9 +85,9 @@ Secret values are **masked by default**. Use the reveal (eye) or copy buttons to
 
 ## Core workflow: paste → identify → save
 
-1. **Paste** any text on **Home** or the **Paste/Analyze** tab.
+1. **Paste** any text into the box on **Home**.
    - Examples: a single API key, an entire `.env` file, a `docker run ...` command, a note in Arabic or English.
-2. Click **Analyze**. IndexArc splits the paste into **candidates**, each with:
+2. Click **Analyze**. IndexArc splits the paste into **candidates** shown right below the box on Home, each with:
    - a detected **value**,
    - a suggested **type** (freeform, e.g. `telegram user id`, `github token`),
    - a **family** (secret / command / note / unknown),
@@ -290,4 +290,4 @@ Another instance or app is using it. Close the other instance, or set the `PORT`
 Encrypted data can't be recovered without it. If you have an **unencrypted** backup from before you set the password, you can restore that.
 
 **Where are the logs?**
-The **Logs** tab shows recent system/AI events. Files live under `<root>/logs/`.
+Open **Settings** and scroll to the **Logs** section for recent system/AI events. Files live under `<root>/logs/`.

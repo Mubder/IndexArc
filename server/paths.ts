@@ -33,26 +33,37 @@ function loadPersistedRoot(): string | null {
   return null;
 }
 
+function hasVault(root: string | null | undefined): boolean {
+  if (!root) return false;
+  try {
+    const v = path.join(root, "data", "vault.json");
+    return fs.existsSync(v) && fs.statSync(v).size > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function getAppRoot(): string {
   if (process.env.INDEXARC_ROOT) {
     return path.resolve(process.env.INDEXARC_ROOT);
   }
   // Electron always passes INDEXARC_ROOT; this branch only runs when the
-  // server is launched standalone. Restore the persisted root so the vault
-  // location is stable across updates.
+  // server is launched standalone.
+  //
+  // PORTABLE-FIRST: prefer the folder that ships alongside this build (the
+  // parent of dist/) when it already holds a vault, so a copied/USB install is
+  // self-contained. Only fall back to the machine-specific persisted root when
+  // there is no local vault to use.
+  const distSibling = process.env.INDEXARC_DIST_DIR
+    ? path.dirname(path.resolve(process.env.INDEXARC_DIST_DIR))
+    : null;
+  if (hasVault(distSibling)) return distSibling as string;
+
   if (process.env.NODE_ENV === "production") {
     const persisted = loadPersistedRoot();
     if (persisted) return persisted;
   }
-  // Bundled CJS (esbuild server.cjs) sets __dirname to dist/
-  // Dev (tsx) uses project root via cwd.
-  if (process.env.INDEXARC_DIST_DIR) {
-    // Electron: data next to resources or user-specified; prefer sibling of dist
-    const distDir = path.resolve(process.env.INDEXARC_DIST_DIR);
-    // Portable layout: ROOT/dist + ROOT/data → root is parent of dist when packaged as app/
-    const candidate = path.dirname(distDir);
-    return candidate;
-  }
+  if (distSibling) return distSibling;
   return path.resolve(process.cwd());
 }
 
@@ -79,6 +90,7 @@ export function ensurePortableLayout(root: string = getAppRoot()) {
     settingsFile: path.join(root, "config", "settings.json"),
     watchedFoldersFile: path.join(root, "data", "watched_folders.json"),
     scanSessionsFile: path.join(root, "data", "scan_sessions.json"),
+    scratchpadFile: path.join(root, "data", "scratchpad.json"),
   };
 }
 
