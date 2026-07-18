@@ -208,6 +208,49 @@ export async function askVault(
     }
   );
 
+  // --- Scratchpad tabs (open + archived) ---
+  // Each tab is treated as a synthetic vault entry so the same scoring/semantic
+  // pipeline applies. Archived tabs are still searchable; the reason notes it.
+  try {
+    const tabs = store.getScratchpad() as Array<{
+      id?: string;
+      title?: string;
+      content?: string;
+      archived?: boolean;
+    }>;
+    for (const tab of tabs) {
+      const content = tab.content || "";
+      if (!content.trim()) continue;
+      const now = new Date().toISOString();
+      const synth: VaultEntry = {
+        id: `scratchpad:${tab.id || content.slice(0, 16)}`,
+        value: content,
+        type: "scratchpad note",
+        name: tab.title || "Scratch",
+        raw_fragment: content,
+        labels: ["scratchpad"],
+        type_aliases: [],
+        status: "saved",
+        family: "note",
+        created_at: now,
+        updated_at: now,
+        notes: tab.archived ? "archived" : "open",
+        source_file: "scratchpad",
+      };
+      const { score, reason, keywordHits } = scoreEntry(synth, q, terms);
+      if (score <= 0 && keywordHits === 0) continue;
+      scored.push({
+        entry: synth,
+        score: score * 0.85, // slight demotion vs real vault entries
+        match_reason: (reason ? `${reason}, ` : "") + "scratchpad" + (tab.archived ? " (archived)" : ""),
+        keywordHits: keywordHits + 1, // ensure it passes the keyword floor
+        semantic: 0,
+      });
+    }
+  } catch {
+    /* scratchpad not available — skip */
+  }
+
   // Vector boost — only re-ranks keyword hits or very strong pure semantic matches
   let provider_used = "keyword";
   const active = await resolveActiveProvider(settings);
@@ -275,7 +318,7 @@ export async function askVault(
 Name: ${r.entry.name}
 Type: ${r.entry.type}
 Family: ${r.entry.family}
-Value: ${r.entry.value}
+Value: ${r.entry.value.slice(0, 400)}${r.entry.value.length > 400 ? "…" : ""}
 Labels: ${(r.entry.labels || []).join(", ")}
 Notes: ${r.entry.notes || ""}`
         )

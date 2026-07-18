@@ -27,6 +27,7 @@ export interface TranslationDict {
   analyze_btn: string;
   analyzing: string;
   re_analyze_btn: string;
+  open_analyze_tab: string;
   paste_multi_extract: string;
   paste_placeholder_generic: string;
 
@@ -247,6 +248,7 @@ export interface TranslationDict {
   scratchpad_copied: string;
   scratchpad_rename: string;
   scratchpad_archive: string;
+  scratchpad_drag_to_reorder: string;
   scratchpad_archived: string;
   scratchpad_restore: string;
   scratchpad_delete: string;
@@ -307,6 +309,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     analyze_btn: "Analyze & extract",
     analyzing: "Analyzing…",
     re_analyze_btn: "Re-analyze",
+    open_analyze_tab: "Open Analyze tab",
     paste_multi_extract: "Paste & multi-extract",
     paste_placeholder_generic: "Whole .env, single key, command, or note…",
 
@@ -527,6 +530,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_copied: "Copied",
     scratchpad_rename: "Rename tab",
     scratchpad_archive: "Archive tab",
+    scratchpad_drag_to_reorder: "Drag to reorder",
     scratchpad_archived: "Archived",
     scratchpad_restore: "Restore tab",
     scratchpad_delete: "Delete tab",
@@ -583,8 +587,9 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     quick_paste: "لصق سريع",
     paste_placeholder: "قم بلصق الأسرار، كتل .env، الأوامر أو الملاحظات هنا...",
     analyze_btn: "تحليل واستخراج",
-    analyzing: "جاري التحليل...",
+    analyzing: "جاري التحليل…",
     re_analyze_btn: "إعادة التحليل",
+    open_analyze_tab: "فتح تبويب التحليل",
     paste_multi_extract: "لصق واستخراج متعدد",
     paste_placeholder_generic: "ملف .env كامل، مفتاح فردي، أمر أو ملاحظة...",
 
@@ -805,6 +810,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_copied: "تم النسخ",
     scratchpad_rename: "إعادة تسمية التبويب",
     scratchpad_archive: "أرشفة التبويب",
+    scratchpad_drag_to_reorder: "اسحب لإعادة الترتيب",
     scratchpad_archived: "مؤرشف",
     scratchpad_restore: "استعادة التبويب",
     scratchpad_delete: "حذف التبويب",

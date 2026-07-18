@@ -90,6 +90,21 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   // content, so the user can step back through their edits.
   const [rephraseUndo, setRephraseUndo] = useState<Record<string, string[]>>({});
   const titleTouched = useRef<Record<string, boolean>>({});
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+
+  const reorderTab = useCallback((fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    setTabs((prev) => {
+      const from = prev.findIndex((x) => x.id === fromId);
+      const to = prev.findIndex((x) => x.id === toId);
+      if (from === -1 || to === -1) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }, []);
 
   const pasteFlag = useRef<Record<string, boolean>>({});
   const serverLoaded = useRef(false);
@@ -474,13 +489,41 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           return (
             <div
               key={tab.id}
+              draggable
               onClick={() => setActiveId(tab.id)}
+              onDragStart={(e) => {
+                setDragId(tab.id);
+                e.dataTransfer.effectAllowed = "move";
+                try { e.dataTransfer.setData("text/plain", tab.id); } catch {}
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (overId !== tab.id) setOverId(tab.id);
+              }}
+              onDragLeave={() => {
+                if (overId === tab.id) setOverId(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const fromId = dragId ?? e.dataTransfer.getData("text/plain");
+                if (fromId) reorderTab(fromId, tab.id);
+                setDragId(null);
+                setOverId(null);
+              }}
+              onDragEnd={() => {
+                setDragId(null);
+                setOverId(null);
+              }}
               className="group flex items-center gap-1 pl-3 pr-1.5 py-1.5 rounded-xl cursor-pointer text-xs font-medium transition-all"
               style={{
                 background: isActive ? "var(--bg-active)" : "transparent",
                 color: isActive ? "var(--accent-bright)" : "var(--text-dim)",
                 border: `1px solid ${isActive ? "var(--border-glow)" : "var(--border)"}`,
+                opacity: dragId === tab.id ? 0.4 : 1,
+                boxShadow: overId === tab.id && dragId && dragId !== tab.id ? "0 -2px 0 var(--accent-bright)" : undefined,
               }}
+              title={t("scratchpad_drag_to_reorder")}
             >
               {renaming ? (
                 <input

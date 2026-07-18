@@ -18,6 +18,8 @@ export const EntryCard: React.FC<EntryCardProps> = ({
 }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
+  const isScratchpad = entry.source_file === "scratchpad";
+
   return (
     <div
       className="rounded-xl p-3 flex items-center justify-between gap-3 group transition-all"
@@ -32,6 +34,14 @@ export const EntryCard: React.FC<EntryCardProps> = ({
           <div className="flex items-center gap-2">
             <span className="text-[10px] uppercase font-semibold" style={{ color: "var(--text-muted)" }}>{entry.type}</span>
             <span className="text-xs font-medium truncate" style={{ color: "var(--text)" }}>{entry.name}</span>
+            {isScratchpad && (
+              <span
+                className="text-[9px] px-1.5 py-0.5 rounded"
+                style={{ color: "var(--accent-bright)", background: "var(--accent-bg)" }}
+              >
+                {entry.notes === "archived" ? t("scratchpad_archived") : t("tab_scratchpad")}
+              </span>
+            )}
           </div>
           <div
             className="text-[11px] truncate max-w-md"
@@ -51,24 +61,28 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         >
           <Copy className="w-3.5 h-3.5" />
         </button>
-        <button
-          type="button"
-          onClick={() => onOpenClarify(entry)}
-          className="p-1.5 rounded-lg transition-all"
-          style={{ color: "var(--cyan)", background: "var(--bg-input)" }}
-          title={t("identify")}
-        >
-          <Edit3 className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => onDeleteEntry(entry.id)}
-          className="p-1.5 rounded-lg transition-all"
-          style={{ color: "var(--danger)", background: "var(--bg-input)" }}
-          title={t("hide")}
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
+        {!isScratchpad && (
+          <button
+            type="button"
+            onClick={() => onOpenClarify(entry)}
+            className="p-1.5 rounded-lg transition-all"
+            style={{ color: "var(--cyan)", background: "var(--bg-input)" }}
+            title={t("identify")}
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+          </button>
+        )}
+        {!isScratchpad && (
+          <button
+            type="button"
+            onClick={() => onDeleteEntry(entry.id)}
+            className="p-1.5 rounded-lg transition-all"
+            style={{ color: "var(--danger)", background: "var(--bg-input)" }}
+            title={t("hide")}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );

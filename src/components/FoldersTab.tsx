@@ -1,6 +1,7 @@
 import React from "react";
-import { AlertCircle, Ban, CheckCircle, Folder, FolderSearch, HelpCircle, Save } from "lucide-react";
+import { Ban, Folder, FolderSearch, HelpCircle, Save } from "lucide-react";
 import { FolderScanSession, WatchedFolderRow, ScanCandidate, Settings } from "../types";
+import { CandidateCard } from "./CandidateCard";
 import { getTranslation } from "../utils/i18n";
 
 interface FoldersTabProps {
@@ -240,87 +241,42 @@ export const FoldersTab: React.FC<FoldersTabProps> = ({
                 : `Extracted candidates (${scanSession.candidates.length})`}
             </h3>
             {scanSession.candidates.map((c) => (
-              <div
+              <CandidateCard
                 key={c.temp_id}
-                className="rounded-xl p-4 space-y-2 transition-all"
-                style={{
-                  background: c.decision === "discard"
-                    ? "var(--bg-surface)"
-                    : c.ready
-                      ? "var(--bg-surface)"
-                      : "var(--amber-bg)",
-                  border: `1px solid ${c.decision === "discard" ? "var(--border)" : c.ready ? "var(--border)" : "rgba(251, 191, 36, 0.2)"}`,
+                candidate={c}
+                sourceName={c.source_name}
+                showFamilyChips={false}
+                onUpdate={(id, patch) => onPatchScanCandidate(id, patch)}
+                settings={settings}
+                styleOverride={{
                   opacity: c.decision === "discard" ? 0.5 : 1,
                 }}
-              >
-                <div className="flex flex-wrap items-center gap-2 text-[10px]">
-                  <span className="uppercase" style={{ color: "var(--text-muted)" }}>{c.family}</span>
-                  {c.source_name && (
-                    <span
-                      className="px-1.5 py-0.5 rounded"
-                      style={{ fontFamily: "var(--font-mono)", color: "var(--accent-bright)", background: "var(--accent-bg)" }}
-                      title={c.source_file}
-                    >
-                      {c.source_name}
-                    </span>
-                  )}
-                  {!c.ready && (
-                    <span className="flex items-center gap-1" style={{ color: "var(--amber)" }}>
-                      <AlertCircle className="w-3 h-3" />
-                      {c.needs_type && t("needs_type_label")}
-                      {c.needs_type && c.needs_name && " · "}
-                      {c.needs_name && t("needs_name_label")}
-                    </span>
-                  )}
-                  {c.ready && (
-                    <span className="flex items-center gap-1" style={{ color: "var(--emerald)" }}>
-                      <CheckCircle className="w-3 h-3" /> {t("ready_label")}
-                    </span>
-                  )}
-                </div>
-                <div className="rounded-lg px-3 py-2 break-all" style={{ fontFamily: "var(--font-mono)", fontSize: "0.875rem", color: "var(--emerald)", background: "var(--bg-input)", border: "1px solid var(--border)" }}>
-                  {c.value}
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  <input
-                    value={c.type}
-                    onChange={(e) => onPatchScanCandidate(c.temp_id, { type: e.target.value })}
-                    placeholder={t("type_placeholder")}
-                    className="rounded-lg px-2 py-1.5 text-sm focus:outline-none"
-                    style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
-                  />
-                  <input
-                    value={c.name}
-                    onChange={(e) => onPatchScanCandidate(c.temp_id, { name: e.target.value })}
-                    placeholder={t("name_placeholder")}
-                    className="rounded-lg px-2 py-1.5 text-sm focus:outline-none"
-                    style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
-                  />
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {(["pending", "save", "park", "discard"] as const).map((d) => (
-                    <button
-                      key={d}
-                      type="button"
-                      onClick={() => onPatchScanCandidate(c.temp_id, { decision: d })}
-                      className="px-2 py-0.5 rounded text-[11px] transition-all"
-                      style={{
-                        border: `1px solid ${(c.decision || "pending") === d
-                          ? d === "save" ? "rgba(52, 211, 153, 0.4)" : d === "discard" ? "rgba(248, 113, 113, 0.4)" : d === "park" ? "rgba(251, 191, 36, 0.4)" : "var(--border-glow)"
-                          : "var(--border)"}`,
-                        color: (c.decision || "pending") === d
-                          ? d === "save" ? "var(--emerald)" : d === "discard" ? "var(--danger)" : d === "park" ? "var(--amber)" : "var(--accent-bright)"
-                          : "var(--text-muted)",
-                        background: (c.decision || "pending") === d
-                          ? d === "save" ? "var(--emerald-bg)" : d === "discard" ? "var(--danger-bg)" : d === "park" ? "var(--amber-bg)" : "var(--accent-bg)"
-                          : "transparent",
-                      }}
-                    >
-                      {d}
-                    </button>
-                  ))}
-                </div>
-              </div>
+                footer={
+                  <div className="flex flex-wrap gap-2">
+                    {(["pending", "save", "park", "discard"] as const).map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => onPatchScanCandidate(c.temp_id, { decision: d })}
+                        className="px-2 py-0.5 rounded text-[11px] transition-all"
+                        style={{
+                          border: `1px solid ${(c.decision || "pending") === d
+                            ? d === "save" ? "rgba(52, 211, 153, 0.4)" : d === "discard" ? "rgba(248, 113, 113, 0.4)" : d === "park" ? "rgba(251, 191, 36, 0.4)" : "var(--border-glow)"
+                            : "var(--border)"}`,
+                          color: (c.decision || "pending") === d
+                            ? d === "save" ? "var(--emerald)" : d === "discard" ? "var(--danger)" : d === "park" ? "var(--amber)" : "var(--accent-bright)"
+                            : "var(--text-muted)",
+                          background: (c.decision || "pending") === d
+                            ? d === "save" ? "var(--emerald-bg)" : d === "discard" ? "var(--danger-bg)" : d === "park" ? "var(--amber-bg)" : "var(--accent-bg)"
+                            : "transparent",
+                        }}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                }
+              />
             ))}
             {!scanSession.candidates.length && (
               <p className="text-sm italic" style={{ color: "var(--text-muted)" }}>{t("no_candidates_msg")}</p>

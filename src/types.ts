@@ -68,7 +68,7 @@ export interface Settings {
   ui_language: "en" | "ar";
 }
 
-export type Tab = "home" | "scratchpad" | "folders" | "library" | "ask" | "settings";
+export type Tab = "home" | "scratchpad" | "analyze" | "folders" | "library" | "ask" | "settings";
 
 export type LibraryFilter = "all" | "secret" | "command" | "note" | "unknown" | "attention";
 

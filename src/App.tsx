@@ -35,6 +35,7 @@ import { getTranslation } from "./utils/i18n";
 // Subcomponents
 import { HomeTab } from "./components/HomeTab";
 import { ScratchpadTab } from "./components/ScratchpadTab";
+import { AnalyzeTab } from "./components/AnalyzeTab";
 import { FoldersTab } from "./components/FoldersTab";
 import { AskTab } from "./components/AskTab";
 import { LibraryTab } from "./components/LibraryTab";
@@ -635,6 +636,7 @@ export default function App() {
     () => [
       { id: "home", label: t("tab_home"), icon: <Layers className="w-4 h-4" />, badge: attention.length || undefined },
       { id: "scratchpad", label: t("tab_scratchpad"), icon: <StickyNote className="w-4 h-4" /> },
+      { id: "analyze", label: t("tab_paste"), icon: <Sparkles className="w-4 h-4" />, badge: candidates.length || undefined },
       { id: "ask", label: t("tab_ask"), icon: <Search className="w-4 h-4" /> },
       { id: "library", label: t("tab_library"), icon: <KeyRound className="w-4 h-4" /> },
       {
@@ -1007,6 +1009,7 @@ export default function App() {
                 paste={paste}
                 setPaste={setPaste}
                 onAnalyze={handleAnalyze}
+                onOpenAnalyzeTab={() => setTab("analyze")}
                 analyzing={analyzing}
                 providerUsed={providerUsed}
                 candidates={candidates}
@@ -1018,6 +1021,22 @@ export default function App() {
                 entries={entries}
                 onOpenClarify={openClarify}
                 onDeleteEntry={deleteEntry}
+                settings={settings}
+              />
+            )}
+
+            {tab === "analyze" && (
+              <AnalyzeTab
+                paste={paste}
+                setPaste={setPaste}
+                onAnalyze={handleAnalyze}
+                analyzing={analyzing}
+                providerUsed={providerUsed}
+                candidates={candidates}
+                selected={selected}
+                setSelected={setSelected}
+                onSaveSelected={handleSaveSelected}
+                onUpdateCandidate={updateCandidate}
                 settings={settings}
               />
             )}

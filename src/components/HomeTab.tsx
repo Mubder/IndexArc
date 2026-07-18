@@ -1,13 +1,15 @@
 import React from "react";
-import { Plus, Sparkles, Inbox, AlertCircle, CheckCircle, Save, SkipForward } from "lucide-react";
+import { Plus, Sparkles, Inbox, Save, SkipForward } from "lucide-react";
 import { VaultEntry, AnalyzeCandidate, Settings } from "../types";
 import { EntryCard } from "./EntryCard";
+import { CandidateCard } from "./CandidateCard";
 import { getTranslation } from "../utils/i18n";
 
 interface HomeTabProps {
   paste: string;
   setPaste: (v: string) => void;
   onAnalyze: () => Promise<void>;
+  onOpenAnalyzeTab: () => void;
   analyzing: boolean;
   providerUsed: string;
   candidates: AnalyzeCandidate[];
@@ -26,6 +28,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   paste,
   setPaste,
   onAnalyze,
+  onOpenAnalyzeTab,
   analyzing,
   providerUsed,
   candidates,
@@ -40,6 +43,11 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   settings,
 }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
+
+  const handleAnalyze = async () => {
+    await onAnalyze();
+    onOpenAnalyzeTab();
+  };
 
   return (
     <div className="space-y-6">
@@ -60,16 +68,27 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           className="w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors resize-none"
           style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
         />
-        <button
-          type="button"
-          onClick={onAnalyze}
-          disabled={analyzing || !paste.trim()}
-          className="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center gap-2 transition-all"
-          style={{ background: "linear-gradient(135deg, var(--accent), #1d4ed8)", boxShadow: "0 0 20px var(--accent-glow)" }}
-        >
-          <Sparkles className="w-4 h-4" />
-          {analyzing ? t("analyzing") : t("analyze_btn")}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleAnalyze}
+            disabled={analyzing || !paste.trim()}
+            className="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center gap-2 transition-all"
+            style={{ background: "linear-gradient(135deg, var(--accent), #1d4ed8)", boxShadow: "0 0 20px var(--accent-glow)" }}
+          >
+            <Sparkles className="w-4 h-4" />
+            {analyzing ? t("analyzing") : t("analyze_btn")}
+          </button>
+          <button
+            type="button"
+            onClick={onOpenAnalyzeTab}
+            disabled={!candidates.length}
+            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:opacity-40"
+            style={{ color: "var(--accent-bright)", border: "1px solid var(--border-glow)", background: "var(--accent-bg)" }}
+          >
+            {t("open_analyze_tab")} ({candidates.length})
+          </button>
+        </div>
       </div>
 
       {candidates.length > 0 && (
@@ -100,84 +119,14 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           </div>
 
           {candidates.map((c) => (
-            <div
+            <CandidateCard
               key={c.temp_id}
-              className="rounded-xl p-4 space-y-3 transition-all"
-              style={{
-                background: c.ready ? "var(--bg-surface)" : "var(--amber-bg)",
-                border: `1px solid ${c.ready ? "var(--border)" : "rgba(251, 191, 36, 0.2)"}`,
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={!!selected[c.temp_id]}
-                  onChange={(e) => setSelected((s) => ({ ...s, [c.temp_id]: e.target.checked }))}
-                />
-                <span className="text-[10px] uppercase" style={{ color: "var(--text-dim)" }}>{c.family}</span>
-                <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                  {t("confidence_label")} {Math.round(c.confidence * 100)}%
-                </span>
-                {!c.ready && (
-                  <span className="text-[10px] flex items-center gap-1" style={{ color: "var(--amber)" }}>
-                    <AlertCircle className="w-3 h-3" />
-                    {c.needs_type && t("needs_type_label")}
-                    {c.needs_type && c.needs_name && " · "}
-                    {c.needs_name && t("needs_name_label")}
-                  </span>
-                )}
-                {c.ready && (
-                  <span className="text-[10px] flex items-center gap-1" style={{ color: "var(--emerald)" }}>
-                    <CheckCircle className="w-3 h-3" /> {t("ready_label")}
-                  </span>
-                )}
-              </div>
-              <div className="rounded-lg px-3 py-2 break-all" style={{ fontFamily: "var(--font-mono)", fontSize: "0.875rem", color: "var(--emerald)", background: "var(--bg-input)", border: "1px solid var(--border)" }}>
-                {c.value}
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <label className="text-xs space-y-1 block">
-                  <span style={{ color: "var(--text-dim)" }}>{t("type_label")}</span>
-                  <input
-                    value={c.type}
-                    onChange={(e) => onUpdateCandidate(c.temp_id, { type: e.target.value })}
-                    placeholder={t("type_placeholder")}
-                    className="w-full rounded-lg px-2 py-1.5 text-sm focus:outline-none"
-                    style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
-                  />
-                </label>
-                <label className="text-xs space-y-1 block">
-                  <span style={{ color: "var(--text-dim)" }}>{t("name_label_secrets")}</span>
-                  <input
-                    value={c.name}
-                    onChange={(e) => onUpdateCandidate(c.temp_id, { name: e.target.value })}
-                    placeholder={t("name_placeholder")}
-                    className="w-full rounded-lg px-2 py-1.5 text-sm focus:outline-none"
-                    style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
-                  />
-                </label>
-              </div>
-              <div className="flex flex-wrap gap-2 text-[11px]">
-                {(["secret", "command", "note", "unknown"] as const).map((f) => (
-                  <button
-                    key={f}
-                    type="button"
-                    onClick={() => onUpdateCandidate(c.temp_id, { family: f })}
-                    className="px-2 py-0.5 rounded border transition-all"
-                    style={{
-                      borderColor: c.family === f ? "var(--border-glow)" : "var(--border)",
-                      color: c.family === f ? "var(--accent-bright)" : "var(--text-muted)",
-                      background: c.family === f ? "var(--accent-bg)" : "transparent",
-                    }}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
-              {c.model_notes && (
-                <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>{c.model_notes}</p>
-              )}
-            </div>
+              candidate={c}
+              selected={selected[c.temp_id]}
+              onToggleSelect={(id, checked) => setSelected((s) => ({ ...s, [id]: checked }))}
+              onUpdate={onUpdateCandidate}
+              settings={settings}
+            />
           ))}
         </div>
       )}
