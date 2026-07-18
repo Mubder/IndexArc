@@ -80,8 +80,8 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   ai_provider: "auto",
   ollama_base_url: "http://127.0.0.1:11434",
-  ollama_llm_model: "qwen2.5:0.5b",
-  ollama_embed_model: "nomic-embed-text",
+  ollama_llm_model: "qwen2.5:7b",
+  ollama_embed_model: "bge-m3",
   gemini_api_key: "",
   gemini_llm_model: "gemini-2.0-flash",
   gemini_embed_model: "text-embedding-004",

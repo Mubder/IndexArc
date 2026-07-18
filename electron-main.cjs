@@ -507,6 +507,15 @@ function createWindow() {
 
   Menu.setApplicationMenu(null);
 
+  // Open any external link (e.g. target="_blank") in the OS default browser
+  // instead of spawning a new Electron window.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url && /^https?:\/\//.test(url)) {
+      shell.openExternal(url);
+    }
+    return { action: "deny" };
+  });
+
   try {
     const ses = mainWindow.webContents.session;
     const available = ses.availableSpellCheckerLanguages || [];

@@ -11,6 +11,8 @@ import {
   Sparkles,
   Pencil,
   Undo2,
+  Archive,
+  ArchiveRestore,
 } from "lucide-react";
 import { AnalyzeCandidate, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
@@ -19,6 +21,7 @@ interface ScratchTab {
   id: string;
   title: string;
   content: string;
+  archived?: boolean;
 }
 
 interface Detection {
@@ -61,6 +64,7 @@ function loadTabs(): ScratchTab[] {
           id: x.id || uid(),
           title: x.title || "Scratch",
           content: x.content || "",
+          archived: !!x.archived,
         }));
       }
     }
@@ -81,6 +85,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [style, setStyle] = useState<RewriteStyle>("professional");
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
   // Per-tab undo stack for rephrase: each entry is a previous version of the
   // content, so the user can step back through their edits.
   const [rephraseUndo, setRephraseUndo] = useState<Record<string, string[]>>({});
@@ -170,6 +175,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
                 id: x.id || uid(),
                 title: x.title || "Scratch",
                 content: x.content || "",
+                archived: !!x.archived,
               }))
           : [];
         if (cancelled) return;
@@ -285,6 +291,28 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     const id = uid();
     setTabs((prev) => [...prev, { id, title: nextTitle(prev), content: "" }]);
     setActiveId(id);
+  };
+
+  // Archive soft-hides a tab (content preserved) instead of deleting it.
+  const archiveTab = (id: string) => {
+    setTabs((prev) => {
+      const archived = prev.map((x) => (x.id === id ? { ...x, archived: true } : x));
+      const remaining = archived.filter((x) => !x.archived);
+      if (id === activeId) {
+        if (remaining.length) {
+          setActiveId(remaining[0].id);
+        } else {
+          const fresh = { id: uid(), title: "Scratch 1", content: "" };
+          setTabs((cur) => [...cur, fresh]);
+          setActiveId(fresh.id);
+        }
+      }
+      return archived;
+    });
+  };
+
+  const restoreTab = (id: string) => {
+    setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, archived: false } : x)));
   };
 
   const closeTab = (id: string) => {
@@ -440,7 +468,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     <div className="space-y-4">
       {/* Internal tabs */}
       <div className="flex items-center gap-1 flex-wrap">
-        {tabs.map((tab) => {
+        {tabs.filter((t) => !t.archived).map((tab) => {
           const isActive = tab.id === activeId;
           const renaming = renameId === tab.id;
           return (
@@ -482,6 +510,18 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
                 title={t("scratchpad_rename")}
               >
                 <Pencil className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  archiveTab(tab.id);
+                }}
+                className="opacity-50 hover:opacity-100 transition-opacity"
+                aria-label={t("scratchpad_archive")}
+                title={t("scratchpad_archive")}
+              >
+                <Archive className="w-3.5 h-3.5" />
               </button>
               <button
                 type="button"
@@ -664,6 +704,70 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           </span>
         )}
       </div>
+
+      {/* Archived tabs */}
+      {tabs.some((x) => x.archived) && (
+        <div
+          className="rounded-2xl overflow-hidden"
+          style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
+        >
+          <button
+            type="button"
+            onClick={() => setShowArchived((s) => !s)}
+            className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold"
+            style={{ color: "var(--text-dim)" }}
+          >
+            <span className="flex items-center gap-2">
+              <Archive className="w-3.5 h-3.5" />
+              {t("scratchpad_archived")} ({tabs.filter((x) => x.archived).length})
+            </span>
+            <span>{showArchived ? "▾" : "▸"}</span>
+          </button>
+          {showArchived && (
+            <div className="px-4 pb-3 flex flex-col gap-1.5">
+              {tabs
+                .filter((x) => x.archived)
+                .map((tab) => (
+                  <div
+                    key={tab.id}
+                    className="flex items-center gap-2 py-1.5 px-2 rounded-lg"
+                    style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}
+                  >
+                    <span
+                      className="flex-1 truncate text-xs cursor-pointer"
+                      style={{ color: "var(--text-muted)" }}
+                      onClick={() => {
+                        restoreTab(tab.id);
+                        setActiveId(tab.id);
+                      }}
+                      title={t("scratchpad_restore")}
+                    >
+                      {tab.title || "Untitled"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => restoreTab(tab.id)}
+                      className="opacity-70 hover:opacity-100 transition-opacity"
+                      aria-label={t("scratchpad_restore")}
+                      title={t("scratchpad_restore")}
+                    >
+                      <ArchiveRestore className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => closeTab(tab.id)}
+                      className="opacity-70 hover:opacity-100 transition-opacity"
+                      aria-label={t("scratchpad_delete")}
+                      title={t("scratchpad_delete")}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

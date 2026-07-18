@@ -60,6 +60,8 @@ export interface TranslationDict {
   ask_header_placeholder: string;
   search_btn: string;
   ask_btn: string;
+  built_with_kazma: string;
+  kazma_tagline: string;
   assistant_answer: string;
   no_results: string;
   rewrite_mode_btn: string;
@@ -244,6 +246,10 @@ export interface TranslationDict {
   scratchpad_copy: string;
   scratchpad_copied: string;
   scratchpad_rename: string;
+  scratchpad_archive: string;
+  scratchpad_archived: string;
+  scratchpad_restore: string;
+  scratchpad_delete: string;
   scratchpad_ai_detected: string;
   scratchpad_no_detection: string;
 
@@ -334,6 +340,8 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     ask_header_placeholder: "Ask: What is my Telegram token and ID?",
     search_btn: "Search",
     ask_btn: "Ask",
+    built_with_kazma: "Built with Kazma.ai",
+    kazma_tagline: "Autonomous AI agent framework — LangGraph brain, swarm orchestration, Arabic-first, human-in-the-loop safety.",
     assistant_answer: "Assistant Answer",
     no_results: "No results yet. Ask a question to your secure vault.",
     rewrite_mode_btn: "Rewrite Text",
@@ -518,6 +526,10 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_copy: "Copy",
     scratchpad_copied: "Copied",
     scratchpad_rename: "Rename tab",
+    scratchpad_archive: "Archive tab",
+    scratchpad_archived: "Archived",
+    scratchpad_restore: "Restore tab",
+    scratchpad_delete: "Delete tab",
     scratchpad_ai_detected: "AI detected",
     scratchpad_no_detection: "Nothing detected yet — paste or click Detect",
 
@@ -606,6 +618,8 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     ask_header_placeholder: "اسأل: ما هو توكن ومفتاح التليجرام؟",
     search_btn: "بحث",
     ask_btn: "اسأل",
+    built_with_kazma: "صُنع باستخدام Kazma.ai",
+    kazma_tagline: "إطار عمل وكلاء ذكاء اصطناعي مستقل — عقل LangGraph، تنسيق سربي، عربي أولاً، مع أمان بوجود الإنسان في الحلقة.",
     assistant_answer: "إجابة المساعد الذكي",
     no_results: "لا توجد نتائج بعد. اسأل سؤالاً للبحث في خزنتك الآمنة.",
     rewrite_mode_btn: "إعادة صياغة",
@@ -790,6 +804,10 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_copy: "نسخ",
     scratchpad_copied: "تم النسخ",
     scratchpad_rename: "إعادة تسمية التبويب",
+    scratchpad_archive: "أرشفة التبويب",
+    scratchpad_archived: "مؤرشف",
+    scratchpad_restore: "استعادة التبويب",
+    scratchpad_delete: "حذف التبويب",
     scratchpad_ai_detected: "اكتشف الذكاء",
     scratchpad_no_detection: "لم يُكتشف شيء بعد — الصق أو اضغط اكتشاف",
 

@@ -797,6 +797,33 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          {/* Built with Kazma.ai credit (clickable → opens in default browser) */}
+          <button
+            type="button"
+            onClick={() => window.electronAPI?.openExternal?.("https://kazma.ai")}
+            className="mt-auto m-3 p-3 rounded-xl flex items-center gap-3 transition-all hover:brightness-125 text-left"
+            style={{
+              borderColor: "var(--border-glow)",
+              background: "var(--accent-bg)",
+              boxShadow: "0 0 16px var(--accent-glow)",
+            }}
+            title="https://kazma.ai"
+          >
+            <img
+              src="/kazma-logo.jpeg"
+              alt="Kazma.ai"
+              className="h-10 w-10 rounded-lg object-contain flex-shrink-0"
+            />
+            <div className="leading-snug">
+              <div className="text-[11px] font-semibold" style={{ color: "var(--accent-bright)" }}>
+                {t("built_with_kazma")}
+              </div>
+              <div className="text-[10px]" style={{ color: "var(--text-dim)" }}>
+                {t("kazma_tagline")}
+              </div>
+            </div>
+          </button>
         </aside>
 
         {/* Main Content */}
