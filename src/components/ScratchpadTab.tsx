@@ -135,6 +135,16 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const pasteFlag = useRef<Record<string, boolean>>({});
   const serverLoaded = useRef(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const savedSelection = useRef<Selection | null>(null);
+
+  // Arabic spellcheck overlay (Electron only): set of misspelled Arabic words
+  const editorRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const [misspelledAr, setMisspelledAr] = useState<Set<string>>(new Set());
+  const [highlightColor, setHighlightColor] = useState<string>("#fef08a");
+  const [textColor, setTextColor] = useState<string>("#ffffff");
+  const [showHighlightPicker, setShowHighlightPicker] = useState(false);
+  const [showTextColorPicker, setShowTextColorPicker] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -147,19 +157,39 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Arabic spellcheck overlay (Electron only): set of misspelled Arabic words
-  const editorRef = useRef<HTMLDivElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const [misspelledAr, setMisspelledAr] = useState<Set<string>>(new Set());
-  const [highlightColor, setHighlightColor] = useState<string>("#fef08a");
-  const [textColor, setTextColor] = useState<string>("#ffffff");
-  const [showHighlightPicker, setShowHighlightPicker] = useState(false);
-  const [showTextColorPicker, setShowTextColorPicker] = useState(false);
+  // Save selection when user clicks in the editor (so we have a valid selection for toolbar buttons)
+  const saveSelection = useCallback(() => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.anchorNode)) {
+      savedSelection.current = sel.getRangeAt(0).cloneRange();
+    }
+  }, []);
 
-  const execFormat = (command: string, value?: string) => {
+  // Restore saved selection and execute command
+  const execFormat = useCallback((command: string, value?: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus();
+    if (savedSelection.current) {
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(savedSelection.current);
+      }
+    }
     document.execCommand(command, false, value);
-    editorRef.current?.focus();
-  };
+    editor.focus();
+    // Re-save selection after command (some commands may modify it)
+    saveSelection();
+  }, [saveSelection]);
+
+  // Called onMouseDown on toolbar buttons to capture selection BEFORE focus is lost
+  const captureSelection = useCallback(() => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.anchorNode)) {
+      savedSelection.current = sel.getRangeAt(0).cloneRange();
+    }
+  }, []);
 
   const htmlToPlainText = (html: string): string => {
     const d = document.createElement("div");
@@ -814,6 +844,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           <button
             type="button"
             onClick={() => execFormat("undo")}
+            onMouseDown={captureSelection}
             className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
             style={{ color: "var(--text-dim)" }}
             title={t("scratchpad_undo")}
@@ -823,6 +854,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           <button
             type="button"
             onClick={() => execFormat("redo")}
+            onMouseDown={captureSelection}
             className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
             style={{ color: "var(--text-dim)" }}
             title={t("scratchpad_redo")}
@@ -836,6 +868,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           <button
             type="button"
             onClick={() => execFormat("bold")}
+            onMouseDown={captureSelection}
             className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
             style={{ color: "var(--text-dim)" }}
             title={t("scratchpad_bold")}
@@ -845,6 +878,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           <button
             type="button"
             onClick={() => execFormat("italic")}
+            onMouseDown={captureSelection}
             className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
             style={{ color: "var(--text-dim)" }}
             title={t("scratchpad_italic")}
@@ -854,6 +888,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           <button
             type="button"
             onClick={() => execFormat("underline")}
+            onMouseDown={captureSelection}
             className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
             style={{ color: "var(--text-dim)" }}
             title={t("scratchpad_underline")}
@@ -869,6 +904,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               <button
                 type="button"
                 onClick={() => execFormat("foreColor", textColor)}
+                onMouseDown={captureSelection}
                 className="p-1.5 rounded-l-lg transition-all hover:opacity-100 opacity-70"
                 style={{ color: "var(--text-dim)" }}
                 title={t("scratchpad_text_color")}
@@ -882,6 +918,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               <button
                 type="button"
                 onClick={() => { setShowTextColorPicker((s) => !s); setShowHighlightPicker(false); }}
+                onMouseDown={captureSelection}
                 className="px-0.5 py-1.5 rounded-r-lg transition-all hover:opacity-100 opacity-70 text-[8px]"
                 style={{ color: "var(--text-dim)" }}
               >
@@ -899,6 +936,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
                     key={c.hex}
                     type="button"
                     onClick={() => { setTextColor(c.hex); execFormat("foreColor", c.hex); }}
+                    onMouseDown={captureSelection}
                     className="w-5 h-5 rounded-full border-2 transition-all"
                     style={{
                       background: c.hex,
@@ -917,6 +955,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               <button
                 type="button"
                 onClick={() => execFormat("hiliteColor", highlightColor)}
+                onMouseDown={captureSelection}
                 className="p-1.5 rounded-l-lg transition-all hover:opacity-100 opacity-70"
                 style={{ color: "var(--text-dim)" }}
                 title={t("scratchpad_highlight")}
@@ -930,6 +969,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               <button
                 type="button"
                 onClick={() => { setShowHighlightPicker((s) => !s); setShowTextColorPicker(false); }}
+                onMouseDown={captureSelection}
                 className="px-0.5 py-1.5 rounded-r-lg transition-all hover:opacity-100 opacity-70 text-[8px]"
                 style={{ color: "var(--text-dim)" }}
               >
@@ -947,6 +987,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
                     key={c.hex}
                     type="button"
                     onClick={() => { setHighlightColor(c.hex); execFormat("hiliteColor", c.hex); }}
+                    onMouseDown={captureSelection}
                     className="w-5 h-5 rounded-full border-2 transition-all"
                     style={{
                       background: c.hex,
@@ -965,6 +1006,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           <button
             type="button"
             onClick={() => execFormat("removeFormat")}
+            onMouseDown={captureSelection}
             className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
             style={{ color: "var(--text-dim)" }}
             title={t("scratchpad_clear_format")}
