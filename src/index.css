@@ -33,15 +33,12 @@
   text-underline-offset: 3px;
 }
 
-/* ── ContentEditable Editor ── */
-[contenteditable] {
-  outline: none;
-}
-[contenteditable]:empty::before {
-  content: attr(data-placeholder);
-  color: var(--text-muted);
-  pointer-events: none;
-}
+/* ── Highlight Colors ── */
+mark.hl-yellow { background: #fef08a; color: #1a1a2e; }
+mark.hl-green  { background: #86efac; color: #1a1a2e; }
+mark.hl-blue   { background: #93c5fd; color: #1a1a2e; }
+mark.hl-red    { background: #fca5a5; color: #1a1a2e; }
+mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
 
 /* ── Highlight Colors ── */
 mark.hl-yellow { background: #fef08a; color: #1a1a2e; }
