@@ -18,6 +18,9 @@ import {
   Underline,
   Highlighter,
   Eraser,
+  Undo,
+  Redo,
+  Palette,
 } from "lucide-react";
 import { AnalyzeCandidate, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
@@ -60,6 +63,16 @@ const HIGHLIGHT_COLORS = [
   { hex: "#93c5fd", key: "highlight_blue" },
   { hex: "#fca5a5", key: "highlight_red" },
   { hex: "#d8b4fe", key: "highlight_purple" },
+];
+
+const TEXT_COLORS = [
+  { hex: "#ffffff", key: "text_color_white" },
+  { hex: "#f87171", key: "text_color_red" },
+  { hex: "#fb923c", key: "text_color_orange" },
+  { hex: "#facc15", key: "text_color_yellow" },
+  { hex: "#4ade80", key: "text_color_green" },
+  { hex: "#38bdf8", key: "text_color_blue" },
+  { hex: "#c084fc", key: "text_color_purple" },
 ];
 
 function uid(): string {
@@ -121,13 +134,27 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   const pasteFlag = useRef<Record<string, boolean>>({});
   const serverLoaded = useRef(false);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (toolbarRef.current && !toolbarRef.current.contains(e.target as Node)) {
+        setShowHighlightPicker(false);
+        setShowTextColorPicker(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Arabic spellcheck overlay (Electron only): set of misspelled Arabic words
   const editorRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [misspelledAr, setMisspelledAr] = useState<Set<string>>(new Set());
   const [highlightColor, setHighlightColor] = useState<string>("#fef08a");
+  const [textColor, setTextColor] = useState<string>("#ffffff");
   const [showHighlightPicker, setShowHighlightPicker] = useState(false);
+  const [showTextColorPicker, setShowTextColorPicker] = useState(false);
 
   const execFormat = (command: string, value?: string) => {
     document.execCommand(command, false, value);
@@ -779,9 +806,33 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
         {/* Formatting toolbar */}
         <div
-          className="flex items-center gap-1 flex-wrap"
+          ref={toolbarRef}
+          className="flex items-center gap-0.5 flex-wrap"
           style={{ borderTop: "1px solid var(--border)", paddingTop: "8px" }}
         >
+          {/* Undo / Redo */}
+          <button
+            type="button"
+            onClick={() => execFormat("undo")}
+            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
+            style={{ color: "var(--text-dim)" }}
+            title={t("scratchpad_undo")}
+          >
+            <Undo className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => execFormat("redo")}
+            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
+            style={{ color: "var(--text-dim)" }}
+            title={t("scratchpad_redo")}
+          >
+            <Redo className="w-3.5 h-3.5" />
+          </button>
+
+          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
+
+          {/* Bold / Italic / Underline */}
           <button
             type="button"
             onClick={() => execFormat("bold")}
@@ -809,7 +860,59 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           >
             <Underline className="w-3.5 h-3.5" />
           </button>
-          <div className="relative" onMouseLeave={() => setShowHighlightPicker(false)}>
+
+          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
+
+          {/* Text color */}
+          <div className="relative">
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => execFormat("foreColor", textColor)}
+                className="p-1.5 rounded-l-lg transition-all hover:opacity-100 opacity-70"
+                style={{ color: "var(--text-dim)" }}
+                title={t("scratchpad_text_color")}
+              >
+                <Palette className="w-3.5 h-3.5" />
+                <span
+                  className="absolute bottom-0.5 left-2 w-2 h-0.5 rounded-full"
+                  style={{ background: textColor }}
+                />
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowTextColorPicker((s) => !s); setShowHighlightPicker(false); }}
+                className="px-0.5 py-1.5 rounded-r-lg transition-all hover:opacity-100 opacity-70 text-[8px]"
+                style={{ color: "var(--text-dim)" }}
+              >
+                ▾
+              </button>
+            </div>
+            {showTextColorPicker && (
+              <div
+                className="absolute bottom-full left-0 mb-1 flex gap-1 p-1.5 rounded-lg z-50"
+                style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border)" }}
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                {TEXT_COLORS.map((c) => (
+                  <button
+                    key={c.hex}
+                    type="button"
+                    onClick={() => { setTextColor(c.hex); execFormat("foreColor", c.hex); }}
+                    className="w-5 h-5 rounded-full border-2 transition-all"
+                    style={{
+                      background: c.hex,
+                      borderColor: textColor === c.hex ? "var(--accent-bright)" : "transparent",
+                    }}
+                    title={t(c.key as Parameters<typeof getTranslation>[1])}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Highlight color */}
+          <div className="relative">
             <div className="flex items-center">
               <button
                 type="button"
@@ -826,7 +929,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               </button>
               <button
                 type="button"
-                onClick={() => setShowHighlightPicker((s) => !s)}
+                onClick={() => { setShowHighlightPicker((s) => !s); setShowTextColorPicker(false); }}
                 className="px-0.5 py-1.5 rounded-r-lg transition-all hover:opacity-100 opacity-70 text-[8px]"
                 style={{ color: "var(--text-dim)" }}
               >
@@ -837,12 +940,13 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               <div
                 className="absolute bottom-full left-0 mb-1 flex gap-1 p-1.5 rounded-lg z-50"
                 style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border)" }}
+                onMouseDown={(e) => e.preventDefault()}
               >
                 {HIGHLIGHT_COLORS.map((c) => (
                   <button
                     key={c.hex}
                     type="button"
-                    onClick={() => { setHighlightColor(c.hex); setShowHighlightPicker(false); }}
+                    onClick={() => { setHighlightColor(c.hex); execFormat("hiliteColor", c.hex); }}
                     className="w-5 h-5 rounded-full border-2 transition-all"
                     style={{
                       background: c.hex,
@@ -854,6 +958,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               </div>
             )}
           </div>
+
+          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
+
+          {/* Clear formatting */}
           <button
             type="button"
             onClick={() => execFormat("removeFormat")}

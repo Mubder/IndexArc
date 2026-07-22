@@ -258,12 +258,22 @@ export interface TranslationDict {
   scratchpad_italic: string;
   scratchpad_underline: string;
   scratchpad_highlight: string;
+  scratchpad_text_color: string;
   scratchpad_clear_format: string;
+  scratchpad_undo: string;
+  scratchpad_redo: string;
   highlight_yellow: string;
   highlight_green: string;
   highlight_blue: string;
   highlight_red: string;
   highlight_purple: string;
+  text_color_white: string;
+  text_color_red: string;
+  text_color_orange: string;
+  text_color_yellow: string;
+  text_color_green: string;
+  text_color_blue: string;
+  text_color_purple: string;
 
   setup_title: string;
   setup_collapse: string;
@@ -550,12 +560,22 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_italic: "Italic",
     scratchpad_underline: "Underline",
     scratchpad_highlight: "Highlight",
+    scratchpad_text_color: "Text color",
     scratchpad_clear_format: "Clear formatting",
+    scratchpad_undo: "Undo",
+    scratchpad_redo: "Redo",
     highlight_yellow: "Yellow",
     highlight_green: "Green",
     highlight_blue: "Blue",
     highlight_red: "Red",
     highlight_purple: "Purple",
+    text_color_white: "White",
+    text_color_red: "Red",
+    text_color_orange: "Orange",
+    text_color_yellow: "Yellow",
+    text_color_green: "Green",
+    text_color_blue: "Blue",
+    text_color_purple: "Purple",
 
     setup_title: "Setup & Dependencies",
     setup_collapse: "Details",
@@ -840,12 +860,22 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_italic: "مائل",
     scratchpad_underline: "تحته خط",
     scratchpad_highlight: "تمييز",
+    scratchpad_text_color: "لون النص",
     scratchpad_clear_format: "إزالة التنسيق",
+    scratchpad_undo: "تراجع",
+    scratchpad_redo: "إعادة",
     highlight_yellow: "أصفر",
     highlight_green: "أخضر",
     highlight_blue: "أزرق",
     highlight_red: "أحمر",
     highlight_purple: "بنفسجي",
+    text_color_white: "أبيض",
+    text_color_red: "أحمر",
+    text_color_orange: "برتقالي",
+    text_color_yellow: "أصفر",
+    text_color_green: "أخضر",
+    text_color_blue: "أزرق",
+    text_color_purple: "بنفسجي",
 
     setup_title: "الإعداد والاعتماديات",
     setup_collapse: "التفاصيل",
