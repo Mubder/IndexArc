@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Plus,
   X,
@@ -98,6 +98,68 @@ function loadTabs(): ScratchTab[] {
   return [{ id: uid(), title: "Scratch 1", content: "" }];
 }
 
+// --- Caret/selection offset helpers -------------------------------------
+// We snapshot the editor's selection as a (start, end) character offset
+// pair over its textContent. This survives DOM replacement (unlike Range
+// objects, which point at detached nodes after innerHTML is reassigned) and
+// lets our owned history stack restore the selection on undo/redo.
+
+function getSelectionOffsets(root: HTMLElement): [number, number] {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !root.contains(sel.anchorNode)) {
+    return [0, 0];
+  }
+  const range = sel.getRangeAt(0);
+  const pre = range.cloneRange();
+  pre.selectNodeContents(root);
+  pre.setEnd(range.startContainer, range.startOffset);
+  const start = pre.toString().length;
+  const end = start + range.toString().length;
+  return [start, end];
+}
+
+function setSelectionOffsets(root: HTMLElement, start: number, end: number) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  let node: Text | null;
+  let counted = 0;
+  let startNode: Text | null = null;
+  let startOff = 0;
+  let endNode: Text | null = null;
+  let endOff = 0;
+  while ((node = walker.nextNode() as Text | null)) {
+    const len = node.nodeValue?.length ?? 0;
+    if (!startNode && counted + len >= start) {
+      startNode = node;
+      startOff = Math.min(start - counted, len);
+    }
+    if (!endNode && counted + len >= end) {
+      endNode = node;
+      endOff = Math.min(end - counted, len);
+    }
+    if (startNode && endNode) break;
+    counted += len;
+  }
+  // If end fell past the last text node, clamp to the end of the editor.
+  if (!endNode) {
+    const last = root.lastChild;
+    if (last && last.nodeType === Node.TEXT_NODE) {
+      endNode = last as Text;
+      endOff = last.nodeValue?.length ?? 0;
+    } else if (startNode) {
+      endNode = startNode;
+      endOff = startOff;
+    }
+  }
+  if (!startNode) return; // nothing to select
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.setStart(startNode, startOff);
+  range.setEnd(endNode ?? startNode, endNode ? endOff : startOff);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ settings }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
@@ -135,7 +197,12 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const pasteFlag = useRef<Record<string, boolean>>({});
   const serverLoaded = useRef(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const savedSelection = useRef<Range | null>(null);
+  // Live content buffer keyed by tab id. The editor DOM is authoritative
+  // while editing; this ref mirrors it for persistence without triggering a
+  // React re-render (which would destroy the selection / undo stack).
+  const contentRef = useRef<Record<string, string>>({});
+  const activeIdRef = useRef<string>(activeId);
+  activeIdRef.current = activeId;
 
   // Arabic spellcheck overlay (Electron only): set of misspelled Arabic words
   const editorRef = useRef<HTMLDivElement>(null);
@@ -146,16 +213,105 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [showHighlightPicker, setShowHighlightPicker] = useState(false);
   const [showTextColorPicker, setShowTextColorPicker] = useState(false);
 
-  // Continuously track editor selection via document.selectionchange
-  useEffect(() => {
-    const onSelectionChange = () => {
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.anchorNode)) {
-        savedSelection.current = sel.getRangeAt(0).cloneRange();
-      }
+  // --- Owned undo/redo history -------------------------------------------
+  // The browser's native undo stack is unreliable here (React reconciliation
+  // + innerHTML reassignment fragment it), so we keep our own. Each entry is
+  // an innerHTML snapshot plus the (start,end) character offsets of the
+  // selection at that point. Undo/redo restore both content and caret.
+  interface HistoryEntry {
+    html: string;
+    sel: [number, number];
+  }
+  const historyRef = useRef<HistoryEntry[]>([]);
+  const historyIndexRef = useRef<number>(-1);
+  const historyTimerRef = useRef<number | null>(null);
+  const [historyVersion, setHistoryVersion] = useState(0); // bumps to refresh canUndo/canRedo
+  const seedHandledRef = useRef<Set<string>>(new Set()); // tracks which tab ids have been seeded
+
+  // historyVersion exists only to trigger re-renders when the stack mutates so
+  // the disabled state on the Undo/Redo buttons stays correct.
+  void historyVersion;
+  const historyCanUndo = historyIndexRef.current > 0;
+  const historyCanRedo = historyIndexRef.current < historyRef.current.length - 1;
+
+  const historyPushImmediate = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const entry: HistoryEntry = {
+      html: editor.innerHTML,
+      sel: getSelectionOffsets(editor),
     };
-    document.addEventListener("selectionchange", onSelectionChange);
-    return () => document.removeEventListener("selectionchange", onSelectionChange);
+    // Drop any redo tail beyond the current index.
+    historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
+    const last = historyRef.current[historyRef.current.length - 1];
+    if (last && last.html === entry.html) {
+      last.sel = entry.sel; // just update caret position
+    } else {
+      historyRef.current.push(entry);
+    }
+    // Cap the stack to a sane size.
+    if (historyRef.current.length > 200) {
+      historyRef.current = historyRef.current.slice(-200);
+    }
+    historyIndexRef.current = historyRef.current.length - 1;
+    setHistoryVersion((v) => v + 1);
+  }, []);
+
+  // Coalesce rapid edits (typing) into one history entry.
+  const scheduleHistoryPush = useCallback(() => {
+    if (historyTimerRef.current !== null) {
+      window.clearTimeout(historyTimerRef.current);
+    }
+    historyTimerRef.current = window.setTimeout(() => {
+      historyTimerRef.current = null;
+      historyPushImmediate();
+    }, 350);
+  }, [historyPushImmediate]);
+
+  const historyApply = useCallback((entry: HistoryEntry) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.innerHTML = entry.html;
+    setSelectionOffsets(editor, entry.sel[0], entry.sel[1]);
+    editor.focus();
+    // Keep the ref buffer in sync so persistence still fires.
+    contentRef.current[activeIdRef.current] = entry.html;
+    setTabs((prev) =>
+      prev.map((x) => (x.id === activeIdRef.current ? { ...x, content: entry.html } : x))
+    );
+  }, []);
+
+  const historyUndo = useCallback(() => {
+    if (historyIndexRef.current <= 0) return;
+    // Push any pending edit before stepping back.
+    if (historyTimerRef.current !== null) {
+      window.clearTimeout(historyTimerRef.current);
+      historyTimerRef.current = null;
+      historyPushImmediate();
+    }
+    historyIndexRef.current -= 1;
+    const entry = historyRef.current[historyIndexRef.current];
+    if (entry) historyApply(entry);
+    setHistoryVersion((v) => v + 1);
+  }, [historyApply, historyPushImmediate]);
+
+  const historyRedo = useCallback(() => {
+    if (historyIndexRef.current >= historyRef.current.length - 1) return;
+    historyIndexRef.current += 1;
+    const entry = historyRef.current[historyIndexRef.current];
+    if (entry) historyApply(entry);
+    setHistoryVersion((v) => v + 1);
+  }, [historyApply]);
+
+  const historyInit = useCallback((html: string) => {
+    const editor = editorRef.current;
+    historyRef.current = [{ html, sel: [0, 0] }];
+    historyIndexRef.current = 0;
+    if (editor) {
+      const sel = getSelectionOffsets(editor);
+      historyRef.current[0].sel = sel;
+    }
+    setHistoryVersion((v) => v + 1);
   }, []);
 
   useEffect(() => {
@@ -169,21 +325,22 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Restore saved selection and execute command
+  // Execute a document.execCommand formatting command against the LIVE
+  // selection. The toolbar's onMouseDown preventDefault keeps focus in the
+  // editor so the selection never collapses — no save/restore needed.
   const execFormat = useCallback((command: string, value?: string) => {
     const editor = editorRef.current;
     if (!editor) return;
     editor.focus();
-    if (savedSelection.current) {
-      const sel = window.getSelection();
-      if (sel) {
-        sel.removeAllRanges();
-        sel.addRange(savedSelection.current);
-      }
-    }
     document.execCommand(command, false, value);
     editor.focus();
-  }, []);
+    // Formatting is a discrete edit — snapshot immediately.
+    historyPushImmediate();
+    contentRef.current[activeIdRef.current] = editor.innerHTML;
+    setTabs((prev) =>
+      prev.map((x) => (x.id === activeIdRef.current ? { ...x, content: editor.innerHTML } : x))
+    );
+  }, [historyPushImmediate]);
 
   const htmlToPlainText = (html: string): string => {
     const d = document.createElement("div");
@@ -191,11 +348,22 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     return d.textContent || d.innerText || "";
   };
 
-  const syncEditorContent = useCallback(() => {
-    if (!editorRef.current) return;
-    const html = editorRef.current.innerHTML;
-    setTabs((prev) => prev.map((x) => (x.id === activeId ? { ...x, content: html } : x)));
-  }, [activeId]);
+  // Single entry point for any EXTERNAL content write (rephrase, clear,
+  // undo-rephrase, etc.). Updates the DOM, the history stack, the ref buffer
+  // and React state in one consistent step — no scattered innerHTML writes.
+  const setEditorHtml = useCallback(
+    (html: string) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.innerHTML = html;
+      contentRef.current[activeIdRef.current] = html;
+      setTabs((prev) =>
+        prev.map((x) => (x.id === activeIdRef.current ? { ...x, content: html } : x))
+      );
+      historyInit(html);
+    },
+    [historyInit]
+  );
 
   const active = tabs.find((x) => x.id === activeId) || tabs[0];
   const b = busy[activeId] || {};
@@ -203,6 +371,22 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const hasSecret =
     !!detection &&
     (detection.families.includes("secret") || detection.families.includes("unknown"));
+
+  // Seed the editor DOM imperatively on mount and on every tab switch (the
+  // editor has key={activeId}, so it remounts). After this, React NEVER
+  // re-applies innerHTML while editing — the editor is uncontrolled, which
+  // is what keeps the selection and undo stack intact.
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const html = contentRef.current[activeId] ?? active?.content ?? "";
+    editor.innerHTML = html;
+    historyInit(html);
+    if (!seedHandledRef.current.has(activeId)) {
+      seedHandledRef.current.add(activeId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
 
   const spellApi =
     typeof window !== "undefined" ? window.electronAPI?.spellcheckArabic : undefined;
@@ -356,29 +540,75 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     }
   }, []);
 
-  const setContent = useCallback((id: string, content: string) => {
-    setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, content } : x)));
-  }, []);
+  // setContent is used by external flows (rephrase, undo-rephrase) to replace
+  // the whole editor body. Route through setEditorHtml so the DOM, history
+  // stack and state all update together.
+  const setContent = useCallback(
+    (id: string, content: string) => {
+      if (id === activeIdRef.current) {
+        setEditorHtml(content);
+      } else {
+        setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, content } : x)));
+        contentRef.current[id] = content;
+      }
+    },
+    [setEditorHtml]
+  );
 
   const onEditorInput = useCallback(() => {
-    if (!editorRef.current) return;
-    const html = editorRef.current.innerHTML;
-    setTabs((prev) => prev.map((x) => (x.id === activeId ? { ...x, content: html } : x)));
-    if (pasteFlag.current[activeId]) {
-      pasteFlag.current[activeId] = false;
-      analyze(activeId, html);
+    const editor = editorRef.current;
+    if (!editor) return;
+    const html = editor.innerHTML;
+    const id = activeIdRef.current;
+    // The editor DOM is authoritative — mirror into the ref buffer.
+    contentRef.current[id] = html;
+    // Coalesce typing into discrete history entries.
+    scheduleHistoryPush();
+    if (pasteFlag.current[id]) {
+      pasteFlag.current[id] = false;
+      analyze(id, html);
     }
+    // Auto-title from the first non-empty line.
     const plainText = htmlToPlainText(html);
-    if (plainText.trim() && !titleTouched.current[activeId]) {
+    if (plainText.trim() && !titleTouched.current[id]) {
       const firstLine = plainText.split("\n").map((l) => l.trim()).find(Boolean) || "";
       const auto = firstLine.slice(0, 40) || active.title;
-      setTabs((prev) => prev.map((x) => (x.id === activeId ? { ...x, title: auto } : x)));
+      setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, title: auto } : x)));
     }
-  }, [activeId, active?.title, analyze]);
+    // Sync content into React state so persistence (localStorage + server)
+    // and the Arabic overlay fire. This is SAFE now because the editor is
+    // uncontrolled — React no longer re-applies innerHTML to it (we removed
+    // dangerouslySetInnerHTML), so this re-render cannot destroy the
+    // selection or corrupt the undo stack.
+    setTabs((prev) => {
+      const cur = prev.find((x) => x.id === id);
+      if (cur && cur.content === html) return prev;
+      return prev.map((x) => (x.id === id ? { ...x, content: html } : x));
+    });
+  }, [active?.title, analyze, scheduleHistoryPush]);
 
   const onPaste = () => {
     pasteFlag.current[activeId] = true;
   };
+
+  // Intercept Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl+Y) so they drive OUR
+  // history stack instead of the browser's native execCommand undo, which is
+  // unreliable under React reconciliation.
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        historyUndo();
+      } else if ((key === "z" && e.shiftKey) || key === "y") {
+        e.preventDefault();
+        historyRedo();
+      }
+    },
+    [historyUndo, historyRedo]
+  );
 
   const nextTitle = useCallback((prev: ScratchTab[]) => {
     let n = prev.length + 1;
@@ -530,8 +760,9 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           [activeId]: [...(prev[activeId] || []), original],
         }));
         const newHtml = data.rewritten.replace(/\n/g, "<br>");
+        // setContent routes through setEditorHtml for the active tab, which
+        // updates DOM + history + state together — no direct innerHTML write.
         setContent(activeId, newHtml);
-        if (editorRef.current) editorRef.current.innerHTML = newHtml;
         setStatus(t("scratchpad_rephrased"));
         analyze(activeId, data.rewritten);
       } else {
@@ -553,7 +784,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       [activeId]: stack.slice(0, -1),
     }));
     setContent(activeId, previous);
-    if (editorRef.current) editorRef.current.innerHTML = previous;
     setStatus(t("scratchpad_rephrase_undone"));
     analyze(activeId, previous);
   };
@@ -733,7 +963,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
             type="button"
             onClick={() => {
               setContent(activeId, "");
-              if (editorRef.current) editorRef.current.innerHTML = "";
             }}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
             style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
@@ -814,6 +1043,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
             spellCheck={true}
             onInput={onEditorInput}
             onPaste={onPaste}
+            onKeyDown={onKeyDown}
             onScroll={syncOverlayScroll}
             className="relative z-10 w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors min-h-[200px] max-h-[60vh] overflow-auto"
             style={{
@@ -824,22 +1054,22 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
             }}
-            dangerouslySetInnerHTML={{ __html: active.content || "" }}
           />
         </div>
 
         {/* Formatting toolbar */}
         <div
           ref={toolbarRef}
+          onMouseDown={(e) => e.preventDefault()}
           className="flex items-center gap-0.5 flex-wrap"
           style={{ borderTop: "1px solid var(--border)", paddingTop: "8px" }}
         >
           {/* Undo / Redo */}
           <button
             type="button"
-            onClick={() => execFormat("undo")}
-            
-            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
+            onClick={historyUndo}
+            disabled={!historyCanUndo}
+            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
             style={{ color: "var(--text-dim)" }}
             title={t("scratchpad_undo")}
           >
@@ -847,9 +1077,9 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           </button>
           <button
             type="button"
-            onClick={() => execFormat("redo")}
-            
-            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
+            onClick={historyRedo}
+            disabled={!historyCanRedo}
+            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
             style={{ color: "var(--text-dim)" }}
             title={t("scratchpad_redo")}
           >
