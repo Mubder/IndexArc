@@ -13,6 +13,11 @@ import {
   Undo2,
   Archive,
   ArchiveRestore,
+  Bold,
+  Italic,
+  Underline,
+  Highlighter,
+  Eraser,
 } from "lucide-react";
 import { AnalyzeCandidate, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
@@ -48,6 +53,14 @@ const REWRITE_STYLE_KEYS: Record<RewriteStyle, string> = {
   formal: "rewrite_style_formal",
   casual: "rewrite_style_casual",
 };
+
+const HIGHLIGHT_COLORS = [
+  { hex: "#fef08a", key: "highlight_yellow" },
+  { hex: "#86efac", key: "highlight_green" },
+  { hex: "#93c5fd", key: "highlight_blue" },
+  { hex: "#fca5a5", key: "highlight_red" },
+  { hex: "#d8b4fe", key: "highlight_purple" },
+];
 
 function uid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -110,9 +123,28 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const serverLoaded = useRef(false);
 
   // Arabic spellcheck overlay (Electron only): set of misspelled Arabic words
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [misspelledAr, setMisspelledAr] = useState<Set<string>>(new Set());
+  const [highlightColor, setHighlightColor] = useState<string>("#fef08a");
+  const [showHighlightPicker, setShowHighlightPicker] = useState(false);
+
+  const execFormat = (command: string, value?: string) => {
+    document.execCommand(command, false, value);
+    editorRef.current?.focus();
+  };
+
+  const htmlToPlainText = (html: string): string => {
+    const d = document.createElement("div");
+    d.innerHTML = html;
+    return d.textContent || d.innerText || "";
+  };
+
+  const syncEditorContent = useCallback(() => {
+    if (!editorRef.current) return;
+    const html = editorRef.current.innerHTML;
+    setTabs((prev) => prev.map((x) => (x.id === activeId ? { ...x, content: html } : x)));
+  }, [activeId]);
 
   const active = tabs.find((x) => x.id === activeId) || tabs[0];
   const b = busy[activeId] || {};
@@ -132,7 +164,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       setMisspelledAr((prev) => (prev.size ? new Set<string>() : prev));
       return;
     }
-    const text = active?.content || "";
+    const text = htmlToPlainText(active?.content || "");
     const matches: string[] = text.match(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g) || [];
     const words: string[] = Array.from(new Set(matches));
     if (!words.length) {
@@ -155,16 +187,16 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   }, [active?.content, spellApi]);
 
   const syncOverlayScroll = useCallback(() => {
-    if (overlayRef.current && textareaRef.current) {
-      overlayRef.current.scrollTop = textareaRef.current.scrollTop;
-      overlayRef.current.scrollLeft = textareaRef.current.scrollLeft;
+    if (overlayRef.current && editorRef.current) {
+      overlayRef.current.scrollTop = editorRef.current.scrollTop;
+      overlayRef.current.scrollLeft = editorRef.current.scrollLeft;
     }
   }, []);
 
   // Build the highlighted HTML for the overlay: misspelled Arabic words get a
-  // red wavy underline; everything else is transparent so the textarea shows.
+  // red wavy underline; everything else is transparent so the editor shows.
   const overlayHtml = React.useMemo(() => {
-    const text = active?.content || "";
+    const text = htmlToPlainText(active?.content || "");
     if (!misspelledAr.size) return "";
     const esc = (s: string) =>
       s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -277,19 +309,21 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, content } : x)));
   }, []);
 
-  const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    setContent(activeId, value);
+  const onEditorInput = useCallback(() => {
+    if (!editorRef.current) return;
+    const html = editorRef.current.innerHTML;
+    setTabs((prev) => prev.map((x) => (x.id === activeId ? { ...x, content: html } : x)));
     if (pasteFlag.current[activeId]) {
       pasteFlag.current[activeId] = false;
-      analyze(activeId, value);
+      analyze(activeId, html);
     }
-    if (value.trim() && !titleTouched.current[activeId]) {
-      const firstLine = value.split("\n").map((l) => l.trim()).find(Boolean) || "";
+    const plainText = htmlToPlainText(html);
+    if (plainText.trim() && !titleTouched.current[activeId]) {
+      const firstLine = plainText.split("\n").map((l) => l.trim()).find(Boolean) || "";
       const auto = firstLine.slice(0, 40) || active.title;
       setTabs((prev) => prev.map((x) => (x.id === activeId ? { ...x, title: auto } : x)));
     }
-  };
+  }, [activeId, active?.title, analyze]);
 
   const onPaste = () => {
     pasteFlag.current[activeId] = true;
@@ -375,23 +409,24 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   };
 
   const handleSaveSecret = async () => {
-    const text = active.content.trim();
-    if (!text) return;
+    const plainText = htmlToPlainText(active.content).trim();
+    if (!plainText) return;
+    const stripUrl = (v: string) => v.replace(/^https?:\/\//, "");
     const secretItems: Array<Partial<AnalyzeCandidate> & { notes?: string }> =
       detection?.candidates?.filter((c) => c.family === "secret" || c.family === "unknown") || [];
     const items: Array<Partial<AnalyzeCandidate> & { notes?: string }> =
       secretItems.length > 0
-        ? secretItems
+        ? secretItems.map((c) => ({ ...c, value: stripUrl(c.value || "") }))
         : [
             {
-              value: text,
+              value: stripUrl(plainText),
               type: "note",
               name: active.title,
-              raw_fragment: text,
+              raw_fragment: plainText,
               labels: [],
               type_aliases: ["note"],
               family: "note",
-              notes: text,
+              notes: plainText,
             },
           ];
     setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], save: true } }));
@@ -427,7 +462,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   const handleRephrase = async () => {
     const original = active.content;
-    const text = original.trim();
+    const text = htmlToPlainText(original).trim();
     if (!text) return;
     setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], rewrite: true } }));
     setStatus(t("scratchpad_rewriting"));
@@ -439,13 +474,13 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       });
       const data = await res.json();
       if (res.ok && data.rewritten) {
-        // Push the pre-rephrase text onto this tab's undo stack so the change
-        // can be reverted (and re-reverted through earlier edits).
         setRephraseUndo((prev) => ({
           ...prev,
           [activeId]: [...(prev[activeId] || []), original],
         }));
-        setContent(activeId, data.rewritten);
+        const newHtml = data.rewritten.replace(/\n/g, "<br>");
+        setContent(activeId, newHtml);
+        if (editorRef.current) editorRef.current.innerHTML = newHtml;
         setStatus(t("scratchpad_rephrased"));
         analyze(activeId, data.rewritten);
       } else {
@@ -467,13 +502,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       [activeId]: stack.slice(0, -1),
     }));
     setContent(activeId, previous);
+    if (editorRef.current) editorRef.current.innerHTML = previous;
     setStatus(t("scratchpad_rephrase_undone"));
     analyze(activeId, previous);
   };
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(active.content);
+      await navigator.clipboard.writeText(htmlToPlainText(active.content));
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {}
@@ -599,8 +635,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => analyze(activeId, active.content)}
-            disabled={b.analyze || !active.content.trim()}
+            onClick={() => analyze(activeId, htmlToPlainText(active.content))}
+            disabled={b.analyze || !htmlToPlainText(active.content).trim()}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
             style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
           >
@@ -644,7 +680,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
           <button
             type="button"
-            onClick={() => setContent(activeId, "")}
+            onClick={() => {
+              setContent(activeId, "");
+              if (editorRef.current) editorRef.current.innerHTML = "";
+            }}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
             style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
           >
@@ -715,24 +754,115 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               dangerouslySetInnerHTML={{ __html: overlayHtml + "\n" }}
             />
           )}
-          <textarea
-            ref={textareaRef}
-            value={active.content}
-            onChange={onChange}
+          <div
+            ref={editorRef}
+            key={activeId}
+            contentEditable
+            suppressContentEditableWarning
+            dir="auto"
+            spellCheck={true}
+            onInput={onEditorInput}
             onPaste={onPaste}
             onScroll={syncOverlayScroll}
-            spellCheck={true}
-            dir="auto"
-            rows={14}
-            className="relative z-10 w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors resize-none"
+            className="relative z-10 w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors min-h-[200px] max-h-[60vh] overflow-auto"
             style={{
               background: overlayHtml ? "transparent" : "var(--bg-input)",
               border: "1px solid var(--border-input)",
               color: "var(--text)",
               fontFamily: "var(--font-mono)",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
             }}
-            placeholder={t("scratchpad_placeholder")}
+            dangerouslySetInnerHTML={{ __html: active.content || "" }}
           />
+        </div>
+
+        {/* Formatting toolbar */}
+        <div
+          className="flex items-center gap-1 flex-wrap"
+          style={{ borderTop: "1px solid var(--border)", paddingTop: "8px" }}
+        >
+          <button
+            type="button"
+            onClick={() => execFormat("bold")}
+            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
+            style={{ color: "var(--text-dim)" }}
+            title={t("scratchpad_bold")}
+          >
+            <Bold className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => execFormat("italic")}
+            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
+            style={{ color: "var(--text-dim)" }}
+            title={t("scratchpad_italic")}
+          >
+            <Italic className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => execFormat("underline")}
+            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
+            style={{ color: "var(--text-dim)" }}
+            title={t("scratchpad_underline")}
+          >
+            <Underline className="w-3.5 h-3.5" />
+          </button>
+          <div className="relative" onMouseLeave={() => setShowHighlightPicker(false)}>
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => execFormat("hiliteColor", highlightColor)}
+                className="p-1.5 rounded-l-lg transition-all hover:opacity-100 opacity-70"
+                style={{ color: "var(--text-dim)" }}
+                title={t("scratchpad_highlight")}
+              >
+                <Highlighter className="w-3.5 h-3.5" />
+                <span
+                  className="absolute bottom-0.5 left-2 w-2 h-0.5 rounded-full"
+                  style={{ background: highlightColor }}
+                />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowHighlightPicker((s) => !s)}
+                className="px-0.5 py-1.5 rounded-r-lg transition-all hover:opacity-100 opacity-70 text-[8px]"
+                style={{ color: "var(--text-dim)" }}
+              >
+                ▾
+              </button>
+            </div>
+            {showHighlightPicker && (
+              <div
+                className="absolute bottom-full left-0 mb-1 flex gap-1 p-1.5 rounded-lg z-50"
+                style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border)" }}
+              >
+                {HIGHLIGHT_COLORS.map((c) => (
+                  <button
+                    key={c.hex}
+                    type="button"
+                    onClick={() => { setHighlightColor(c.hex); setShowHighlightPicker(false); }}
+                    className="w-5 h-5 rounded-full border-2 transition-all"
+                    style={{
+                      background: c.hex,
+                      borderColor: highlightColor === c.hex ? "var(--accent-bright)" : "transparent",
+                    }}
+                    title={t(c.key as Parameters<typeof getTranslation>[1])}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => execFormat("removeFormat")}
+            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
+            style={{ color: "var(--text-dim)" }}
+            title={t("scratchpad_clear_format")}
+          >
+            <Eraser className="w-3.5 h-3.5" />
+          </button>
         </div>
 
         {/* Detection status, moved to underneath the text box. */}

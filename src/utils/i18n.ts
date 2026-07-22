@@ -254,6 +254,16 @@ export interface TranslationDict {
   scratchpad_delete: string;
   scratchpad_ai_detected: string;
   scratchpad_no_detection: string;
+  scratchpad_bold: string;
+  scratchpad_italic: string;
+  scratchpad_underline: string;
+  scratchpad_highlight: string;
+  scratchpad_clear_format: string;
+  highlight_yellow: string;
+  highlight_green: string;
+  highlight_blue: string;
+  highlight_red: string;
+  highlight_purple: string;
 
   setup_title: string;
   setup_collapse: string;
@@ -536,6 +546,16 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_delete: "Delete tab",
     scratchpad_ai_detected: "AI detected",
     scratchpad_no_detection: "Nothing detected yet — paste or click Detect",
+    scratchpad_bold: "Bold",
+    scratchpad_italic: "Italic",
+    scratchpad_underline: "Underline",
+    scratchpad_highlight: "Highlight",
+    scratchpad_clear_format: "Clear formatting",
+    highlight_yellow: "Yellow",
+    highlight_green: "Green",
+    highlight_blue: "Blue",
+    highlight_red: "Red",
+    highlight_purple: "Purple",
 
     setup_title: "Setup & Dependencies",
     setup_collapse: "Details",
@@ -816,6 +836,16 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_delete: "حذف التبويب",
     scratchpad_ai_detected: "اكتشف الذكاء",
     scratchpad_no_detection: "لم يُكتشف شيء بعد — الصق أو اضغط اكتشاف",
+    scratchpad_bold: "عريض",
+    scratchpad_italic: "مائل",
+    scratchpad_underline: "تحته خط",
+    scratchpad_highlight: "تمييز",
+    scratchpad_clear_format: "إزالة التنسيق",
+    highlight_yellow: "أصفر",
+    highlight_green: "أخضر",
+    highlight_blue: "أزرق",
+    highlight_red: "أحمر",
+    highlight_purple: "بنفسجي",
 
     setup_title: "الإعداد والاعتماديات",
     setup_collapse: "التفاصيل",
