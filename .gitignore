@@ -14,8 +14,9 @@ backups/
 .env
 .env.*
 
-# OS / editor
+# OS / editor / agent
 .DS_Store
 Thumbs.db
 *.log
 .vs/
+.zcode/
