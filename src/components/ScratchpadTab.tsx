@@ -21,6 +21,7 @@ import {
   Undo,
   Redo,
   Palette,
+  ClipboardPaste,
 } from "lucide-react";
 import { AnalyzeCandidate, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
@@ -587,8 +588,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     });
   }, [active?.title, analyze, scheduleHistoryPush]);
 
-  const onPaste = () => {
+  const [pastePlain, setPastePlain] = useState(true);
+
+  const onPaste = (e: React.ClipboardEvent) => {
     pasteFlag.current[activeId] = true;
+    if (!pastePlain) return;
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain");
+    document.execCommand("insertText", false, text);
   };
 
   // Intercept Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl+Y) so they drive OUR
@@ -1236,6 +1243,23 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
             title={t("scratchpad_clear_format")}
           >
             <Eraser className="w-3.5 h-3.5" />
+          </button>
+
+          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
+
+          {/* Paste mode toggle */}
+          <button
+            type="button"
+            onClick={() => setPastePlain((v) => !v)}
+            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
+            style={{
+              color: pastePlain ? "var(--accent-bright)" : "var(--text-dim)",
+              background: pastePlain ? "var(--accent-bg)" : "transparent",
+              border: pastePlain ? "1px solid var(--border-glow)" : "1px solid transparent",
+            }}
+            title={pastePlain ? t("paste_plain_on") : t("paste_plain_off")}
+          >
+            <ClipboardPaste className="w-3.5 h-3.5" />
           </button>
         </div>
 

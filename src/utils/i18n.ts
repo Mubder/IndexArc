@@ -260,6 +260,8 @@ export interface TranslationDict {
   scratchpad_highlight: string;
   scratchpad_text_color: string;
   scratchpad_clear_format: string;
+  paste_plain_on: string;
+  paste_plain_off: string;
   scratchpad_undo: string;
   scratchpad_redo: string;
   highlight_yellow: string;
@@ -562,6 +564,8 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_highlight: "Highlight",
     scratchpad_text_color: "Text color",
     scratchpad_clear_format: "Clear formatting",
+    paste_plain_on: "Paste as plain text (ON)",
+    paste_plain_off: "Paste as plain text (OFF — keep formatting)",
     scratchpad_undo: "Undo",
     scratchpad_redo: "Redo",
     highlight_yellow: "Yellow",
@@ -862,6 +866,8 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_highlight: "تمييز",
     scratchpad_text_color: "لون النص",
     scratchpad_clear_format: "إزالة التنسيق",
+    paste_plain_on: "اللصق كنص عادي (مفعّل)",
+    paste_plain_off: "اللصق كنص عادي (معطل — إبقاء التنسيق)",
     scratchpad_undo: "تراجع",
     scratchpad_redo: "إعادة",
     highlight_yellow: "أصفر",
