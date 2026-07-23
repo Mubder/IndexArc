@@ -75,6 +75,7 @@ IndexArc/
 ├── package.json       # scripts + electron-builder "build" config
 ├── Dockerfile
 ├── README.md
+├── SECURITY.md          # Security policy and repository cleanliness rules
 ├── DESKTOP_BUILD_GUIDE.md
 └── docs/              # this documentation set
 ```
@@ -248,6 +249,7 @@ A typical end-to-end change touches these layers in order:
 
 - **TypeScript everywhere** on the frontend and `server/` (the Electron process files are `.cjs`).
 - **No comments unless they add real value** — the codebase favors self-descriptive code.
+- **Zero-Secrets Compliance:** Never hardcode secrets, API keys, passwords, or personal credentials anywhere in tracked code or logs. Always use local `.env` files for developer overrides and adhere strictly to the guidelines in [SECURITY.md](../SECURITY.md).
 - **Never log full secret values.** Mask in the UI (`maskValue`) and avoid writing secrets to logs.
 - **Atomic writes** for any on-disk state (use `VaultStore` / `atomicWrite`).
 - **Localhost only** — the server must bind `127.0.0.1`.

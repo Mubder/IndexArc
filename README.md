@@ -13,6 +13,7 @@ Full documentation lives in [`docs/`](./docs/README.md):
 - [Architecture & Data Model](./docs/ARCHITECTURE.md) — process model, portable root, encryption, backups
 - [API Reference](./docs/API_REFERENCE.md) — every `/api/*` endpoint
 - [Build & Release](./docs/BUILD_AND_RELEASE.md) — builds, installer, signing, data safety
+- [Security Policy & Cleanliness](./SECURITY.md) — local data protection, threat model, repository audit, Zero-Secrets compliance
 
 ## Features
 
@@ -95,6 +96,7 @@ Packaged builds write vault data next to the executable (`data/`, `config/`). Se
 - Server binds to **localhost** only.
 - Treat `data/vault.json` as sensitive — encrypt the USB or the file if needed.
 - Logs never intentionally store full secret values.
+- See [SECURITY.md](./SECURITY.md) for our detailed threat model, local encryption design (AES-256-GCM), and guidelines for keeping the repository clean of private data.
 
 ## License
 

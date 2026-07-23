@@ -19,6 +19,7 @@ Everything lives in **one folder** (USB-safe), with optional AES-256-GCM encrypt
 Root-level docs that still apply:
 
 - [`../README.md`](../README.md) — quick project overview.
+- [`../SECURITY.md`](../SECURITY.md) — security policy and repository cleanliness rules.
 - [`../DESKTOP_BUILD_GUIDE.md`](../DESKTOP_BUILD_GUIDE.md) — original desktop build notes (superseded in detail by [Build & Release](./BUILD_AND_RELEASE.md)).
 
 ---
