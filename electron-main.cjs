@@ -357,6 +357,37 @@ ipcMain.handle("open-external", async (_e, url) => {
   }
 });
 
+function stripArabicDiacritics(str) {
+  return str.replace(/[\u064B-\u0652\u0640\u0670]/g, "");
+}
+
+function checkArabicWord(w) {
+  if (!arSpell) return true;
+  const clean = stripArabicDiacritics(w);
+  if (!clean || clean.length <= 1) return true;
+  if (arSpell.correct(clean)) return true;
+
+  // Normalize Alef / Alef Maksura / Teh Marbuta
+  const norm = clean
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه");
+  if (arSpell.correct(norm)) return true;
+
+  // Common Arabic prefix stripping (wa-, fa-, bi-, li-, ka-, al-)
+  const prefixes = ["وبال", "فبال", "بال", "وكال", "فكال", "كال", "ولل", "فلل", "لل", "وال", "فال", "ال", "و", "ف", "ب", "ل", "ك"];
+  for (const p of prefixes) {
+    if (clean.startsWith(p) && clean.length - p.length >= 2) {
+      const rest = clean.slice(p.length);
+      if (arSpell.correct(rest)) return true;
+      const restNorm = rest.replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه");
+      if (arSpell.correct(restNorm)) return true;
+    }
+  }
+
+  return false;
+}
+
 // Check a batch of Arabic words; returns the list of misspelled ones.
 ipcMain.handle("spellcheck-ar", async (_e, words) => {
   if (!arSpell || !Array.isArray(words)) return [];
@@ -365,7 +396,7 @@ ipcMain.handle("spellcheck-ar", async (_e, words) => {
   for (const w of words) {
     if (typeof w !== "string" || seen.has(w)) continue;
     seen.add(w);
-    if (isArabicWord(w) && !arSpell.correct(w)) bad.push(w);
+    if (isArabicWord(w) && !checkArabicWord(w)) bad.push(w);
   }
   return bad;
 });

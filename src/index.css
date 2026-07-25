@@ -22,15 +22,19 @@
 /* ── Spellcheck overlay (Scratchpad): sizing/metrics that must mirror the
    underlying textarea so the red underlines line up. ── */
 .ar-spell-overlay {
-  line-height: inherit;
-  letter-spacing: inherit;
-  tab-size: inherit;
+  line-height: inherit !important;
+  letter-spacing: inherit !important;
+  tab-size: inherit !important;
+  box-sizing: border-box !important;
 }
 
 .ar-spell-overlay .ar-misspell {
   text-decoration: underline wavy #f87171;
   text-decoration-skip-ink: none;
   text-underline-offset: 3px;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  display: inline;
 }
 
 /* ── Highlight Colors ── */

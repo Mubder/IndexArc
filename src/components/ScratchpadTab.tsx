@@ -1022,9 +1022,12 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
               lang="ar"
               className="ar-spell-overlay font-arabic ar-text absolute inset-0 z-0 w-full rounded-xl px-3 py-2 text-sm pointer-events-none whitespace-pre-wrap break-words"
               style={{
-                border: "1px solid var(--border-input)",
+                border: "1px solid transparent",
                 color: "transparent",
                 fontFamily: "var(--font-mono)",
+                lineHeight: "1.625",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
               }}
               dangerouslySetInnerHTML={{ __html: overlayHtml + "\n" }}
             />
@@ -1036,7 +1039,7 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
             suppressContentEditableWarning
             dir="auto"
             lang="ar"
-            spellCheck={true}
+            spellCheck={false}
             onInput={onEditorInput}
             onPaste={onPaste}
             onKeyDown={onKeyDown}
@@ -1046,6 +1049,7 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
               border: "1px solid var(--border-input)",
               color: "var(--text)",
               fontFamily: "var(--font-mono)",
+              lineHeight: "1.625",
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
             }}
