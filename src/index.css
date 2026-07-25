@@ -20,21 +20,43 @@
 }
 
 /* ── Spellcheck overlay (Scratchpad): sizing/metrics that must mirror the
-   underlying textarea so the red underlines line up. ── */
-.ar-spell-overlay {
+   underlying editor so the red underlines line up. ── */
+.spell-overlay {
   line-height: inherit !important;
   letter-spacing: inherit !important;
   tab-size: inherit !important;
   box-sizing: border-box !important;
+  /* Force consistent font metrics for mixed-script overlay */
+  font-family: inherit !important;
+  font-size: inherit !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  direction: ltr; /* overlay is LTR; individual spans handle their own direction */
 }
 
-.ar-spell-overlay .ar-misspell {
+/* Robust squiggly underline that sits BELOW Arabic descenders */
+.spell-overlay .spell-misspell {
+  /* Standard wavy underline */
   text-decoration: underline wavy #f87171;
   text-decoration-skip-ink: none;
-  text-underline-offset: 3px;
+  /* Offset pushes line below tallest descenders in Arabic fonts */
+  text-underline-offset: 5px;
+  /* Ensure inline layout matches editor text flow */
+  display: inline;
   font-size: inherit !important;
   line-height: inherit !important;
-  display: inline;
+  /* Prevent underline from being clipped by line-height */
+  vertical-align: baseline;
+}
+
+/* For browsers that don't support text-underline-offset well, fallback to border-bottom */
+@supports not (text-underline-offset: 5px) {
+  .spell-overlay .spell-misspell {
+    text-decoration: none;
+    border-bottom: 2px solid #f87171;
+    border-bottom-style: wavy;
+    padding-bottom: 3px;
+  }
 }
 
 /* ── Highlight Colors ── */

@@ -5,7 +5,7 @@ interface ElectronAPI {
   installOllama: () => Promise<{ ok: boolean; error?: string; path?: string | null }>;
   startOllama: () => Promise<boolean>;
   openExternal: (url: string) => Promise<boolean>;
-  spellcheckArabic: (words: string[]) => Promise<string[]>;
+  spellcheckWords: (words: string[]) => Promise<string[]>;
 }
 
 declare global {

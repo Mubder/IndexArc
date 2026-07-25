@@ -7,34 +7,67 @@ const fs = require("fs");
 const os = require("os");
 const { execSync } = require("child_process");
 
-// ── Arabic spellchecker (Hunspell via nspell) ──
-// Chromium's built-in spellchecker has no Arabic dictionary, so we load a
-// bundled Hunspell dictionary and check Arabic words ourselves, surfacing
-// suggestions through the right-click context menu.
+// ── Note editor spellchecker (Hunspell via nspell, for BOTH languages) ──
+// Chromium's built-in spellchecker has no Arabic dictionary at all (verified:
+// "ar" never appears in session.availableSpellCheckerLanguages), so Arabic
+// has always needed a bundled Hunspell dictionary checked ourselves. On
+// Windows, Chromium's native checker also turned out to flag Arabic script
+// as misspelled English once native spellcheck was enabled on the note
+// editor (there is no per-script skip there, unlike its behavior on a
+// regular web page) — rendering its underline glyph-through the Arabic text.
+// So the note editor's spellcheck attribute stays OFF, and BOTH English and
+// Arabic are checked here, uniformly, via our own overlay + context menu.
 let arSpell = null;
+let enSpell = null;
 const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
+const LATIN_WORD_RE = /^[A-Za-z]+(?:['-][A-Za-z]+)*$/;
 
-function loadArabicSpellchecker() {
+// Characters to strip from tokens before spellcheck (invisible BIDI controls, diacritics, Tatweel)
+const CLEAN_TOKEN_RE = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\u0640\u064B-\u0652\u0670]/g;
+
+function sanitizeToken(token) {
+  return typeof token === "string" ? token.replace(CLEAN_TOKEN_RE, "") : "";
+}
+
+function isArabicToken(token) {
+  return typeof token === "string" && ARABIC_RE.test(token);
+}
+
+function isLatinToken(token) {
+  return typeof token === "string" && LATIN_WORD_RE.test(token);
+}
+
+function loadDict(lang) {
   try {
     const nspell = require("nspell");
-    const dir = path.join(getResourcePath(), "dictionaries", "ar");
-    const affPath = path.join(dir, "ar.aff");
-    const dicPath = path.join(dir, "ar.dic");
+    const dir = path.join(getResourcePath(), "dictionaries", lang);
+    const affPath = path.join(dir, `${lang}.aff`);
+    const dicPath = path.join(dir, `${lang}.dic`);
     if (!fs.existsSync(affPath) || !fs.existsSync(dicPath)) {
-      console.log(`[spellcheck] Arabic dictionary not found at ${dir}`);
-      return;
+      console.log(`[spellcheck] ${lang} dictionary not found at ${dir}`);
+      return null;
     }
     const aff = fs.readFileSync(affPath);
     const dic = fs.readFileSync(dicPath);
-    arSpell = nspell({ aff, dic });
-    console.log("[spellcheck] Arabic dictionary loaded");
+    console.log(`[spellcheck] ${lang} dictionary loaded`);
+    return nspell({ aff, dic });
   } catch (e) {
-    console.log(`[spellcheck] Arabic dictionary load failed: ${e && e.message ? e.message : e}`);
+    console.log(`[spellcheck] ${lang} dictionary load failed: ${e && e.message ? e.message : e}`);
+    return null;
   }
+}
+
+function loadSpellcheckers() {
+  arSpell = loadDict("ar");
+  enSpell = loadDict("en");
 }
 
 function isArabicWord(word) {
   return typeof word === "string" && ARABIC_RE.test(word);
+}
+
+function isLatinWord(word) {
+  return typeof word === "string" && LATIN_WORD_RE.test(word);
 }
 
 function logCrash(tag, e) {
@@ -361,42 +394,100 @@ function stripArabicDiacritics(str) {
   return str.replace(/[\u064B-\u0652\u0640\u0670]/g, "");
 }
 
+// Spelling variants worth trying for a given Arabic stem: the letter itself
+// is sometimes written inconsistently (ة/ه confusion is common even among
+// native writers), and the hamza seat on a final "اء" shifts to "ائ" once a
+// suffix is attached (e.g. أصدقاء → أصدقائهم) — a genuine orthographic rule,
+// not a typo, so both spellings must be accepted.
+function arabicWordVariants(word) {
+  const out = new Set([word]);
+  out.add(word.replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه"));
+  if (word.endsWith("ائ")) out.add(word.slice(0, -2) + "اء");
+  return out;
+}
+
+// Attached proclitics (wa-, fa-, bi-, li-, ka-, sa- "will" and combinations).
+const AR_PREFIXES = ["وبال", "فبال", "بال", "وكال", "فكال", "كال", "ولل", "فلل", "لل", "وال", "فال", "ال", "وس", "فس", "و", "ف", "ب", "ل", "ك", "س"];
+// Attached enclitics (possessive/object pronouns, plural & dual markers, and
+// the bare feminine ta-marbuta ة). Single-letter pronoun suffixes ي/ه/ك are
+// deliberately excluded — they are too easily confused with root letters and
+// would hide real misspellings.
+const AR_SUFFIXES = ["هما", "كما", "تما", "تين", "تان", "ية", "ون", "ين", "ات", "ني", "ها", "هم", "هن", "كم", "كن", "نا", "تم", "تن", "وا", "ة"];
+
+function arabicWordIsKnown(word) {
+  for (const v of arabicWordVariants(word)) {
+    if (arSpell.correct(v)) return true;
+  }
+  return false;
+}
+
+// Multiple suffixes can match the same ending (e.g. "ية" and "ة" both match
+// "نهائية"), and only one of them may lead to a real stem, so every
+// candidate has to be tried rather than stopping at the first match.
+function stripArabicSuffixCandidates(word) {
+  const out = [];
+  for (const s of AR_SUFFIXES) {
+    if (word.endsWith(s) && word.length - s.length >= 2) {
+      out.push(word.slice(0, word.length - s.length));
+    }
+  }
+  return out;
+}
+
+// Hunspell's affix model does not fully capture Arabic's rich derivational
+// morphology (circumfixes, broken plurals, stacked clitics), which is a
+// known limitation of every Hunspell-based Arabic dictionary (including the
+// one bundled here — e.g. it lists masculine adjectives like كبير but not
+// their feminine كبيرة form). To cut down on false positives we additionally
+// strip the most common attached prefixes/suffixes (individually and
+// combined) before giving up on a word.
 function checkArabicWord(w) {
   if (!arSpell) return true;
   const clean = stripArabicDiacritics(w);
   if (!clean || clean.length <= 1) return true;
-  if (arSpell.correct(clean)) return true;
+  if (arabicWordIsKnown(clean)) return true;
 
-  // Normalize Alef / Alef Maksura / Teh Marbuta
-  const norm = clean
-    .replace(/[أإآ]/g, "ا")
-    .replace(/ى/g, "ي")
-    .replace(/ة/g, "ه");
-  if (arSpell.correct(norm)) return true;
+  for (const cand of stripArabicSuffixCandidates(clean)) {
+    if (arabicWordIsKnown(cand)) return true;
+  }
 
-  // Common Arabic prefix stripping (wa-, fa-, bi-, li-, ka-, al-)
-  const prefixes = ["وبال", "فبال", "بال", "وكال", "فكال", "كال", "ولل", "فلل", "لل", "وال", "فال", "ال", "و", "ف", "ب", "ل", "ك"];
-  for (const p of prefixes) {
+  for (const p of AR_PREFIXES) {
     if (clean.startsWith(p) && clean.length - p.length >= 2) {
       const rest = clean.slice(p.length);
-      if (arSpell.correct(rest)) return true;
-      const restNorm = rest.replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه");
-      if (arSpell.correct(restNorm)) return true;
+      if (arabicWordIsKnown(rest)) return true;
+      for (const cand of stripArabicSuffixCandidates(rest)) {
+        if (arabicWordIsKnown(cand)) return true;
+      }
     }
   }
 
   return false;
 }
 
-// Check a batch of Arabic words; returns the list of misspelled ones.
-ipcMain.handle("spellcheck-ar", async (_e, words) => {
-  if (!arSpell || !Array.isArray(words)) return [];
+function checkEnglishWord(w) {
+  if (!enSpell) return true;
+  if (!w || w.length <= 1) return true;
+  return enSpell.correct(w);
+}
+
+// Check a batch of words (English and/or Arabic, mixed-language notes are
+// the whole point) and return the ones that are misspelled.
+ipcMain.handle("spellcheck-words", async (_e, words) => {
+  if (!Array.isArray(words)) return [];
   const bad = [];
   const seen = new Set();
   for (const w of words) {
     if (typeof w !== "string" || seen.has(w)) continue;
     seen.add(w);
-    if (isArabicWord(w) && !checkArabicWord(w)) bad.push(w);
+    // Client already sanitized and filtered, but re-verify for safety
+    const clean = sanitizeToken(w);
+    if (!clean || clean.length <= 1) continue;
+    if (isArabicToken(clean)) {
+      if (arSpell && !checkArabicWord(clean)) bad.push(clean);
+    } else if (isLatinToken(clean)) {
+      if (enSpell && !checkEnglishWord(clean)) bad.push(clean);
+    }
+    // Ignore mixed-script / numeric / symbol tokens
   }
   return bad;
 });
@@ -592,13 +683,22 @@ function createWindow() {
       menu.append(new MenuItem({ type: "separator" }));
     }
 
-    // Arabic spellcheck right-click menu: check word under cursor
-    if (arSpell && params.isEditable) {
+    // Custom spellcheck right-click menu (Arabic and, for the note editor
+    // where Chromium's native checker is disabled, English too): check the
+    // word under the cursor ourselves whenever the native checker didn't
+    // already flag something, so suggestions never get duplicated for
+    // fields where the native English checker is active.
+    if ((arSpell || enSpell) && params.isEditable && !params.misspelledWord) {
       const word = (params.selectionText || "").trim();
-      if (isArabicWord(word) && !checkArabicWord(word)) {
-        const clean = stripArabicDiacritics(word);
+      const isAr = isArabicWord(word);
+      const isEn = !isAr && isLatinWord(word);
+      const engine = isAr ? arSpell : isEn ? enSpell : null;
+      const misspelled = isAr ? !checkArabicWord(word) : isEn ? !checkEnglishWord(word) : false;
+
+      if (engine && misspelled) {
+        const clean = isAr ? stripArabicDiacritics(word) : word;
         const suggestions = Array.from(
-          new Set([...arSpell.suggest(word), ...arSpell.suggest(clean)])
+          new Set([...engine.suggest(word), ...engine.suggest(clean)])
         ).slice(0, 6);
 
         if (suggestions.length) {
@@ -619,7 +719,7 @@ function createWindow() {
             label: `Add "${word}" to dictionary`,
             click: () => {
               try {
-                arSpell.add(word);
+                engine.add(word);
               } catch (_) {
                 /* best-effort */
               }
@@ -668,7 +768,7 @@ ipcMain.handle("select-folder", async () => {
 
 app.on("ready", async () => {
   try {
-    loadArabicSpellchecker();
+    loadSpellcheckers();
     await startOllamaIfNeeded();
     startBackendServer();
     createWindow();

@@ -207,7 +207,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   // Arabic spellcheck overlay (Electron only): set of misspelled Arabic words
   const editorRef = useRef<HTMLDivElement>(null);
-  const [misspelledAr, setMisspelledAr] = useState<Set<string>>(new Set());
+  const [misspelledWords, setMisspelledWords] = useState<Set<string>>(new Set());
   const [highlightColor, setHighlightColor] = useState<string>("#fef08a");
   const [textColor, setTextColor] = useState<string>("#ffffff");
   const [showHighlightPicker, setShowHighlightPicker] = useState(false);
@@ -390,12 +390,65 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
-  const checkArabicWords = useCallback(async (words: string[]): Promise<string[]> => {
-    if (typeof window !== "undefined" && window.electronAPI?.spellcheckArabic) {
-      return window.electronAPI.spellcheckArabic(words);
+// Matches a "word" in either script: a run of Arabic letters, or a run of
+// Latin letters (with internal apostrophes/hyphens, e.g. "don't", "well-known").
+// Using Intl.Segmenter for accurate word boundaries across scripts (RTL/LTR).
+// Fallback regex for older environments (kept for server-side use).
+const SPELL_WORD_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+|[A-Za-z]+(?:['-][A-Za-z]+)*/g;
+
+// Unicode ranges for script detection
+const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
+const LATIN_WORD_RE = /^[A-Za-z]+(?:['-][A-Za-z]+)*$/;
+
+// Characters to strip from tokens before spellcheck (invisible BIDI controls, diacritics, Tatweel)
+const CLEAN_TOKEN_RE = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\u0640\u064B-\u0652\u0670]/g;
+
+function sanitizeToken(token: string): string {
+  return token.replace(CLEAN_TOKEN_RE, "");
+}
+
+function isArabicToken(token: string): boolean {
+  return ARABIC_RE.test(token);
+}
+
+function isLatinToken(token: string): boolean {
+  return LATIN_WORD_RE.test(token);
+}
+
+// Extract words using Intl.Segmenter (browser) with fallback to regex
+function extractSpellWords(text: string): string[] {
+  const words: string[] = [];
+  try {
+    // Intl.Segmenter gives accurate word boundaries with character indices
+    const segmenter = new Intl.Segmenter(["en", "ar"], { granularity: "word" });
+    for (const segment of segmenter.segment(text)) {
+      if (!segment.isWordLike) continue;
+      const raw = segment.segment;
+      const clean = sanitizeToken(raw);
+      if (!clean || clean.length <= 1) continue;
+      // Only accept tokens that are purely Arabic or purely Latin script
+      if (isArabicToken(clean) || isLatinToken(clean)) {
+        words.push(clean);
+      }
+    }
+  } catch {
+    // Fallback: regex-based extraction (e.g., older browser / server)
+    const matches = text.match(SPELL_WORD_RE) || [];
+    for (const m of matches) {
+      const clean = sanitizeToken(m);
+      if (!clean || clean.length <= 1) continue;
+      if (isArabicToken(clean) || isLatinToken(clean)) words.push(clean);
+    }
+  }
+  return Array.from(new Set(words));
+}
+
+  const checkWords = useCallback(async (words: string[]): Promise<string[]> => {
+    if (typeof window !== "undefined" && window.electronAPI?.spellcheckWords) {
+      return window.electronAPI.spellcheckWords(words);
     }
     try {
-      const res = await fetch("/api/spellcheck-ar", {
+      const res = await fetch("/api/spellcheck-words", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ words }),
@@ -408,22 +461,25 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     }
   }, []);
 
-  // Debounced Arabic spellcheck of the active tab's content. Runs regardless of
-  // the UI language — it is driven by the CONTENT (any Arabic text), so writing
-  // Arabic while the interface is English still gets red-underline marking.
+  // Debounced spellcheck of the active tab's content, for BOTH English and
+  // Arabic. This runs entirely through our own custom checker rather than
+  // Chromium's native spellcheck attribute: Chromium has no Arabic Hunspell
+  // dictionary at all, and enabling its native checker on this editor also
+  // made it (incorrectly) draw its own misspelling underline through correct
+  // Arabic words on Windows. Keeping both languages on one custom pipeline
+  // avoids that conflict and works identically regardless of UI language.
   useEffect(() => {
     const text = htmlToPlainText(active?.content || "");
-    const matches: string[] = text.match(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g) || [];
-    const words: string[] = Array.from(new Set(matches));
+    const words = extractSpellWords(text);
     if (!words.length) {
-      setMisspelledAr((prev) => (prev.size ? new Set<string>() : prev));
+      setMisspelledWords((prev) => (prev.size ? new Set<string>() : prev));
       return;
     }
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
-        const bad = await checkArabicWords(words);
-        if (!cancelled) setMisspelledAr(new Set(bad));
+        const bad = await checkWords(words);
+        if (!cancelled) setMisspelledWords(new Set(bad));
       } catch {
         /* ignore */
       }
@@ -432,13 +488,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [active?.content, checkArabicWords]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.content, checkWords]);
 
   // Build the highlighted HTML for the overlay: preserving exact DOM node structure
   // so paragraph breaks, margins, and line wraps mirror the editor with 0px offset.
   const overlayHtml = React.useMemo(() => {
     const rawHtml = active?.content || "";
-    if (!misspelledAr.size || !rawHtml) return "";
+    if (!misspelledWords.size || !rawHtml) return "";
 
     const d = document.createElement("div");
     d.innerHTML = rawHtml;
@@ -446,22 +503,34 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     const processNode = (node: Node) => {
       if (node.nodeType === Node.TEXT_NODE) {
         const text = node.nodeValue || "";
-        if (!/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(text)) return;
-
-        const parts = text.split(/([\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+)/g);
+        // Use the same tokenization logic as the spellchecker for consistent matching
+        const segmenter = new Intl.Segmenter(["en", "ar"], { granularity: "word" });
+        const segments = Array.from(segmenter.segment(text));
         let hasBad = false;
         const frag = document.createDocumentFragment();
 
-        for (const part of parts) {
-          const cleanPart = part.replace(/[\u00A0\u200B]/g, " ");
-          if (misspelledAr.has(part) || misspelledAr.has(cleanPart)) {
+        for (const segment of segments) {
+          const raw = segment.segment;
+          if (!segment.isWordLike) {
+            // Non-word segment (whitespace, punctuation) - keep as-is
+            frag.appendChild(document.createTextNode(raw));
+            continue;
+          }
+          const clean = sanitizeToken(raw);
+          if (!clean || clean.length <= 1 || !(isArabicToken(clean) || isLatinToken(clean))) {
+            // Not a spellcheckable word (mixed script, number, symbol) - keep as-is
+            frag.appendChild(document.createTextNode(raw));
+            continue;
+          }
+          // Check if this normalized token is misspelled
+          if (misspelledWords.has(clean)) {
             hasBad = true;
             const span = document.createElement("span");
-            span.className = "ar-misspell";
-            span.textContent = part;
+            span.className = "spell-misspell";
+            span.textContent = raw; // preserve original text for display
             frag.appendChild(span);
           } else {
-            frag.appendChild(document.createTextNode(part));
+            frag.appendChild(document.createTextNode(raw));
           }
         }
 
@@ -479,7 +548,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
     Array.from(d.childNodes).forEach(processNode);
     return d.innerHTML;
-  }, [active?.content, misspelledAr]);
+  }, [active?.content, misspelledWords]);
 
   // Load tabs from the server (portable, survives reinstall/update). The
   // server copy is authoritative when it has content; localStorage is a cache.
@@ -1067,7 +1136,7 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
               aria-hidden="true"
               dir="auto"
               lang="ar"
-              className="ar-spell-overlay font-arabic ar-text absolute inset-0 z-0 w-full rounded-xl px-3 py-2 text-sm pointer-events-none whitespace-pre-wrap break-words"
+              className="spell-overlay font-arabic ar-text absolute inset-0 z-0 w-full rounded-xl px-3 py-2 text-sm pointer-events-none whitespace-pre-wrap break-words"
               style={{
                 border: "1px solid transparent",
                 color: "transparent",
@@ -1086,6 +1155,12 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
             suppressContentEditableWarning
             dir="auto"
             lang="ar"
+            // Both English and Arabic spellchecking is done via our own
+            // custom nspell-based pipeline (see the overlay below and the
+            // "spellcheck-words" IPC handler). Chromium's native checker
+            // has no Arabic dictionary at all, and enabling it here also
+            // made it (incorrectly) draw its own misspelling underline
+            // through correct Arabic words on Windows.
             spellCheck={false}
             onInput={onEditorInput}
             onPaste={onPaste}
