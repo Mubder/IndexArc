@@ -73,6 +73,8 @@ export interface AppSettings {
   local_openai_api_key: string;
   local_openai_llm_model: string;
   ui_language: "en" | "ar";
+  font_size_en: number;
+  font_size_ar: number;
   bind_host: string;
   port: number;
 }
@@ -97,6 +99,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   local_openai_api_key: "",
   local_openai_llm_model: "meta-llama-3-8b-instruct",
   ui_language: "en",
+  font_size_en: 14,
+  font_size_ar: 16,
   bind_host: "127.0.0.1",
   port: 3000,
 };

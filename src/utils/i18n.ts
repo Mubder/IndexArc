@@ -152,6 +152,10 @@ export interface TranslationDict {
   save_settings_btn: string;
   ui_language_label: string;
   ui_language_desc: string;
+  font_size_en_label: string;
+  font_size_en_desc: string;
+  font_size_ar_label: string;
+  font_size_ar_desc: string;
 
   candidates_title: string;
   save_selected_btn: string;
@@ -456,6 +460,10 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     save_settings_btn: "Save settings",
     ui_language_label: "UI Language",
     ui_language_desc: "Select the display language for the application interface.",
+    font_size_en_label: "English Font Size",
+    font_size_en_desc: "Adjust the font size for English text.",
+    font_size_ar_label: "Arabic Font Size",
+    font_size_ar_desc: "Adjust the font size for Arabic text.",
 
     candidates_title: "Extraction Candidates",
     save_selected_btn: "Save Selected to Vault",
@@ -758,6 +766,10 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     save_settings_btn: "حفظ الإعدادات",
     ui_language_label: "لغة الواجهة",
     ui_language_desc: "اختر لغة عرض واجهة المستخدم الخاصة بالتطبيق.",
+    font_size_en_label: "حجم الخط الإنجليزي",
+    font_size_en_desc: "ضبط حجم الخط للنص الإنجليزي.",
+    font_size_ar_label: "حجم الخط العربي",
+    font_size_ar_desc: "ضبط حجم الخط للنص العربي.",
 
     candidates_title: "المرشحون المستخرجون",
     save_selected_btn: "حفظ العناصر المحددة في الخزنة",

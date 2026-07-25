@@ -66,6 +66,8 @@ export interface Settings {
   local_openai_api_key?: string;
   local_openai_llm_model?: string;
   ui_language: "en" | "ar";
+  font_size_en: number;
+  font_size_ar: number;
 }
 
 export type Tab = "home" | "scratchpad" | "analyze" | "folders" | "library" | "ask" | "settings";

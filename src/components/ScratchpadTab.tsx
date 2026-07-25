@@ -207,7 +207,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   // Arabic spellcheck overlay (Electron only): set of misspelled Arabic words
   const editorRef = useRef<HTMLDivElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
   const [misspelledAr, setMisspelledAr] = useState<Set<string>>(new Set());
   const [highlightColor, setHighlightColor] = useState<string>("#fef08a");
   const [textColor, setTextColor] = useState<string>("#ffffff");
@@ -421,13 +420,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       window.clearTimeout(timer);
     };
   }, [active?.content, spellApi]);
-
-  const syncOverlayScroll = useCallback(() => {
-    if (overlayRef.current && editorRef.current) {
-      overlayRef.current.scrollTop = editorRef.current.scrollTop;
-      overlayRef.current.scrollLeft = editorRef.current.scrollLeft;
-    }
-  }, []);
 
   // Build the highlighted HTML for the overlay: misspelled Arabic words get a
   // red wavy underline; everything else is transparent so the editor shows.
@@ -806,7 +798,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   return (
     <div className="space-y-4">
       {/* Internal tabs */}
-      <div className="flex items-center gap-2 overflow-x-auto scrollbar-thin" style={{ background: "var(--bg-surface)", borderRadius: "0.75rem", padding: "4px", border: "1px solid var(--border)" }}>
+      <div className="flex items-center gap-2 flex-wrap" style={{ background: "var(--bg-surface)", borderRadius: "0.75rem", padding: "4px", border: "1px solid var(--border)" }}>
         {tabs.filter((t) => !t.archived).map((tab) => {
           const isActive = tab.id === activeId;
           const renaming = renameId === tab.id;
@@ -839,7 +831,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
                 setDragId(null);
                 setOverId(null);
               }}
-className="group relative flex h-8 min-w-[100px] max-w-[180px] items-center gap-1.5 px-2.5 py-0 rounded-lg cursor-pointer text-xs font-medium transition-all flex-shrink-0"
+className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 rounded-lg cursor-pointer text-xs font-medium transition-all flex-shrink-0"
                style={{
                  background: isActive ? "var(--bg-surface)" : "var(--bg-base)",
                  color: isActive ? "var(--text)" : "var(--text-dim)",
@@ -1025,10 +1017,9 @@ className="group relative flex h-8 min-w-[100px] max-w-[180px] items-center gap-
         <div className="relative">
           {overlayHtml && (
             <div
-              ref={overlayRef}
               aria-hidden="true"
               dir="auto"
-              className="ar-spell-overlay absolute inset-0 z-0 w-full rounded-xl px-3 py-2 text-sm overflow-auto pointer-events-none whitespace-pre-wrap break-words"
+              className="ar-spell-overlay absolute inset-0 z-0 w-full rounded-xl px-3 py-2 text-sm pointer-events-none whitespace-pre-wrap break-words"
               style={{
                 border: "1px solid var(--border-input)",
                 color: "transparent",
@@ -1047,8 +1038,7 @@ className="group relative flex h-8 min-w-[100px] max-w-[180px] items-center gap-
             onInput={onEditorInput}
             onPaste={onPaste}
             onKeyDown={onKeyDown}
-            onScroll={syncOverlayScroll}
-            className="relative z-10 w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors min-h-[200px] max-h-[60vh] overflow-auto"
+            className="relative z-10 w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors min-h-[200px]"
             style={{
               background: overlayHtml ? "transparent" : "var(--bg-input)",
               border: "1px solid var(--border-input)",

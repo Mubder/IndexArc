@@ -670,10 +670,16 @@ export default function App() {
     );
   }
 
-  return (
+return (
     <div
-      className="h-full font-sans antialiased flex flex-col relative overflow-hidden"
-      style={{ background: "var(--bg-root)", color: "var(--text)" }}
+      className="h-full font-sans antialiased flex flex-col relative overflow-x-hidden"
+      style={{
+        background: "var(--bg-root)",
+        color: "var(--text)",
+        fontSize: settings?.font_size_en || 14,
+        "--font-size-en": `${settings?.font_size_en || 14}px`,
+        "--font-size-ar": `${settings?.font_size_ar || 16}px`,
+      }}
     >
       {/* Animated Background */}
       <div className="bg-canvas">
@@ -837,7 +843,7 @@ export default function App() {
         </aside>
 
         {/* Main Content */}
-        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+        <div className="flex-1 flex flex-col min-h-0 min-w-0">
           {/* Top Bar - Fixed Layout */}
           <header
             className="flex items-center gap-4 px-6 py-3 border-b flex-shrink-0"

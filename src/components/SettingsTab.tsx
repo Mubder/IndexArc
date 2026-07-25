@@ -154,7 +154,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   };
 
   return (
-    <div className="rounded-2xl p-6 space-y-5 max-w-xl" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+    <div className="rounded-2xl p-6 space-y-5" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
       <div className="space-y-2" style={{ borderBottom: "1px solid var(--border)", paddingBottom: "1.25rem" }}>
         <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--text)" }}>
           {t("ui_language_label")}
@@ -180,6 +180,56 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="space-y-2" style={{ borderBottom: "1px solid var(--border)", paddingBottom: "1.25rem" }}>
+        <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--text)" }}>
+          {t("font_size_en_label")}
+        </h2>
+        <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+          {t("font_size_en_desc")}
+        </p>
+        <input
+          type="range"
+          min="10"
+          max="24"
+          step="1"
+          value={settings.font_size_en || 14}
+          onChange={(e) => onPatchSettings({ font_size_en: parseInt(e.target.value) })}
+          className="w-full h-2 rounded-lg appearance-none cursor-pointer"
+          style={{
+            background: "var(--bg-input)",
+            accentColor: "var(--accent)",
+          }}
+        />
+        <p className="text-[11px] text-right" style={{ color: "var(--text-muted)" }}>
+          {settings.font_size_en || 14}px
+        </p>
+      </div>
+
+      <div className="space-y-2" style={{ borderBottom: "1px solid var(--border)", paddingBottom: "1.25rem" }}>
+        <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--text)" }}>
+          {t("font_size_ar_label")}
+        </h2>
+        <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+          {t("font_size_ar_desc")}
+        </p>
+        <input
+          type="range"
+          min="10"
+          max="24"
+          step="1"
+          value={settings.font_size_ar || 16}
+          onChange={(e) => onPatchSettings({ font_size_ar: parseInt(e.target.value) })}
+          className="w-full h-2 rounded-lg appearance-none cursor-pointer"
+          style={{
+            background: "var(--bg-input)",
+            accentColor: "var(--accent)",
+          }}
+        />
+        <p className="text-[11px] text-right" style={{ color: "var(--text-muted)" }}>
+          {settings.font_size_ar || 16}px
+        </p>
       </div>
 
       <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("ai_provider_choice")}</h2>
