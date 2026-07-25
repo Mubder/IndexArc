@@ -328,14 +328,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   // Execute a document.execCommand formatting command against the LIVE
   // selection. The toolbar's onMouseDown preventDefault keeps focus in the
-  // editor so the selection never collapses — no save/restore needed.
+  // editor so the selection never collapses â€” no save/restore needed.
   const execFormat = useCallback((command: string, value?: string) => {
     const editor = editorRef.current;
     if (!editor) return;
     editor.focus();
     document.execCommand(command, false, value);
     editor.focus();
-    // Formatting is a discrete edit — snapshot immediately.
+    // Formatting is a discrete edit â€” snapshot immediately.
     historyPushImmediate();
     contentRef.current[activeIdRef.current] = editor.innerHTML;
     setTabs((prev) =>
@@ -351,7 +351,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   // Single entry point for any EXTERNAL content write (rephrase, clear,
   // undo-rephrase, etc.). Updates the DOM, the history stack, the ref buffer
-  // and React state in one consistent step — no scattered innerHTML writes.
+  // and React state in one consistent step â€” no scattered innerHTML writes.
   const setEditorHtml = useCallback(
     (html: string) => {
       const editor = editorRef.current;
@@ -375,7 +375,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   // Seed the editor DOM imperatively on mount and on every tab switch (the
   // editor has key={activeId}, so it remounts). After this, React NEVER
-  // re-applies innerHTML while editing — the editor is uncontrolled, which
+  // re-applies innerHTML while editing â€” the editor is uncontrolled, which
   // is what keeps the selection and undo stack intact.
   useLayoutEffect(() => {
     const editor = editorRef.current;
@@ -393,7 +393,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     typeof window !== "undefined" ? window.electronAPI?.spellcheckArabic : undefined;
 
   // Debounced Arabic spellcheck of the active tab's content. Runs regardless of
-  // the UI language — it is driven by the CONTENT (any Arabic text), so writing
+  // the UI language â€” it is driven by the CONTENT (any Arabic text), so writing
   // Arabic while the interface is English still gets red-underline marking.
   useEffect(() => {
     if (!spellApi) {
@@ -463,7 +463,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           : [];
         if (cancelled) return;
         if (serverTabs.length) {
-          // Server has the durable copy — it wins over the localStorage cache.
+          // Server has the durable copy â€” it wins over the localStorage cache.
           setTabs(serverTabs);
           setActiveId(serverTabs[0].id);
         } else {
@@ -480,7 +480,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           }
         }
       } catch {
-        /* offline / locked — keep localStorage tabs */
+        /* offline / locked â€” keep localStorage tabs */
       } finally {
         if (!cancelled) serverLoaded.current = true;
       }
@@ -561,7 +561,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     if (!editor) return;
     const html = editor.innerHTML;
     const id = activeIdRef.current;
-    // The editor DOM is authoritative — mirror into the ref buffer.
+    // The editor DOM is authoritative â€” mirror into the ref buffer.
     contentRef.current[id] = html;
     // Coalesce typing into discrete history entries.
     scheduleHistoryPush();
@@ -578,7 +578,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     }
     // Sync content into React state so persistence (localStorage + server)
     // and the Arabic overlay fire. This is SAFE now because the editor is
-    // uncontrolled — React no longer re-applies innerHTML to it (we removed
+    // uncontrolled â€” React no longer re-applies innerHTML to it (we removed
     // dangerouslySetInnerHTML), so this re-render cannot destroy the
     // selection or corrupt the undo stack.
     setTabs((prev) => {
@@ -768,7 +768,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         }));
         const newHtml = data.rewritten.replace(/\n/g, "<br>");
         // setContent routes through setEditorHtml for the active tab, which
-        // updates DOM + history + state together — no direct innerHTML write.
+        // updates DOM + history + state together â€” no direct innerHTML write.
         setContent(activeId, newHtml);
         setStatus(t("scratchpad_rephrased"));
         analyze(activeId, data.rewritten);
@@ -806,7 +806,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   return (
     <div className="space-y-4">
       {/* Internal tabs */}
-      <div className="flex items-center gap-1 flex-wrap">
+      <div className="flex items-center gap-2 overflow-x-auto scrollbar-thin" style={{ background: "var(--bg-surface)", borderRadius: "0.75rem", padding: "4px", border: "1px solid var(--border)" }}>
         {tabs.filter((t) => !t.archived).map((tab) => {
           const isActive = tab.id === activeId;
           const renaming = renameId === tab.id;
@@ -839,11 +839,11 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
                 setDragId(null);
                 setOverId(null);
               }}
-className="group relative flex h-8 min-w-[100px] max-w-[180px] items-center gap-1.5 px-2.5 py-0 rounded-lg cursor-pointer text-xs font-medium transition-all"
-style={{
-                 background: isActive ? "var(--bg-surface)" : "transparent",
+className="group relative flex h-8 min-w-[100px] max-w-[180px] items-center gap-1.5 px-2.5 py-0 rounded-lg cursor-pointer text-xs font-medium transition-all flex-shrink-0"
+               style={{
+                 background: isActive ? "var(--bg-surface)" : "var(--bg-base)",
                  color: isActive ? "var(--text)" : "var(--text-dim)",
-                 border: `1px solid ${isActive ? "var(--border-glow)" : "transparent"}`,
+                 border: `1px solid ${isActive ? "var(--border-glow)" : "var(--border)"}`,
                }}
               title={t("scratchpad_drag_to_reorder")}
             >
@@ -864,9 +864,8 @@ style={{
               ) : (
                 <span
                   onDoubleClick={(e) => { e.stopPropagation(); startRename(tab.id); }}
-                  className="truncate flex-1 min-w-0"
+                  className="truncate flex-1 min-w-0 pr-14"
                   title={tab.title}
-                  style={{ maxWidth: "110px" }}
                 >
                   {tab.title}
                 </span>
@@ -1150,7 +1149,7 @@ style={{
                 className="px-0.5 py-1.5 rounded-r-lg transition-all hover:opacity-100 opacity-70 text-[8px]"
                 style={{ color: "var(--text-dim)" }}
               >
-                ▾
+                â–¾
               </button>
             </div>
             {showTextColorPicker && (
@@ -1201,7 +1200,7 @@ style={{
                 className="px-0.5 py-1.5 rounded-r-lg transition-all hover:opacity-100 opacity-70 text-[8px]"
                 style={{ color: "var(--text-dim)" }}
               >
-                ▾
+                â–¾
               </button>
             </div>
             {showHighlightPicker && (
@@ -1264,7 +1263,7 @@ style={{
         {detection ? (
           <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
             {t("scratchpad_ai_detected")}: {detection.families.join(", ")}
-            {detection.provider ? ` · ${detection.provider}` : ""}
+            {detection.provider ? ` Â· ${detection.provider}` : ""}
           </span>
         ) : (
           <span className="text-[10px]" style={{ color: "var(--text-dim)" }}>
@@ -1289,7 +1288,7 @@ style={{
               <Archive className="w-3.5 h-3.5" />
               {t("scratchpad_archived")} ({tabs.filter((x) => x.archived).length})
             </span>
-            <span>{showArchived ? "▾" : "▸"}</span>
+            <span>{showArchived ? "â–¾" : "â–¸"}</span>
           </button>
           {showArchived && (
             <div className="px-4 pb-3 flex flex-col gap-1.5">

@@ -1,14 +1,14 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Rubik:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
-/* ── Arabic glyphs: map Calibri ONLY to Arabic codepoints via an aliased
-   @font-face with unicode-range. Because this alias is added to the FRONT of
-   every font stack (sans/mono/arabic), Arabic text renders in Calibri
-   everywhere — regardless of the UI language — while Latin text keeps
+/* ── Arabic glyphs: Rubik via Google Fonts, mapped ONLY to Arabic codepoints
+   via an aliased @font-face with unicode-range. Because this alias is added to
+   the FRONT of every font stack (sans/mono/arabic), Arabic text renders in
+   Rubik everywhere — regardless of the UI language — while Latin text keeps
    Inter / JetBrains Mono untouched. ── */
 @font-face {
   font-family: "ArabicGlyphs";
-  src: local("Calibri"), local("Segoe UI"), local("Tahoma");
+  src: local("Rubik"), local("Calibri"), local("Segoe UI"), local("Tahoma");
   unicode-range: U+0600-06FF, U+0750-077F, U+0870-089F, U+08A0-08FF,
     U+FB50-FDFF, U+FE70-FEFF, U+0640, U+200C-200F;
 }
@@ -16,7 +16,7 @@
 @theme {
   --font-sans: "ArabicGlyphs", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "ArabicGlyphs", "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  --font-arabic: "ArabicGlyphs", "Calibri", "Segoe UI", "Tahoma", ui-sans-serif, sans-serif;
+  --font-arabic: "ArabicGlyphs", "Rubik", "Calibri", "Segoe UI", "Tahoma", ui-sans-serif, sans-serif;
 }
 
 /* ── Spellcheck overlay (Scratchpad): sizing/metrics that must mirror the
@@ -302,4 +302,36 @@ body {
   main { padding: 0.75rem; }
   .btn-new { width: 100%; }
   .filter-chips button { padding: 0.4rem 0.75rem; font-size: 0.75rem; }
+}
+
+/* ── Custom Scrollbar ── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--border-hover);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Tab strip horizontal scrollbar */
+.flex.overflow-x-auto::-webkit-scrollbar {
+  height: 4px;
+}
+.flex.overflow-x-auto::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 2px;
 }
