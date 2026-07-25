@@ -138,10 +138,18 @@ export default function App() {
         message,
         confirmText,
         onConfirm: async () => {
-          await onConfirm();
-          resolve();
+          try {
+            await onConfirm();
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+          setConfirmState(null);
         },
-        onCancel: () => reject(),
+        onCancel: () => {
+          reject();
+          setConfirmState(null);
+        },
       });
     });
   }, []);

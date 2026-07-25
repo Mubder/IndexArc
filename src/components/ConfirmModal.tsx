@@ -53,7 +53,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => { onConfirm(); onClose(); }}
+            onClick={onConfirm}
             className="px-4 py-1.5 rounded-lg text-sm font-medium"
             style={{
               background: variant === "danger" ? "var(--danger)" : "var(--accent)",
