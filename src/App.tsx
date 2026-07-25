@@ -170,17 +170,15 @@ export default function App() {
     document.documentElement.setAttribute("dir", isAr ? "rtl" : "ltr");
   }, [settings?.ui_language]);
 
-  // Font size settings — apply to :root so CSS can use var(--font-size-*)
+  // Font size settings — Arabic font-size is universal (always controls html font-size)
   useEffect(() => {
     const root = document.documentElement;
     const en = settings?.font_size_en || 14;
     const ar = settings?.font_size_ar || 16;
     root.style.setProperty("--font-size-en", `${en}px`);
     root.style.setProperty("--font-size-ar", `${ar}px`);
-    // Also set base font-size on html for non-Arabic content
-    const isAr = settings?.ui_language === "ar";
-    root.style.setProperty("font-size", `${isAr ? ar : en}px`);
-  }, [settings?.font_size_en, settings?.font_size_ar, settings?.ui_language]);
+    root.style.setProperty("font-size", `${ar}px`);
+  }, [settings?.font_size_en, settings?.font_size_ar]);
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));

@@ -127,9 +127,6 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
 
 /* ── Base ── */
 html, body, #root { height: 100%; overflow: hidden; margin: 0; padding: 0; }
-html {
-  font-size: var(--font-size-en);
-}
 body {
   font-family: var(--font-sans);
   background: var(--bg-root);
