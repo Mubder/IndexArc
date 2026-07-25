@@ -1086,7 +1086,7 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
             suppressContentEditableWarning
             dir="auto"
             lang="ar"
-            spellCheck={true}
+            spellCheck={false}
             onInput={onEditorInput}
             onPaste={onPaste}
             onKeyDown={onKeyDown}

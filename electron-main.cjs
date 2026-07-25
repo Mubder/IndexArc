@@ -592,13 +592,15 @@ function createWindow() {
       menu.append(new MenuItem({ type: "separator" }));
     }
 
-    // Arabic: Chromium doesn't flag it, so check the word under the cursor
-    // ourselves. The preload selects that word on right-click and exposes it
-    // via params.selectionText.
-    if (arSpell && params.isEditable && !params.misspelledWord) {
+    // Arabic spellcheck right-click menu: check word under cursor
+    if (arSpell && params.isEditable) {
       const word = (params.selectionText || "").trim();
-      if (isArabicWord(word) && !arSpell.correct(word)) {
-        const suggestions = arSpell.suggest(word).slice(0, 6);
+      if (isArabicWord(word) && !checkArabicWord(word)) {
+        const clean = stripArabicDiacritics(word);
+        const suggestions = Array.from(
+          new Set([...arSpell.suggest(word), ...arSpell.suggest(clean)])
+        ).slice(0, 6);
+
         if (suggestions.length) {
           for (const s of suggestions) {
             menu.append(
