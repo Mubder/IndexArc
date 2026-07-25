@@ -343,14 +343,16 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   }, [historyPushImmediate]);
 
   const htmlToPlainText = (html: string): string => {
+    if (!html) return "";
     const d = document.createElement("div");
-    d.innerHTML = html;
-    return d.textContent || d.innerText || "";
+    d.innerHTML = html.replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n</$1>");
+    const text = d.textContent || d.innerText || "";
+    return text.replace(/[\u00A0\u1680\u180E\u2000-\u200B\u202F\u205F\u3000]/g, " ");
   };
 
   // Single entry point for any EXTERNAL content write (rephrase, clear,
   // undo-rephrase, etc.). Updates the DOM, the history stack, the ref buffer
-  // and React state in one consistent step â€” no scattered innerHTML writes.
+  // and React state in one consistent step — no scattered innerHTML writes.
   const setEditorHtml = useCallback(
     (html: string) => {
       const editor = editorRef.current;
@@ -374,7 +376,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   // Seed the editor DOM imperatively on mount and on every tab switch (the
   // editor has key={activeId}, so it remounts). After this, React NEVER
-  // re-applies innerHTML while editing â€” the editor is uncontrolled, which
+  // re-applies innerHTML while editing — the editor is uncontrolled, which
   // is what keeps the selection and undo stack intact.
   useLayoutEffect(() => {
     const editor = editorRef.current;
@@ -432,17 +434,51 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     };
   }, [active?.content, checkArabicWords]);
 
-  // Build the highlighted HTML for the overlay: misspelled Arabic words get a
-  // red wavy underline; everything else is transparent so the editor shows.
+  // Build the highlighted HTML for the overlay: preserving exact DOM node structure
+  // so paragraph breaks, margins, and line wraps mirror the editor with 0px offset.
   const overlayHtml = React.useMemo(() => {
-    const text = htmlToPlainText(active?.content || "");
-    if (!misspelledAr.size) return "";
-    const esc = (s: string) =>
-      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return esc(text).replace(
-      /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g,
-      (w) => (misspelledAr.has(w) ? `<span class="ar-misspell">${w}</span>` : w)
-    );
+    const rawHtml = active?.content || "";
+    if (!misspelledAr.size || !rawHtml) return "";
+
+    const d = document.createElement("div");
+    d.innerHTML = rawHtml;
+
+    const processNode = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.nodeValue || "";
+        if (!/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(text)) return;
+
+        const parts = text.split(/([\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+)/g);
+        let hasBad = false;
+        const frag = document.createDocumentFragment();
+
+        for (const part of parts) {
+          const cleanPart = part.replace(/[\u00A0\u200B]/g, " ");
+          if (misspelledAr.has(part) || misspelledAr.has(cleanPart)) {
+            hasBad = true;
+            const span = document.createElement("span");
+            span.className = "ar-misspell";
+            span.textContent = part;
+            frag.appendChild(span);
+          } else {
+            frag.appendChild(document.createTextNode(part));
+          }
+        }
+
+        if (hasBad && node.parentNode) {
+          node.parentNode.replaceChild(frag, node);
+        }
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as HTMLElement;
+        const tag = el.tagName.toLowerCase();
+        if (tag !== "script" && tag !== "style") {
+          Array.from(el.childNodes).forEach(processNode);
+        }
+      }
+    };
+
+    Array.from(d.childNodes).forEach(processNode);
+    return d.innerHTML;
   }, [active?.content, misspelledAr]);
 
   // Load tabs from the server (portable, survives reinstall/update). The
