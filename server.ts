@@ -229,6 +229,8 @@ app.post("/api/settings", (req, res) => {
     "local_openai_api_key",
     "local_openai_llm_model",
     "ui_language",
+    "font_size_en",
+    "font_size_ar",
   ];
   const patch: Record<string, unknown> = {};
   for (const k of allowed) {

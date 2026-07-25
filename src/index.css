@@ -40,13 +40,6 @@ mark.hl-blue   { background: #93c5fd; color: #1a1a2e; }
 mark.hl-red    { background: #fca5a5; color: #1a1a2e; }
 mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
 
-/* ── Highlight Colors ── */
-mark.hl-yellow { background: #fef08a; color: #1a1a2e; }
-mark.hl-green  { background: #86efac; color: #1a1a2e; }
-mark.hl-blue   { background: #93c5fd; color: #1a1a2e; }
-mark.hl-red    { background: #fca5a5; color: #1a1a2e; }
-mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
-
 /* ── Arabic font size ─── */
 html[lang="ar"], [dir="rtl"] {
   font-size: var(--font-size-ar, 16px);
@@ -140,13 +133,24 @@ html:not([lang="ar"]):not([dir="rtl"]) {
 
 /* ── Base ── */
 html, body, #root { height: 100%; overflow: hidden; margin: 0; padding: 0; }
+html {
+  font-size: var(--font-size-en);
+}
 body {
   font-family: var(--font-sans);
   background: var(--bg-root);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
-  font-size: 14px;
+  font-size: 1rem;
   transition: background 0.3s, color 0.3s;
+}
+
+/* Arabic text uses larger font size */
+[lang="ar"] body,
+[dir="rtl"] body,
+.ar-text,
+[dir="rtl"] .ar-text {
+  font-size: calc(var(--font-size-ar) / var(--font-size-en) * 1rem);
 }
 
 /* ── Animated Background ── */
