@@ -714,9 +714,9 @@ export default function App() {
             }}
           >
           {/* Navigation */}
-          <nav className="flex-1 p-3 flex flex-col gap-0.5">
+          <nav className="flex-1 p-3 flex flex-col gap-1">
             <div
-              className="text-[10px] font-semibold uppercase tracking-wider px-3 pt-3 pb-1.5 flex items-center gap-2"
+              className="text-[11px] font-semibold uppercase tracking-wider px-3 pt-2 pb-2 flex items-center gap-2"
               style={{ color: "var(--text-muted)" }}
             >
               Vault
@@ -727,7 +727,7 @@ export default function App() {
                 key={n.id}
                 type="button"
                 onClick={() => setTab(n.id)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all relative overflow-hidden"
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all relative"
                 style={{
                   color: tab === n.id ? "var(--accent-bright)" : "var(--text-dim)",
                   background: tab === n.id ? "var(--bg-active)" : "transparent",
@@ -736,14 +736,14 @@ export default function App() {
                 {tab === n.id && (
                   <div
                     className="absolute left-0 top-1/4 bottom-1/4 w-0.5 rounded-r"
-                    style={{ background: "var(--accent)", boxShadow: "0 0 8px var(--accent-glow)" }}
+                    style={{ background: "var(--accent)", boxShadow: "0 0 6px var(--accent-glow)" }}
                   />
                 )}
-                <span className="opacity-60">{n.icon}</span>
-                <span className="flex-1 text-left">{n.label}</span>
+                <span className="opacity-50">{n.icon}</span>
+                <span className="flex-1 text-left truncate">{n.label}</span>
                 {n.badge ? (
                   <span
-                    className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                    className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
                     style={{ background: "var(--amber-bg)", color: "var(--amber)" }}
                   >
                     {n.badge}
@@ -753,7 +753,7 @@ export default function App() {
             ))}
 
             <div
-              className="text-[10px] font-semibold uppercase tracking-wider px-3 pt-4 pb-1.5 flex items-center gap-2"
+              className="text-[11px] font-semibold uppercase tracking-wider px-3 pt-4 pb-2 flex items-center gap-2"
               style={{ color: "var(--text-muted)" }}
             >
               Tools

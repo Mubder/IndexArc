@@ -839,14 +839,12 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
                 setDragId(null);
                 setOverId(null);
               }}
-              className="group flex items-center gap-1 pl-3 pr-1.5 py-1.5 rounded-xl cursor-pointer text-xs font-medium transition-all"
-              style={{
-                background: isActive ? "var(--bg-active)" : "transparent",
-                color: isActive ? "var(--accent-bright)" : "var(--text-dim)",
-                border: `1px solid ${isActive ? "var(--border-glow)" : "var(--border)"}`,
-                opacity: dragId === tab.id ? 0.4 : 1,
-                boxShadow: overId === tab.id && dragId && dragId !== tab.id ? "0 -2px 0 var(--accent-bright)" : undefined,
-              }}
+className="group relative flex h-8 min-w-[100px] max-w-[180px] items-center gap-1.5 px-2.5 py-0 rounded-lg cursor-pointer text-xs font-medium transition-all"
+style={{
+                 background: isActive ? "var(--bg-surface)" : "transparent",
+                 color: isActive ? "var(--text)" : "var(--text-dim)",
+                 border: `1px solid ${isActive ? "var(--border-glow)" : "transparent"}`,
+               }}
               title={t("scratchpad_drag_to_reorder")}
             >
               {renaming ? (
@@ -860,19 +858,23 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
                     if (e.key === "Escape") { setRenameId(null); setRenameValue(""); }
                   }}
                   onBlur={() => commitRename(tab.id)}
-                  className="bg-transparent outline-none w-28"
+                  className="bg-transparent outline-none text-xs w-full truncate"
                   style={{ color: "var(--text)" }}
                 />
               ) : (
-                <span onDoubleClick={(e) => { e.stopPropagation(); startRename(tab.id); }}>{tab.title}</span>
+                <span
+                  onDoubleClick={(e) => { e.stopPropagation(); startRename(tab.id); }}
+                  className="truncate flex-1 min-w-0"
+                  title={tab.title}
+                  style={{ maxWidth: "110px" }}
+                >
+                  {tab.title}
+                </span>
               )}
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  startRename(tab.id);
-                }}
-                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+                onClick={(e) => { e.stopPropagation(); startRename(tab.id); }}
+                className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity flex-shrink-0"
                 aria-label={t("scratchpad_rename")}
                 title={t("scratchpad_rename")}
               >
@@ -880,26 +882,21 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               </button>
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  archiveTab(tab.id);
-                }}
-                className="opacity-50 hover:opacity-100 transition-opacity"
+                onClick={(e) => { e.stopPropagation(); archiveTab(tab.id); }}
+                className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity flex-shrink-0"
                 aria-label={t("scratchpad_archive")}
                 title={t("scratchpad_archive")}
               >
-                <Archive className="w-3.5 h-3.5" />
+                <Archive className="w-3 h-3" />
               </button>
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTab(tab.id);
-                }}
-                className="opacity-50 hover:opacity-100 transition-opacity"
+                onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
+                className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity flex-shrink-0"
                 aria-label="Close tab"
+                title="Close tab"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-3 h-3" />
               </button>
             </div>
           );
@@ -907,11 +904,11 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         <button
           type="button"
           onClick={addTab}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-sm font-medium transition-all flex-shrink-0"
           style={{ color: "var(--text-muted)", border: "1px dashed var(--border)" }}
           title={t("scratchpad_add")}
         >
-          <Plus className="w-3.5 h-3.5" /> {t("scratchpad_add")}
+          <Plus className="w-3.5 h-3.5" />
         </button>
       </div>
 
