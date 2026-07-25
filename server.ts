@@ -1,6 +1,8 @@
 import "dotenv/config";
 import express from "express";
 import path from "path";
+import fs from "fs";
+import nspell from "nspell";
 import { ensurePortableLayout } from "./server/paths.js";
 import { VaultStore } from "./server/store.js";
 import { addLog, getLogs } from "./server/logs.js";
@@ -254,6 +256,68 @@ app.post("/api/settings", (req, res) => {
   const next = store.saveSettings(patch as Partial<ReturnType<typeof store.getSettings>>);
   addLog("SETTINGS", `Updated AI provider mode: ${next.ai_provider}`);
   res.json(next);
+});
+
+// --- Arabic spellchecker (server-side Hunspell via nspell) ---
+let serverArSpell: any = null;
+try {
+  const dicDir = path.join(process.cwd(), "dictionaries", "ar");
+  const affPath = path.join(dicDir, "ar.aff");
+  const dicPath = path.join(dicDir, "ar.dic");
+  if (fs.existsSync(affPath) && fs.existsSync(dicPath)) {
+    const aff = fs.readFileSync(affPath);
+    const dic = fs.readFileSync(dicPath);
+    serverArSpell = nspell({ aff, dic });
+  }
+} catch (e) {
+  /* optional server spellcheck */
+}
+
+function stripArDiacritics(str: string): string {
+  return str.replace(/[\u064B-\u0652\u0640\u0670]/g, "");
+}
+
+function checkArWord(w: string): boolean {
+  if (!serverArSpell) return true;
+  const clean = stripArDiacritics(w);
+  if (!clean || clean.length <= 1) return true;
+  if (serverArSpell.correct(clean)) return true;
+
+  const norm = clean
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه");
+  if (serverArSpell.correct(norm)) return true;
+
+  const prefixes = ["وبال", "فبال", "بال", "وكال", "فكال", "كال", "ولل", "فلل", "لل", "وال", "فال", "ال", "و", "ف", "ب", "ل", "ك"];
+  for (const p of prefixes) {
+    if (clean.startsWith(p) && clean.length - p.length >= 2) {
+      const rest = clean.slice(p.length);
+      if (serverArSpell.correct(rest)) return true;
+      const restNorm = rest.replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه");
+      if (serverArSpell.correct(restNorm)) return true;
+    }
+  }
+
+  return false;
+}
+
+app.post("/api/spellcheck-ar", (req, res) => {
+  const words: string[] = req.body?.words || [];
+  if (!serverArSpell || !Array.isArray(words)) {
+    return res.json({ bad: [] });
+  }
+  const bad: string[] = [];
+  const seen = new Set<string>();
+  const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
+  for (const w of words) {
+    if (typeof w !== "string" || seen.has(w)) continue;
+    seen.add(w);
+    if (ARABIC_RE.test(w) && !checkArWord(w)) {
+      bad.push(w);
+    }
+  }
+  res.json({ bad });
 });
 
 // --- Ollama helpers ---

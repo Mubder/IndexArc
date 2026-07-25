@@ -388,17 +388,28 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
-  const spellApi =
-    typeof window !== "undefined" ? window.electronAPI?.spellcheckArabic : undefined;
+  const checkArabicWords = useCallback(async (words: string[]): Promise<string[]> => {
+    if (typeof window !== "undefined" && window.electronAPI?.spellcheckArabic) {
+      return window.electronAPI.spellcheckArabic(words);
+    }
+    try {
+      const res = await fetch("/api/spellcheck-ar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ words }),
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data.bad) ? data.bad : [];
+    } catch {
+      return [];
+    }
+  }, []);
 
   // Debounced Arabic spellcheck of the active tab's content. Runs regardless of
-  // the UI language â€” it is driven by the CONTENT (any Arabic text), so writing
+  // the UI language — it is driven by the CONTENT (any Arabic text), so writing
   // Arabic while the interface is English still gets red-underline marking.
   useEffect(() => {
-    if (!spellApi) {
-      setMisspelledAr((prev) => (prev.size ? new Set<string>() : prev));
-      return;
-    }
     const text = htmlToPlainText(active?.content || "");
     const matches: string[] = text.match(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g) || [];
     const words: string[] = Array.from(new Set(matches));
@@ -409,7 +420,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
-        const bad = await spellApi(words);
+        const bad = await checkArabicWords(words);
         if (!cancelled) setMisspelledAr(new Set(bad));
       } catch {
         /* ignore */
@@ -419,7 +430,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [active?.content, spellApi]);
+  }, [active?.content, checkArabicWords]);
 
   // Build the highlighted HTML for the overlay: misspelled Arabic words get a
   // red wavy underline; everything else is transparent so the editor shows.
@@ -1039,7 +1050,7 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
             suppressContentEditableWarning
             dir="auto"
             lang="ar"
-            spellCheck={false}
+            spellCheck={true}
             onInput={onEditorInput}
             onPaste={onPaste}
             onKeyDown={onKeyDown}
