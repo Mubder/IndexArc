@@ -77,6 +77,7 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --pink-bg: rgba(239, 68, 68, 0.14);
   --font-size-en: 14px;
   --font-size-ar: 16px;
+  --arabic-font-scale: calc(var(--font-size-ar) / var(--font-size-en));
   --glass: rgba(18, 18, 32, 0.82);
   --glass-border: rgba(255, 255, 255, 0.12);
   --shadow-glow: 0 0 20px rgba(37, 99, 235, 0.14), 0 0 60px rgba(37, 99, 235, 0.07);
@@ -119,10 +120,29 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --glass-border: rgba(0, 0, 0, 0.08);
   --font-size-en: 14px;
   --font-size-ar: 16px;
+  --arabic-font-scale: calc(var(--font-size-ar) / var(--font-size-en));
   --shadow-glow: 0 0 20px rgba(37, 99, 235, 0.04), 0 0 60px rgba(37, 99, 235, 0.02);
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.06), 0 0 1px rgba(37, 99, 235, 0.1);
   --skeleton-from: rgba(37, 99, 235, 0.04);
   --skeleton-mid: rgba(37, 99, 235, 0.08);
+}
+
+/* ── Arabic Text Scaling in English UI ── */
+html[lang="en"] :is([dir="rtl"], [lang="ar"], .font-arabic, .ar-text) {
+  --text-xs: calc(0.75rem * var(--arabic-font-scale, 1.1428));
+  --text-sm: calc(0.875rem * var(--arabic-font-scale, 1.1428));
+  --text-base: calc(1rem * var(--arabic-font-scale, 1.1428));
+  --text-lg: calc(1.125rem * var(--arabic-font-scale, 1.1428));
+  --text-xl: calc(1.25rem * var(--arabic-font-scale, 1.1428));
+  font-size: var(--font-size-ar) !important;
+}
+
+html[lang="en"] :is([dir="rtl"], [lang="ar"], .font-arabic, .ar-text) :is(.text-xs, .text-sm, .text-base, .text-lg, .text-xl, p, span, div, textarea, input, button) {
+  font-size: calc(1em * var(--arabic-font-scale, 1.1428)) !important;
+}
+
+.font-arabic, .ar-text {
+  font-family: var(--font-arabic) !important;
 }
 
 /* ── Base ── */

@@ -2,6 +2,7 @@ import React from "react";
 import { Trash2, Edit3, Copy } from "lucide-react";
 import { VaultEntry, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
+import { isArabicText } from "../utils";
 
 interface EntryCardProps {
   entry: VaultEntry;
@@ -19,6 +20,8 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
   const isScratchpad = entry.source_file === "scratchpad";
+  const isArName = isArabicText(entry.name);
+  const isArVal = isArabicText(entry.value);
 
   return (
     <div
@@ -33,7 +36,14 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-[10px] uppercase font-semibold" style={{ color: "var(--text-muted)" }}>{entry.type}</span>
-            <span className="text-xs font-medium truncate" style={{ color: "var(--text)" }}>{entry.name}</span>
+            <span
+              className={`text-xs font-medium truncate ${isArName ? "font-arabic ar-text" : ""}`}
+              dir={isArName ? "rtl" : "auto"}
+              lang={isArName ? "ar" : undefined}
+              style={{ color: "var(--text)" }}
+            >
+              {entry.name}
+            </span>
             {isScratchpad && (
               <span
                 className="text-[9px] px-1.5 py-0.5 rounded"
@@ -44,8 +54,10 @@ export const EntryCard: React.FC<EntryCardProps> = ({
             )}
           </div>
           <div
-            className="text-[11px] truncate max-w-md"
-            style={{ color: "var(--emerald)", fontFamily: "var(--font-mono)" }}
+            className={`text-[11px] truncate max-w-md ${isArVal ? "font-arabic ar-text" : ""}`}
+            dir={isArVal ? "rtl" : "auto"}
+            lang={isArVal ? "ar" : undefined}
+            style={{ color: "var(--emerald)", fontFamily: isArVal ? "var(--font-arabic)" : "var(--font-mono)" }}
           >
             {entry.value.slice(0, 80)}{entry.value.length > 80 ? "…" : ""}
           </div>

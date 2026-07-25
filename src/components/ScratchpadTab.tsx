@@ -1019,7 +1019,8 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
             <div
               aria-hidden="true"
               dir="auto"
-              className="ar-spell-overlay absolute inset-0 z-0 w-full rounded-xl px-3 py-2 text-sm pointer-events-none whitespace-pre-wrap break-words"
+              lang="ar"
+              className="ar-spell-overlay font-arabic ar-text absolute inset-0 z-0 w-full rounded-xl px-3 py-2 text-sm pointer-events-none whitespace-pre-wrap break-words"
               style={{
                 border: "1px solid var(--border-input)",
                 color: "transparent",
@@ -1034,11 +1035,12 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
             contentEditable
             suppressContentEditableWarning
             dir="auto"
+            lang="ar"
             spellCheck={true}
             onInput={onEditorInput}
             onPaste={onPaste}
             onKeyDown={onKeyDown}
-            className="relative z-10 w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors min-h-[200px]"
+            className="relative z-10 w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors min-h-[200px] font-arabic ar-text"
             style={{
               background: overlayHtml ? "transparent" : "var(--bg-input)",
               border: "1px solid var(--border-input)",

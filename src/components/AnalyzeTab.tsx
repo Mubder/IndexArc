@@ -46,6 +46,7 @@ export const AnalyzeTab: React.FC<AnalyzeTabProps> = ({
           value={paste}
           onChange={(e) => setPaste(e.target.value)}
           rows={5}
+          dir="auto"
           className="w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors resize-none"
           style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
           placeholder={t("paste_placeholder")}

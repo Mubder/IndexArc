@@ -80,6 +80,7 @@ export const CandidateCard: React.FC<CandidateCardProps> = ({
 
       <div
         className="rounded-lg px-3 py-2 break-all"
+        dir="auto"
         style={{ fontFamily: "var(--font-mono)", fontSize: "0.875rem", color: "var(--emerald)", background: "var(--bg-input)", border: "1px solid var(--border)" }}
       >
         {c.value}

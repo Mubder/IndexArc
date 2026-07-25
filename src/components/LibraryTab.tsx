@@ -306,6 +306,7 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
           value={libraryQuery}
           onChange={(e) => setLibraryQuery(e.target.value)}
           placeholder={t("lib_search_placeholder")}
+          dir="auto"
           className="w-full rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none transition-colors"
           style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
         />

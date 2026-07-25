@@ -113,10 +113,12 @@ export const AskTab: React.FC<AskTabProps> = ({
       {mode === "search" && (
         <>
           <form onSubmit={onAsk} className="flex gap-2">
-            <input
+            <textarea
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="flex-1 bg-[var(--bg-input)] border border-[var(--border-input)] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[var(--border-glow)] transition-colors"
+              rows={3}
+              dir="auto"
+              className="w-full bg-[var(--bg-input)] border border-[var(--border-input)] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[var(--border-glow)] transition-colors resize-none"
               placeholder={t("ask_header_placeholder") || "Search tokens, keys, commands..."}
               style={{ color: "var(--text)" }}
             />
@@ -139,7 +141,7 @@ export const AskTab: React.FC<AskTabProps> = ({
                 <Sparkles className="w-4 h-4 animate-pulse" />
                 <span className="text-xs font-semibold uppercase tracking-wider">{t("assistant_answer_title") || "Answer"}</span>
               </div>
-              <div className="whitespace-pre-wrap text-sm leading-relaxed select-text" style={{ color: "var(--text)" }}>
+              <div className="whitespace-pre-wrap text-sm leading-relaxed select-text" dir="auto" style={{ color: "var(--text)" }}>
                 {answer}
               </div>
               {providerUsed && (
@@ -209,6 +211,7 @@ export const AskTab: React.FC<AskTabProps> = ({
               value={rewriteText}
               onChange={(e) => setRewriteText(e.target.value)}
               rows={6}
+              dir="auto"
               className="w-full bg-[var(--bg-input)] border border-[var(--border-input)] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[var(--border-glow)] transition-colors resize-none"
               placeholder={t("rewrite_placeholder")}
               style={{ color: "var(--text)", fontFamily: "var(--font-sans)" }}
@@ -253,6 +256,7 @@ export const AskTab: React.FC<AskTabProps> = ({
               </div>
               <div
                 className="whitespace-pre-wrap text-sm leading-relaxed select-text p-4 rounded-xl"
+                dir="auto"
                 style={{ color: "var(--text)", background: "var(--bg-input)", border: "1px solid var(--border)" }}
               >
                 {rewriteResult}

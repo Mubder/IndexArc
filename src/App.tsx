@@ -162,7 +162,6 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("indexarc-theme", theme);
   }, [theme]);
-
   // Language / direction management (drives Arabic font via CSS)
   useEffect(() => {
     const isAr = settings?.ui_language === "ar";
@@ -170,15 +169,46 @@ export default function App() {
     document.documentElement.setAttribute("dir", isAr ? "rtl" : "ltr");
   }, [settings?.ui_language]);
 
-  // Font size settings — Arabic font-size is universal (always controls html font-size)
+  // Apply initial font size preset from localStorage before server response on startup
+  useEffect(() => {
+    try {
+      const savedPreset = localStorage.getItem("indexarc-settings-preset");
+      if (savedPreset) {
+        const parsed = JSON.parse(savedPreset);
+        const root = document.documentElement;
+        const en = parsed.font_size_en || 14;
+        const ar = parsed.font_size_ar || 16;
+        const isAr = parsed.ui_language === "ar";
+        root.style.setProperty("--font-size-en", `${en}px`);
+        root.style.setProperty("--font-size-ar", `${ar}px`);
+        root.style.setProperty("--arabic-font-scale", (ar / en).toFixed(4));
+        root.style.setProperty("font-size", isAr ? `${ar}px` : `${en}px`);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Font size settings management — scales Arabic font appropriately even when UI is in English
   useEffect(() => {
     const root = document.documentElement;
     const en = settings?.font_size_en || 14;
     const ar = settings?.font_size_ar || 16;
+    const isAr = settings?.ui_language === "ar";
     root.style.setProperty("--font-size-en", `${en}px`);
     root.style.setProperty("--font-size-ar", `${ar}px`);
-    root.style.setProperty("font-size", `${ar}px`);
-  }, [settings?.font_size_en, settings?.font_size_ar]);
+    root.style.setProperty("--arabic-font-scale", (ar / en).toFixed(4));
+    root.style.setProperty("font-size", isAr ? `${ar}px` : `${en}px`);
+
+    localStorage.setItem(
+      "indexarc-settings-preset",
+      JSON.stringify({
+        font_size_en: en,
+        font_size_ar: ar,
+        ui_language: settings?.ui_language || "en",
+      })
+    );
+  }, [settings?.font_size_en, settings?.font_size_ar, settings?.ui_language]);
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
@@ -186,6 +216,7 @@ export default function App() {
 
   /** Prevent poll/refresh from wiping in-progress Settings form edits */
   const settingsDirtyRef = useRef(false);
+  const patchTimerRef = useRef<any>(null);
 
   const toggleLanguage = useCallback(() => {
     setSettings((prev) => {
@@ -240,7 +271,39 @@ export default function App() {
 
   const patchSettings = useCallback((patch: Partial<Settings>) => {
     settingsDirtyRef.current = true;
-    setSettings((prev) => (prev ? { ...prev, ...patch } : (patch as Settings)));
+    setSettings((prev) => {
+      const next = prev ? { ...prev, ...patch } : (patch as Settings);
+      if (next) {
+        localStorage.setItem(
+          "indexarc-settings-preset",
+          JSON.stringify({
+            font_size_en: next.font_size_en || 14,
+            font_size_ar: next.font_size_ar || 16,
+            ui_language: next.ui_language || "en",
+          })
+        );
+      }
+      return next;
+    });
+
+    if (patchTimerRef.current) clearTimeout(patchTimerRef.current);
+    patchTimerRef.current = setTimeout(() => {
+      fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      })
+        .then((r) => r.json())
+        .then((saved) => {
+          settingsDirtyRef.current = false;
+          if (saved && typeof saved === "object" && (saved as Settings).ai_provider) {
+            setSettings(saved as Settings);
+          }
+        })
+        .catch(() => {
+          settingsDirtyRef.current = false;
+        });
+    }, 300);
   }, []);
 
   useEffect(() => {

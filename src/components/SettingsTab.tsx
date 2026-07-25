@@ -202,9 +202,12 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             accentColor: "var(--accent)",
           }}
         />
-        <p className="text-[11px] text-right" style={{ color: "var(--text-muted)" }}>
-          {settings.font_size_en || 14}px
-        </p>
+        <div className="flex justify-between items-center text-[11px]" style={{ color: "var(--text-muted)" }}>
+          <span style={{ fontSize: `${settings.font_size_en || 14}px`, color: "var(--text)" }}>
+            English Font Preview — IndexArc
+          </span>
+          <span>{settings.font_size_en || 14}px</span>
+        </div>
       </div>
 
       <div className="space-y-2" style={{ borderBottom: "1px solid var(--border)", paddingBottom: "1.25rem" }}>
@@ -227,9 +230,12 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             accentColor: "var(--accent)",
           }}
         />
-        <p className="text-[11px] text-right" style={{ color: "var(--text-muted)" }}>
-          {settings.font_size_ar || 16}px
-        </p>
+        <div className="flex justify-between items-center text-[11px]" style={{ color: "var(--text-muted)" }}>
+          <span dir="rtl" lang="ar" className="font-arabic" style={{ fontSize: `${settings.font_size_ar || 16}px`, color: "var(--text)" }}>
+            معاينة حجم الخط العربي — IndexArc
+          </span>
+          <span>{settings.font_size_ar || 16}px</span>
+        </div>
       </div>
 
       <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("ai_provider_choice")}</h2>
