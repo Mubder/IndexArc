@@ -91,9 +91,9 @@ export const HomeTab: React.FC<HomeTabProps> = ({
         </div>
       </div>
 
-      {candidates.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+       {candidates.length > 0 && (
+         <div className="rounded-xl p-4 space-y-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
               {t("candidates_title")} ({candidates.length})
             </h3>
@@ -131,9 +131,9 @@ export const HomeTab: React.FC<HomeTabProps> = ({
         </div>
       )}
 
-      {attention.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--amber)" }}>
+       {attention.length > 0 && (
+         <div className="rounded-xl p-4 space-y-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+           <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--amber)" }}>
             <Inbox className="w-4 h-4" />
             {t("attention_title")} ({attention.length})
           </h2>
@@ -154,8 +154,8 @@ export const HomeTab: React.FC<HomeTabProps> = ({
         </div>
       )}
 
-      <div className="space-y-3">
-        <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("recent_saved")}</h2>
+       <div className="rounded-xl p-4 space-y-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+         <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("recent_saved")}</h2>
         <div className="space-y-2">
           {entries
             .filter((e) => e.status === "saved")
