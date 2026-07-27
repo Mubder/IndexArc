@@ -20,4 +20,17 @@ declare module "pdf-parse/lib/pdf-parse.js" {
   export default pdfParse;
 }
 
+declare module "./shared/spellcheck.cjs" {
+  const spellcheck: {
+    findMisspelled: (words: string[], ar: unknown, en: unknown) => string[];
+    checkArabicWord: (w: string, ar: unknown) => boolean;
+    checkEnglishWord: (w: string, en: unknown) => boolean;
+    sanitizeToken: (t: string) => string;
+    isArabicToken: (t: string) => boolean;
+    isLatinToken: (t: string) => boolean;
+    stripArabicDiacritics: (s: string) => string;
+  };
+  export default spellcheck;
+}
+
 export {};

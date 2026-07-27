@@ -19,44 +19,113 @@
   --font-arabic: "ArabicGlyphs", "Rubik", "Calibri", "Segoe UI", "Tahoma", ui-sans-serif, sans-serif;
 }
 
-/* ── Spellcheck overlay (Scratchpad): sizing/metrics that must mirror the
-   underlying editor so the red underlines line up. ── */
-.spell-overlay {
-  line-height: inherit !important;
-  letter-spacing: inherit !important;
-  tab-size: inherit !important;
+/* ── Note editor (Scratchpad) dual-language BIDI + spell underlines ── */
+.note-editor-shell {
+  position: relative;
+  /* Shell tracks the visible editor frame only — never full content height */
+  isolation: isolate;
+}
+
+.note-editor-frame {
+  position: relative;
+  /* Lock frame to the scroll viewport so jump FABs never sit mid-document */
+  max-height: min(55vh, 520px);
+  min-height: 200px;
+}
+
+.note-editor {
   box-sizing: border-box !important;
-  /* Force consistent font metrics for mixed-script overlay */
-  font-family: inherit !important;
-  font-size: inherit !important;
   white-space: pre-wrap !important;
+  overflow-wrap: break-word !important;
   word-break: break-word !important;
-  direction: ltr; /* overlay is LTR; individual spans handle their own direction */
+  font-family: var(--font-sans) !important;
+  font-size: var(--note-font-size, var(--font-size-en, 14px)) !important;
+  line-height: 1.65 !important;
+  letter-spacing: normal !important;
+  tab-size: 4;
+  --arabic-font-scale: 1;
+  /*
+   * Dual-language BIDI: plaintext gives each paragraph its own base direction
+   * from the first strong character (needed for mixed EN/AR notes).
+   */
+  unicode-bidi: plaintext;
+  text-align: start;
+  /* Critical: contentEditable must scroll inside the frame, not grow the page */
+  max-height: min(55vh, 520px) !important;
+  min-height: 200px !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  scrollbar-gutter: stable;
 }
 
-/* Robust squiggly underline that sits BELOW Arabic descenders */
-.spell-overlay .spell-misspell {
-  /* Standard wavy underline */
-  text-decoration: underline wavy #f87171;
-  text-decoration-skip-ink: none;
-  /* Offset pushes line below tallest descenders in Arabic fonts */
-  text-underline-offset: 5px;
-  /* Ensure inline layout matches editor text flow */
-  display: inline;
+.note-editor[data-bidi="ltr"] {
+  direction: ltr;
+  unicode-bidi: plaintext;
+}
+.note-editor[data-bidi="rtl"] {
+  direction: rtl;
+  unicode-bidi: plaintext;
+}
+.note-editor[data-bidi="auto"] {
+  unicode-bidi: plaintext;
+}
+
+.note-editor * {
   font-size: inherit !important;
   line-height: inherit !important;
-  /* Prevent underline from being clipped by line-height */
-  vertical-align: baseline;
+  font-family: inherit !important;
 }
 
-/* For browsers that don't support text-underline-offset well, fallback to border-bottom */
-@supports not (text-underline-offset: 5px) {
-  .spell-overlay .spell-misspell {
-    text-decoration: none;
-    border-bottom: 2px solid #f87171;
-    border-bottom-style: wavy;
-    padding-bottom: 3px;
-  }
+/*
+ * Spell underlines are painted from live Range#getClientRects() so they sit
+ * under the actual glyphs after RTL/BIDI reordering — never a cloned overlay.
+ */
+.spell-rect-layer {
+  pointer-events: none;
+}
+.spell-rect-underline {
+  pointer-events: none;
+  box-sizing: border-box;
+  border-bottom: 2px wavy #f87171;
+  /* Fallback when wavy borders aren't drawn on empty boxes */
+  background: linear-gradient(
+    90deg,
+    #f87171 0 25%,
+    transparent 25% 50%,
+    #f87171 50% 75%,
+    transparent 75% 100%
+  );
+  background-size: 6px 2px;
+  background-repeat: repeat-x;
+  background-position: left bottom;
+}
+
+/*
+ * Jump FABs: pinned to the TOP and BOTTOM of the visible editor frame
+ * (not mid-content). Always one click away without scrolling to the middle.
+ */
+.note-jump-btn {
+  position: absolute;
+  z-index: 40;
+  pointer-events: auto;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  border-radius: 0.5rem;
+}
+.note-jump-btn--top {
+  top: 8px;
+}
+.note-jump-btn--bottom {
+  bottom: 8px;
+}
+/* Physical corners so RTL UI does not bury the controls */
+[dir="rtl"] .note-jump-btn {
+  left: 8px;
+  right: auto;
+}
+[dir="ltr"] .note-jump-btn,
+.note-jump-btn {
+  right: 8px;
+  left: auto;
 }
 
 /* ── Highlight Colors ── */
@@ -153,22 +222,39 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --skeleton-mid: rgba(37, 99, 235, 0.08);
 }
 
-/* ── Arabic Text Scaling in English UI ── */
+/* ── Arabic Text Scaling in English UI ──
+   IMPORTANT: only scale the Arabic container itself. Never multiply font-size
+   on nested span/div children — that compounds with contentEditable markup
+   and desyncs the spellcheck overlay (red underlines land on the wrong glyphs). */
 html[lang="en"] :is([dir="rtl"], [lang="ar"], .font-arabic, .ar-text) {
   --text-xs: calc(0.75rem * var(--arabic-font-scale, 1.1428));
   --text-sm: calc(0.875rem * var(--arabic-font-scale, 1.1428));
   --text-base: calc(1rem * var(--arabic-font-scale, 1.1428));
   --text-lg: calc(1.125rem * var(--arabic-font-scale, 1.1428));
   --text-xl: calc(1.25rem * var(--arabic-font-scale, 1.1428));
-  font-size: var(--font-size-ar) !important;
+  font-size: var(--font-size-ar);
 }
 
-html[lang="en"] :is([dir="rtl"], [lang="ar"], .font-arabic, .ar-text) :is(.text-xs, .text-sm, .text-base, .text-lg, .text-xl, p, span, div, textarea, input, button) {
-  font-size: calc(1em * var(--arabic-font-scale, 1.1428)) !important;
+/* Utility classes keep a single absolute size (using the vars above), not 1em*scale */
+html[lang="en"] :is([dir="rtl"], [lang="ar"], .font-arabic, .ar-text).text-xs { font-size: var(--text-xs); }
+html[lang="en"] :is([dir="rtl"], [lang="ar"], .font-arabic, .ar-text).text-sm { font-size: var(--text-sm); }
+html[lang="en"] :is([dir="rtl"], [lang="ar"], .font-arabic, .ar-text).text-base { font-size: var(--text-base); }
+html[lang="en"] :is([dir="rtl"], [lang="ar"], .font-arabic, .ar-text).text-lg { font-size: var(--text-lg); }
+html[lang="en"] :is([dir="rtl"], [lang="ar"], .font-arabic, .ar-text).text-xl { font-size: var(--text-xl); }
+
+/* Note editor uses a fixed dual-language size — exclude cascading ar scale */
+html[lang="en"] .note-editor,
+.note-editor {
+  font-size: var(--note-font-size, var(--font-size-en, 14px)) !important;
 }
 
 .font-arabic, .ar-text {
-  font-family: var(--font-arabic) !important;
+  font-family: var(--font-arabic);
+}
+
+/* Dual-language note body: Latin on Inter, Arabic on Rubik via unicode-range */
+.note-editor {
+  font-family: var(--font-sans) !important;
 }
 
 /* ── Base ── */

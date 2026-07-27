@@ -62,6 +62,7 @@
       "dist/**/*",
       "public/**/*",
       "dictionaries/**/*",
+      "shared/**/*",
       "electron-main.cjs",
       "preload.cjs",
       "package.json",

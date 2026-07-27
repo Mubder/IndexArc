@@ -4,6 +4,13 @@ import path from "path";
 import fs from "fs";
 import nspell from "nspell";
 import { ensurePortableLayout } from "./server/paths.js";
+// Shared CJS helpers — esbuild inlines this into dist/server.cjs; tsx loads it
+// at runtime for `npm run dev`. Electron main uses the same file via require().
+import spellcheckHelpers from "./shared/spellcheck.cjs";
+const { findMisspelled, loadArabicEngine } = spellcheckHelpers as {
+  findMisspelled: (words: string[], ar: any, en: any) => string[];
+  loadArabicEngine: (dir: string) => any;
+};
 import { VaultStore } from "./server/store.js";
 import { addLog, getLogs } from "./server/logs.js";
 import {
@@ -258,142 +265,30 @@ app.post("/api/settings", (req, res) => {
   res.json(next);
 });
 
-// --- Note editor spellchecker (server-side Hunspell via nspell, both
-// languages — mirrors the Electron main-process implementation so the
-// non-Electron web fallback behaves the same way). ---
-// Unicode ranges for script detection (kept in sync with client)
-const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
-const LATIN_WORD_RE = /^[A-Za-z]+(?:['-][A-Za-z]+)*$/;
-// Characters to strip from tokens before spellcheck (invisible BIDI controls, diacritics, Tatweel)
-const CLEAN_TOKEN_RE = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\u0640\u064B-\u0652\u0670]/g;
-
-function loadServerDict(lang: string): any {
+// --- Note editor spellchecker (mirrors Electron main) ---
+// Arabic: ArabicSpellEngine (SymSpell + morphology). English: nspell.
+function loadServerEnDict(): any {
   try {
-    const dicDir = path.join(process.cwd(), "dictionaries", lang);
-    const affPath = path.join(dicDir, `${lang}.aff`);
-    const dicPath = path.join(dicDir, `${lang}.dic`);
+    const dicDir = path.join(process.cwd(), "dictionaries", "en");
+    const affPath = path.join(dicDir, "en.aff");
+    const dicPath = path.join(dicDir, "en.dic");
     if (fs.existsSync(affPath) && fs.existsSync(dicPath)) {
-      const aff = fs.readFileSync(affPath);
-      const dic = fs.readFileSync(dicPath);
-      return nspell({ aff, dic });
+      return nspell({ aff: fs.readFileSync(affPath), dic: fs.readFileSync(dicPath) });
     }
-  } catch (e) {
-    /* optional server spellcheck */
+  } catch {
+    /* optional */
   }
   return null;
 }
-const serverArSpell: any = loadServerDict("ar");
-const serverEnSpell: any = loadServerDict("en");
-
-function sanitizeToken(token: string): string {
-  return token.replace(CLEAN_TOKEN_RE, "");
-}
-
-function isArabicToken(token: string): boolean {
-  return ARABIC_RE.test(token);
-}
-
-function isLatinToken(token: string): boolean {
-  return LATIN_WORD_RE.test(token);
-}
-
-function stripArDiacritics(str: string): string {
-  return str.replace(/[\u064B-\u0652\u0640\u0670]/g, "");
-}
-
-// Spelling variants worth trying for a given Arabic stem...
-function arWordVariants(word: string): Set<string> {
-  const out = new Set([word]);
-  out.add(word.replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه"));
-  if (word.endsWith("ائ")) out.add(word.slice(0, -2) + "اء");
-  return out;
-}
-
-// Attached proclitics (wa-, fa-, bi-, li-, ka-, sa- "will" and combinations).
-const AR_PREFIXES = ["وبال", "فبال", "بال", "وكال", "فكال", "كال", "ولل", "فلل", "لل", "وال", "فال", "ال", "وس", "فس", "و", "ف", "ب", "ل", "ك", "س"];
-// Attached enclitics (possessive/object pronouns, plural & dual markers, and
-// the bare feminine ta-marbuta ة). Single-letter pronoun suffixes ي/ه/ك are
-// deliberately excluded — they are too easily confused with root letters and
-// would hide real misspellings.
-const AR_SUFFIXES = ["هما", "كما", "تما", "تين", "تان", "ية", "ون", "ين", "ات", "ني", "ها", "هم", "هن", "كم", "كن", "نا", "تم", "تن", "وا", "ة"];
-
-function arWordIsKnown(word: string): boolean {
-  for (const v of arWordVariants(word)) {
-    if (serverArSpell.correct(v)) return true;
-  }
-  return false;
-}
-
-// Multiple suffixes can match the same ending (e.g. "ية" and "ة" both match
-// "نهائية"), and only one of them may lead to a real stem, so every
-// candidate has to be tried rather than stopping at the first match.
-function stripArSuffixCandidates(word: string): string[] {
-  const out: string[] = [];
-  for (const s of AR_SUFFIXES) {
-    if (word.endsWith(s) && word.length - s.length >= 2) {
-      out.push(word.slice(0, word.length - s.length));
-    }
-  }
-  return out;
-}
-
-// Hunspell's affix model does not fully capture Arabic's rich derivational
-// morphology (circumfixes, broken plurals, stacked clitics), which is a
-// known limitation of every Hunspell-based Arabic dictionary (including the
-// one bundled here — e.g. it lists masculine adjectives like كبير but not
-// their feminine كبيرة form). To cut down on false positives we additionally
-// strip the most common attached prefixes/suffixes (individually and
-// combined) before giving up on a word.
-function checkArWord(w: string): boolean {
-  if (!serverArSpell) return true;
-  const clean = stripArDiacritics(w);
-  if (!clean || clean.length <= 1) return true;
-  if (arWordIsKnown(clean)) return true;
-
-  for (const cand of stripArSuffixCandidates(clean)) {
-    if (arWordIsKnown(cand)) return true;
-  }
-
-  for (const p of AR_PREFIXES) {
-    if (clean.startsWith(p) && clean.length - p.length >= 2) {
-      const rest = clean.slice(p.length);
-      if (arWordIsKnown(rest)) return true;
-      for (const cand of stripArSuffixCandidates(rest)) {
-        if (arWordIsKnown(cand)) return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-function checkEnWord(w: string): boolean {
-  if (!serverEnSpell) return true;
-  if (!w || w.length <= 1) return true;
-  return serverEnSpell.correct(w);
-}
+const serverArSpell: any = loadArabicEngine(path.join(process.cwd(), "dictionaries", "ar"));
+const serverEnSpell: any = loadServerEnDict();
 
 app.post("/api/spellcheck-words", (req, res) => {
   const words: string[] = req.body?.words || [];
   if (!Array.isArray(words)) {
     return res.json({ bad: [] });
   }
-  const bad: string[] = [];
-  const seen = new Set<string>();
-  for (const w of words) {
-    if (typeof w !== "string" || seen.has(w)) continue;
-    seen.add(w);
-    // Client already sanitized and filtered, but re-verify script for safety
-    const clean = sanitizeToken(w);
-    if (!clean || clean.length <= 1) continue;
-    if (isArabicToken(clean)) {
-      if (serverArSpell && !checkArWord(clean)) bad.push(clean);
-    } else if (isLatinToken(clean)) {
-      if (serverEnSpell && !checkEnWord(clean)) bad.push(clean);
-    }
-    // Ignore mixed-script / numeric / symbol tokens
-  }
-  res.json({ bad });
+  res.json({ bad: findMisspelled(words, serverArSpell, serverEnSpell) });
 });
 
 // --- Ollama helpers ---

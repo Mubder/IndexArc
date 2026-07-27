@@ -22,9 +22,16 @@ import {
   Redo,
   Palette,
   ClipboardPaste,
+  ArrowUp,
+  ArrowDown,
+  AlignLeft,
+  AlignRight,
+  Languages,
 } from "lucide-react";
 import { AnalyzeCandidate, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
+
+type NoteBidiMode = "auto" | "ltr" | "rtl";
 
 interface ScratchTab {
   id: string;
@@ -161,6 +168,181 @@ function setSelectionOffsets(root: HTMLElement, start: number, end: number) {
   sel.addRange(range);
 }
 
+// ── Spellcheck tokenization (shared with server/electron via same rules) ──
+// Word = run of Arabic letters, or Latin letters with internal ' / -
+const SPELL_WORD_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+|[A-Za-z]+(?:['\u2019-][A-Za-z]+)*/g;
+const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
+const LATIN_WORD_RE = /^[A-Za-z]+(?:['\u2019-][A-Za-z]+)*$/;
+const CLEAN_TOKEN_RE = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\u0640\u064B-\u0652\u0670]/g;
+
+function sanitizeToken(token: string): string {
+  return token.replace(CLEAN_TOKEN_RE, "");
+}
+
+function isArabicToken(token: string): boolean {
+  return ARABIC_RE.test(token) && !/[A-Za-z]/.test(token);
+}
+
+function isLatinToken(token: string): boolean {
+  return LATIN_WORD_RE.test(token);
+}
+
+function extractSpellWords(text: string): string[] {
+  const words: string[] = [];
+  try {
+    const segmenter = new Intl.Segmenter(["en", "ar"], { granularity: "word" });
+    for (const segment of segmenter.segment(text)) {
+      if (!segment.isWordLike) continue;
+      const clean = sanitizeToken(segment.segment);
+      if (!clean || clean.length <= 1) continue;
+      if (isArabicToken(clean) || isLatinToken(clean)) words.push(clean);
+    }
+  } catch {
+    const matches = text.match(SPELL_WORD_RE) || [];
+    for (const m of matches) {
+      const clean = sanitizeToken(m);
+      if (!clean || clean.length <= 1) continue;
+      if (isArabicToken(clean) || isLatinToken(clean)) words.push(clean);
+    }
+  }
+  return Array.from(new Set(words));
+}
+
+/** First strong character decides a paragraph/note's natural base direction. */
+function detectBaseDir(text: string): "ltr" | "rtl" {
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    // Arabic / Hebrew blocks → RTL
+    if (
+      (code >= 0x0590 && code <= 0x05ff) ||
+      (code >= 0x0600 && code <= 0x06ff) ||
+      (code >= 0x0750 && code <= 0x077f) ||
+      (code >= 0x08a0 && code <= 0x08ff) ||
+      (code >= 0xfb1d && code <= 0xfdff) ||
+      (code >= 0xfe70 && code <= 0xfeff)
+    ) {
+      return "rtl";
+    }
+    // Latin / common LTR letters
+    if (
+      (code >= 0x0041 && code <= 0x005a) ||
+      (code >= 0x0061 && code <= 0x007a) ||
+      (code >= 0x00c0 && code <= 0x024f)
+    ) {
+      return "ltr";
+    }
+  }
+  return "ltr";
+}
+
+/** Scroll a page container (main) so `el` sits near the top of the viewport. */
+function scrollContainerToReveal(el: HTMLElement) {
+  const main = el.closest("main") as HTMLElement | null;
+  if (main) {
+    const mainRect = main.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    const delta = elRect.top - mainRect.top - 12;
+    if (Math.abs(delta) > 2) {
+      main.scrollBy({ top: delta, behavior: "smooth" });
+    }
+    return;
+  }
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+interface SpellRect {
+  key: string;
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Measure misspelled words from the LIVE editor DOM using Range#getClientRects().
+ * A cloned HTML overlay reflows differently under RTL/BIDI (especially when
+ * misspell <span>s get unicode-bidi:isolate), which left red squiggles floating
+ * on the empty side of dual-language notes. Positioning from real glyph boxes
+ * always tracks the painted text.
+ */
+function collectMisspellRects(
+  editor: HTMLElement,
+  misspelled: Set<string>
+): SpellRect[] {
+  if (!misspelled.size) return [];
+  const editorBox = editor.getBoundingClientRect();
+  const out: SpellRect[] = [];
+  let keySeq = 0;
+
+  const pushRangeRects = (range: Range) => {
+    let list: DOMRectList | DOMRect[];
+    try {
+      list = range.getClientRects();
+    } catch {
+      return;
+    }
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i];
+      if (!r || r.width < 1 || r.height < 1) continue;
+      // Skip rects clearly outside the editor (collapsed off-screen fragments)
+      if (r.bottom < editorBox.top - 2 || r.top > editorBox.bottom + 2) continue;
+      out.push({
+        key: `u${keySeq++}`,
+        top: r.top - editorBox.top,
+        left: r.left - editorBox.left,
+        width: r.width,
+        height: Math.max(2, r.height),
+      });
+    }
+  };
+
+  const walkText = (node: Text) => {
+    const text = node.nodeValue || "";
+    if (!text) return;
+
+    type Seg = { start: number; end: number; raw: string };
+    const segs: Seg[] = [];
+    try {
+      const segmenter = new Intl.Segmenter(["en", "ar"], { granularity: "word" });
+      for (const s of segmenter.segment(text)) {
+        if (!s.isWordLike) continue;
+        segs.push({
+          start: s.index,
+          end: s.index + s.segment.length,
+          raw: s.segment,
+        });
+      }
+    } catch {
+      for (const m of text.matchAll(new RegExp(SPELL_WORD_RE.source, "g"))) {
+        const start = m.index ?? 0;
+        segs.push({ start, end: start + m[0].length, raw: m[0] });
+      }
+    }
+
+    for (const seg of segs) {
+      const clean = sanitizeToken(seg.raw);
+      if (!clean || clean.length <= 1) continue;
+      if (!(isArabicToken(clean) || isLatinToken(clean))) continue;
+      if (!misspelled.has(clean)) continue;
+      try {
+        const range = document.createRange();
+        range.setStart(node, seg.start);
+        range.setEnd(node, Math.min(seg.end, text.length));
+        pushRangeRects(range);
+      } catch {
+        /* range may fail if node detaches mid-measure */
+      }
+    }
+  };
+
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  let n: Node | null;
+  while ((n = walker.nextNode())) {
+    walkText(n as Text);
+  }
+  return out;
+}
+
 export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ settings }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
@@ -175,6 +357,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  // Long-note jump controls: shown whenever the editor content overflows.
+  const [noteOverflows, setNoteOverflows] = useState(false);
+  const [canScrollUp, setCanScrollUp] = useState(false);
+  const [canScrollDown, setCanScrollDown] = useState(false);
+  // Dual-language BIDI base direction (auto | force LTR | force RTL)
+  const [bidiMode, setBidiMode] = useState<NoteBidiMode>("auto");
+  const shellRef = useRef<HTMLDivElement>(null);
+  const scratchRootRef = useRef<HTMLDivElement>(null);
   // Per-tab undo stack for rephrase: each entry is a previous version of the
   // content, so the user can step back through their edits.
   const [rephraseUndo, setRephraseUndo] = useState<Record<string, string[]>>({});
@@ -205,13 +395,21 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const activeIdRef = useRef<string>(activeId);
   activeIdRef.current = activeId;
 
-  // Arabic spellcheck overlay (Electron only): set of misspelled Arabic words
+  // Dual-language spellcheck: red underlines are positioned from live
+  // getClientRects() of misspelled ranges (not a cloned HTML overlay).
   const editorRef = useRef<HTMLDivElement>(null);
   const [misspelledWords, setMisspelledWords] = useState<Set<string>>(new Set());
+  const [spellRects, setSpellRects] = useState<SpellRect[]>([]);
   const [highlightColor, setHighlightColor] = useState<string>("#fef08a");
   const [textColor, setTextColor] = useState<string>("#ffffff");
   const [showHighlightPicker, setShowHighlightPicker] = useState(false);
   const [showTextColorPicker, setShowTextColorPicker] = useState(false);
+  const misspelledRef = useRef(misspelledWords);
+  misspelledRef.current = misspelledWords;
+
+  // One size for dual-language notes: larger of EN/AR settings so neither
+  // script is cramped, without per-script scaling that desyncs the overlay.
+  const noteFontSize = Math.max(settings?.font_size_en || 14, settings?.font_size_ar || 16);
 
   // --- Owned undo/redo history -------------------------------------------
   // The browser's native undo stack is unreliable here (React reconciliation
@@ -390,59 +588,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
-// Matches a "word" in either script: a run of Arabic letters, or a run of
-// Latin letters (with internal apostrophes/hyphens, e.g. "don't", "well-known").
-// Using Intl.Segmenter for accurate word boundaries across scripts (RTL/LTR).
-// Fallback regex for older environments (kept for server-side use).
-const SPELL_WORD_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+|[A-Za-z]+(?:['-][A-Za-z]+)*/g;
-
-// Unicode ranges for script detection
-const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
-const LATIN_WORD_RE = /^[A-Za-z]+(?:['-][A-Za-z]+)*$/;
-
-// Characters to strip from tokens before spellcheck (invisible BIDI controls, diacritics, Tatweel)
-const CLEAN_TOKEN_RE = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\u0640\u064B-\u0652\u0670]/g;
-
-function sanitizeToken(token: string): string {
-  return token.replace(CLEAN_TOKEN_RE, "");
-}
-
-function isArabicToken(token: string): boolean {
-  return ARABIC_RE.test(token);
-}
-
-function isLatinToken(token: string): boolean {
-  return LATIN_WORD_RE.test(token);
-}
-
-// Extract words using Intl.Segmenter (browser) with fallback to regex
-function extractSpellWords(text: string): string[] {
-  const words: string[] = [];
-  try {
-    // Intl.Segmenter gives accurate word boundaries with character indices
-    const segmenter = new Intl.Segmenter(["en", "ar"], { granularity: "word" });
-    for (const segment of segmenter.segment(text)) {
-      if (!segment.isWordLike) continue;
-      const raw = segment.segment;
-      const clean = sanitizeToken(raw);
-      if (!clean || clean.length <= 1) continue;
-      // Only accept tokens that are purely Arabic or purely Latin script
-      if (isArabicToken(clean) || isLatinToken(clean)) {
-        words.push(clean);
-      }
-    }
-  } catch {
-    // Fallback: regex-based extraction (e.g., older browser / server)
-    const matches = text.match(SPELL_WORD_RE) || [];
-    for (const m of matches) {
-      const clean = sanitizeToken(m);
-      if (!clean || clean.length <= 1) continue;
-      if (isArabicToken(clean) || isLatinToken(clean)) words.push(clean);
-    }
-  }
-  return Array.from(new Set(words));
-}
-
   const checkWords = useCallback(async (words: string[]): Promise<string[]> => {
     if (typeof window !== "undefined" && window.electronAPI?.spellcheckWords) {
       return window.electronAPI.spellcheckWords(words);
@@ -461,13 +606,8 @@ function extractSpellWords(text: string): string[] {
     }
   }, []);
 
-  // Debounced spellcheck of the active tab's content, for BOTH English and
-  // Arabic. This runs entirely through our own custom checker rather than
-  // Chromium's native spellcheck attribute: Chromium has no Arabic Hunspell
-  // dictionary at all, and enabling its native checker on this editor also
-  // made it (incorrectly) draw its own misspelling underline through correct
-  // Arabic words on Windows. Keeping both languages on one custom pipeline
-  // avoids that conflict and works identically regardless of UI language.
+  // Debounced bilingual spellcheck (custom nspell pipeline — Chromium has no
+  // Arabic dict and would underline correct Arabic as English misspellings).
   useEffect(() => {
     const text = htmlToPlainText(active?.content || "");
     const words = extractSpellWords(text);
@@ -483,7 +623,7 @@ function extractSpellWords(text: string): string[] {
       } catch {
         /* ignore */
       }
-    }, 500);
+    }, 450);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
@@ -491,64 +631,21 @@ function extractSpellWords(text: string): string[] {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.content, checkWords]);
 
-  // Build the highlighted HTML for the overlay: preserving exact DOM node structure
-  // so paragraph breaks, margins, and line wraps mirror the editor with 0px offset.
-  const overlayHtml = React.useMemo(() => {
-    const rawHtml = active?.content || "";
-    if (!misspelledWords.size || !rawHtml) return "";
-
-    const d = document.createElement("div");
-    d.innerHTML = rawHtml;
-
-    const processNode = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.nodeValue || "";
-        // Use the same tokenization logic as the spellchecker for consistent matching
-        const segmenter = new Intl.Segmenter(["en", "ar"], { granularity: "word" });
-        const segments = Array.from(segmenter.segment(text));
-        let hasBad = false;
-        const frag = document.createDocumentFragment();
-
-        for (const segment of segments) {
-          const raw = segment.segment;
-          if (!segment.isWordLike) {
-            // Non-word segment (whitespace, punctuation) - keep as-is
-            frag.appendChild(document.createTextNode(raw));
-            continue;
-          }
-          const clean = sanitizeToken(raw);
-          if (!clean || clean.length <= 1 || !(isArabicToken(clean) || isLatinToken(clean))) {
-            // Not a spellcheckable word (mixed script, number, symbol) - keep as-is
-            frag.appendChild(document.createTextNode(raw));
-            continue;
-          }
-          // Check if this normalized token is misspelled
-          if (misspelledWords.has(clean)) {
-            hasBad = true;
-            const span = document.createElement("span");
-            span.className = "spell-misspell";
-            span.textContent = raw; // preserve original text for display
-            frag.appendChild(span);
-          } else {
-            frag.appendChild(document.createTextNode(raw));
-          }
-        }
-
-        if (hasBad && node.parentNode) {
-          node.parentNode.replaceChild(frag, node);
-        }
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        const el = node as HTMLElement;
-        const tag = el.tagName.toLowerCase();
-        if (tag !== "script" && tag !== "style") {
-          Array.from(el.childNodes).forEach(processNode);
-        }
-      }
-    };
-
-    Array.from(d.childNodes).forEach(processNode);
-    return d.innerHTML;
-  }, [active?.content, misspelledWords]);
+  // Paint underlines from live glyph boxes (BIDI-safe for dual-language notes).
+  const recomputeSpellRects = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      setSpellRects([]);
+      return;
+    }
+    const bad = misspelledRef.current;
+    if (!bad.size) {
+      setSpellRects((prev) => (prev.length ? [] : prev));
+      return;
+    }
+    const next = collectMisspellRects(editor, bad);
+    setSpellRects(next);
+  }, []);
 
   // Load tabs from the server (portable, survives reinstall/update). The
   // server copy is authoritative when it has content; localStorage is a cache.
@@ -700,10 +797,28 @@ function extractSpellWords(text: string): string[] {
 
   const onPaste = (e: React.ClipboardEvent) => {
     pasteFlag.current[activeId] = true;
-    if (!pastePlain) return;
+    if (!pastePlain) {
+      // Rich paste still needs a later measure after browser mutates the DOM.
+      requestAnimationFrame(updateScrollAffordances);
+      return;
+    }
     e.preventDefault();
     const text = e.clipboardData.getData("text/plain");
-    document.execCommand("insertText", false, text);
+    const editor = editorRef.current;
+    if (!editor) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !editor.contains(sel.anchorNode)) return;
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const textNode = document.createTextNode(text);
+    range.insertNode(textNode);
+    range.setStartAfter(textNode);
+    range.setEndAfter(textNode);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    // Manual insert does not always fire `input` — keep state + scroll UI in sync.
+    onEditorInput();
+    requestAnimationFrame(updateScrollAffordances);
   };
 
   // Intercept Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl+Y) so they drive OUR
@@ -802,6 +917,52 @@ function extractSpellWords(text: string): string[] {
     const cur = tabs.find((x) => x.id === id);
     setRenameId(id);
     setRenameValue(cur?.title || "");
+  };
+
+  const handleSaveNote = async () => {
+    const plainText = htmlToPlainText(active.content).trim();
+    if (!plainText) return;
+    const items: Array<Partial<AnalyzeCandidate> & { notes?: string }> = [
+      {
+        value: plainText,
+        type: "note",
+        name: active.title,
+        raw_fragment: plainText,
+        labels: [],
+        type_aliases: ["note"],
+        family: "note",
+        notes: plainText,
+      },
+    ];
+    setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], save: true } }));
+    setStatus(t("scratchpad_saving"));
+    try {
+      const res = await fetch("/api/entries/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidates: items.map((c) => ({
+            value: c.value,
+            type: c.type,
+            name: c.name,
+            raw_fragment: c.raw_fragment,
+            labels: c.labels,
+            type_aliases: c.type_aliases,
+            family: c.family,
+          })),
+        }),
+      });
+      if (res.ok) {
+        setStatus(t("scratchpad_saved_ok"));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setStatus(err.error || t("scratchpad_save_err"));
+      }
+    } catch (e: any) {
+      setStatus(e?.message || t("scratchpad_save_err"));
+    } finally {
+      setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], save: false } }));
+    }
   };
 
   const handleSaveSecret = async () => {
@@ -903,16 +1064,85 @@ function extractSpellWords(text: string): string[] {
     analyze(activeId, previous);
   };
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(htmlToPlainText(active.content));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {}
-  };
+   const handleCopy = async () => {
+     try {
+       await navigator.clipboard.writeText(htmlToPlainText(active.content));
+       setCopied(true);
+       setTimeout(() => setCopied(false), 1500);
+     } catch {}
+   };
+
+  const updateScrollAffordances = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      setNoteOverflows(false);
+      setCanScrollUp(false);
+      setCanScrollDown(false);
+      return;
+    }
+    // Use a small epsilon so sub-pixel layout doesn't hide the controls.
+    const overflow = editor.scrollHeight > editor.clientHeight + 2;
+    const top = editor.scrollTop;
+    const maxScroll = Math.max(0, editor.scrollHeight - editor.clientHeight);
+    setNoteOverflows(overflow);
+    setCanScrollUp(overflow && top > 2);
+    setCanScrollDown(overflow && top < maxScroll - 2);
+  }, []);
+
+  const scrollEditor = useCallback(
+    (direction: "top" | "bottom") => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      if (direction === "top") {
+        editor.scrollTop = 0;
+        // Bring note + app chrome into view (no hand-scrolling the page).
+        const reveal = scratchRootRef.current ?? shellRef.current ?? editor;
+        scrollContainerToReveal(reveal);
+      } else {
+        editor.scrollTop = editor.scrollHeight;
+        // Keep the editor frame on screen while jumping to the end.
+        scrollContainerToReveal(shellRef.current ?? editor);
+      }
+      // Double rAF: layout settles after scroll, then remeasure FABs/underlines.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          updateScrollAffordances();
+          recomputeSpellRects();
+        });
+      });
+    },
+    [updateScrollAffordances, recomputeSpellRects]
+  );
+
+  const onEditorScroll = useCallback(() => {
+    updateScrollAffordances();
+    // Underlines are viewport-relative to the editor box — must refresh on scroll.
+    recomputeSpellRects();
+  }, [updateScrollAffordances, recomputeSpellRects]);
+
+  // Re-measure scroll affordances + spell rects after content/tab/layout change.
+  useLayoutEffect(() => {
+    updateScrollAffordances();
+    recomputeSpellRects();
+  }, [active?.content, activeId, misspelledWords, bidiMode, noteFontSize, updateScrollAffordances, recomputeSpellRects]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      updateScrollAffordances();
+      recomputeSpellRects();
+    });
+    ro.observe(editor);
+    return () => ro.disconnect();
+  }, [activeId, updateScrollAffordances, recomputeSpellRects]);
+
+  // Effective dir attribute for the editor + overlay.
+  const noteDir: "auto" | "ltr" | "rtl" = bidiMode === "auto" ? "auto" : bidiMode;
+  const detectedDir = detectBaseDir(htmlToPlainText(active?.content || ""));
 
   return (
-    <div className="space-y-4">
+    <div ref={scratchRootRef} className="space-y-4">
       {/* Internal tabs */}
       <div className="flex items-center gap-2 flex-wrap" style={{ background: "var(--bg-surface)", borderRadius: "0.75rem", padding: "4px", border: "1px solid var(--border)" }}>
         {tabs.filter((t) => !t.archived).map((tab) => {
@@ -1050,7 +1280,7 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
           ) : (
             <button
               type="button"
-              onClick={handleSaveSecret}
+              onClick={handleSaveNote}
               disabled={b.save}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
               style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
@@ -1078,11 +1308,11 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
             className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
             style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
           >
-            <Trash2 className="w-3.5 h-3.5" />
-            {t("scratchpad_clear")}
-          </button>
+           <Trash2 className="w-3.5 h-3.5" />
+             {t("scratchpad_clear")}
+           </button>
 
-          <div className="flex-1" />
+           <div className="flex-1" />
 
           {/* Rephrase controls, moved to the right side. */}
           <div className="flex items-center gap-1">
@@ -1130,61 +1360,187 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
           </p>
         )}
 
-        <div className="relative">
-          {overlayHtml && (
+        <div
+          ref={shellRef}
+          className="note-editor-shell"
+          style={
+            {
+              ["--note-font-size" as string]: `${noteFontSize}px`,
+              background: "var(--bg-input)",
+              borderRadius: "0.75rem",
+            } as React.CSSProperties
+          }
+        >
+          {/* Frame is height-locked to the viewport. Jump FABs pin to its
+              top/bottom corners so they stay reachable on very long notes. */}
+          <div className="note-editor-frame">
             <div
-              aria-hidden="true"
-              dir="auto"
-              lang="ar"
-              className="spell-overlay font-arabic ar-text absolute inset-0 z-0 w-full rounded-xl px-3 py-2 text-sm pointer-events-none whitespace-pre-wrap break-words"
-              style={{
-                border: "1px solid transparent",
-                color: "transparent",
-                fontFamily: "var(--font-mono)",
-                lineHeight: "1.625",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
+              ref={editorRef}
+              key={activeId}
+              contentEditable
+              suppressContentEditableWarning
+              dir={noteDir}
+              data-bidi={bidiMode}
+              lang={bidiMode === "rtl" ? "ar" : bidiMode === "ltr" ? "en" : undefined}
+              spellCheck={false}
+              onInput={() => {
+                onEditorInput();
+                requestAnimationFrame(() => {
+                  updateScrollAffordances();
+                  recomputeSpellRects();
+                });
               }}
-              dangerouslySetInnerHTML={{ __html: overlayHtml + "\n" }}
+              onPaste={onPaste}
+              onKeyDown={onKeyDown}
+              onScroll={onEditorScroll}
+              className="note-editor relative z-10 w-full rounded-xl px-3 py-2 focus:outline-none transition-colors"
+              style={{
+                background: "var(--bg-input)",
+                border: "1px solid var(--border-input)",
+                color: "var(--text)",
+              }}
             />
-          )}
-          <div
-            ref={editorRef}
-            key={activeId}
-            contentEditable
-            suppressContentEditableWarning
-            dir="auto"
-            lang="ar"
-            // Both English and Arabic spellchecking is done via our own
-            // custom nspell-based pipeline (see the overlay below and the
-            // "spellcheck-words" IPC handler). Chromium's native checker
-            // has no Arabic dictionary at all, and enabling it here also
-            // made it (incorrectly) draw its own misspelling underline
-            // through correct Arabic words on Windows.
-            spellCheck={false}
-            onInput={onEditorInput}
-            onPaste={onPaste}
-            onKeyDown={onKeyDown}
-            className="relative z-10 w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors min-h-[200px] font-arabic ar-text"
-            style={{
-              background: overlayHtml ? "transparent" : "var(--bg-input)",
-              border: "1px solid var(--border-input)",
-              color: "var(--text)",
-              fontFamily: "var(--font-mono)",
-              lineHeight: "1.625",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-            }}
-          />
+            {spellRects.length > 0 && (
+              <div
+                aria-hidden="true"
+                className="spell-rect-layer"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 15,
+                  pointerEvents: "none",
+                  overflow: "hidden",
+                  borderRadius: "0.75rem",
+                }}
+              >
+                {spellRects.map((r) => (
+                  <span
+                    key={r.key}
+                    className="spell-rect-underline"
+                    style={{
+                      position: "absolute",
+                      top: r.top + r.height - 3,
+                      left: r.left,
+                      width: r.width,
+                      height: 3,
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+            {/* Always-visible corners of the editor frame (not mid-document). */}
+            {noteOverflows && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => scrollEditor("top")}
+                  className={`note-jump-btn note-jump-btn--top p-2 transition-all hover:opacity-100 ${
+                    canScrollUp ? "opacity-95" : "opacity-50"
+                  }`}
+                  style={{
+                    background: "var(--bg-surface-solid)",
+                    color: "var(--accent-bright)",
+                    border: "1px solid var(--border-glow)",
+                  }}
+                  title={t("scratchpad_go_to_top")}
+                  aria-label={t("scratchpad_go_to_top")}
+                >
+                  <ArrowUp className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollEditor("bottom")}
+                  className={`note-jump-btn note-jump-btn--bottom p-2 transition-all hover:opacity-100 ${
+                    canScrollDown ? "opacity-95" : "opacity-50"
+                  }`}
+                  style={{
+                    background: "var(--bg-surface-solid)",
+                    color: "var(--accent-bright)",
+                    border: "1px solid var(--border-glow)",
+                  }}
+                  title={t("scratchpad_go_to_bottom")}
+                  aria-label={t("scratchpad_go_to_bottom")}
+                >
+                  <ArrowDown className="w-4 h-4" />
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
-        {/* Formatting toolbar */}
+         {/* Formatting toolbar */}
         <div
           ref={toolbarRef}
           onMouseDown={(e) => e.preventDefault()}
           className="flex items-center gap-0.5 flex-wrap"
           style={{ borderTop: "1px solid var(--border)", paddingTop: "8px" }}
         >
+          {/* Dual-language BIDI base direction */}
+          <div
+            className="flex items-center rounded-lg overflow-hidden me-1"
+            style={{ border: "1px solid var(--border)" }}
+            title={t("scratchpad_bidi_hint")}
+          >
+            {(
+              [
+                { mode: "auto" as const, icon: Languages, labelKey: "scratchpad_bidi_auto" as const },
+                { mode: "ltr" as const, icon: AlignLeft, labelKey: "scratchpad_bidi_ltr" as const },
+                { mode: "rtl" as const, icon: AlignRight, labelKey: "scratchpad_bidi_rtl" as const },
+              ]
+            ).map(({ mode, icon: Icon, labelKey }) => {
+              const activeBidi = bidiMode === mode;
+              const title =
+                mode === "auto"
+                  ? `${t(labelKey)} (${detectedDir.toUpperCase()})`
+                  : t(labelKey);
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setBidiMode(mode)}
+                  className="p-1.5 transition-all"
+                  style={{
+                    color: activeBidi ? "var(--accent-bright)" : "var(--text-dim)",
+                    background: activeBidi ? "var(--accent-bg)" : "transparent",
+                  }}
+                  title={title}
+                  aria-label={title}
+                  aria-pressed={activeBidi}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
+
+          {/* Jump top/bottom — always in the toolbar so long notes never hide them */}
+          <button
+            type="button"
+            onClick={() => scrollEditor("top")}
+            disabled={!noteOverflows && !canScrollUp}
+            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+            style={{ color: "var(--text-dim)" }}
+            title={t("scratchpad_go_to_top")}
+            aria-label={t("scratchpad_go_to_top")}
+          >
+            <ArrowUp className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => scrollEditor("bottom")}
+            disabled={!noteOverflows && !canScrollDown}
+            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+            style={{ color: "var(--text-dim)" }}
+            title={t("scratchpad_go_to_bottom")}
+            aria-label={t("scratchpad_go_to_bottom")}
+          >
+            <ArrowDown className="w-3.5 h-3.5" />
+          </button>
+
+          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
+
           {/* Undo / Redo */}
           <button
             type="button"

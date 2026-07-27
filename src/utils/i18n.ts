@@ -250,6 +250,12 @@ export interface TranslationDict {
   scratchpad_clear: string;
   scratchpad_copy: string;
   scratchpad_copied: string;
+  scratchpad_go_to_top: string;
+  scratchpad_go_to_bottom: string;
+  scratchpad_bidi_auto: string;
+  scratchpad_bidi_ltr: string;
+  scratchpad_bidi_rtl: string;
+  scratchpad_bidi_hint: string;
   scratchpad_rename: string;
   scratchpad_archive: string;
   scratchpad_drag_to_reorder: string;
@@ -558,6 +564,12 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_clear: "Clear",
     scratchpad_copy: "Copy",
     scratchpad_copied: "Copied",
+    scratchpad_go_to_top: "Go to top",
+    scratchpad_go_to_bottom: "Go to bottom",
+    scratchpad_bidi_auto: "Auto direction",
+    scratchpad_bidi_ltr: "Left to right",
+    scratchpad_bidi_rtl: "Right to left",
+    scratchpad_bidi_hint: "Text direction for dual-language notes",
     scratchpad_rename: "Rename tab",
     scratchpad_archive: "Archive tab",
     scratchpad_drag_to_reorder: "Drag to reorder",
@@ -864,6 +876,12 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_clear: "مسح",
     scratchpad_copy: "نسخ",
     scratchpad_copied: "تم النسخ",
+    scratchpad_go_to_top: "انتقال إلى الأعلى",
+    scratchpad_go_to_bottom: "انتقال إلى الأسفل",
+    scratchpad_bidi_auto: "اتجاه تلقائي",
+    scratchpad_bidi_ltr: "من اليسار لليمين",
+    scratchpad_bidi_rtl: "من اليمين لليسار",
+    scratchpad_bidi_hint: "اتجاه النص للملاحظات ثنائية اللغة",
     scratchpad_rename: "إعادة تسمية التبويب",
     scratchpad_archive: "أرشفة التبويب",
     scratchpad_drag_to_reorder: "اسحب لإعادة الترتيب",
