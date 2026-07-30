@@ -922,7 +922,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const handleSaveNote = async () => {
     const plainText = htmlToPlainText(active.content).trim();
     if (!plainText) return;
-    const items: Array<Partial<AnalyzeCandidate> & { notes?: string }> = [
+    const items: Array<Partial<AnalyzeCandidate> & { notes?: string; source_file?: string }> = [
       {
         value: plainText,
         type: "note",
@@ -949,6 +949,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
             labels: c.labels,
             type_aliases: c.type_aliases,
             family: c.family,
+            notes: c.notes,
+            source_file: "scratchpad",
           })),
         }),
       });
@@ -971,7 +973,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     const stripUrl = (v: string) => v.replace(/^https?:\/\//, "");
     const secretItems: Array<Partial<AnalyzeCandidate> & { notes?: string }> =
       detection?.candidates?.filter((c) => c.family === "secret" || c.family === "unknown") || [];
-    const items: Array<Partial<AnalyzeCandidate> & { notes?: string }> =
+    const items: Array<Partial<AnalyzeCandidate> & { notes?: string; source_file?: string }> =
       secretItems.length > 0
         ? secretItems.map((c) => ({ ...c, value: stripUrl(c.value || "") }))
         : [
@@ -984,6 +986,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               type_aliases: ["note"],
               family: "note",
               notes: plainText,
+              source_file: "scratchpad",
             },
           ];
     setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], save: true } }));
@@ -1001,6 +1004,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
             labels: c.labels,
             type_aliases: c.type_aliases,
             family: c.family,
+            notes: c.notes,
+            source_file: c.family === "note" ? "scratchpad" : c.source_file,
           })),
         }),
       });

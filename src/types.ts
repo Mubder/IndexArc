@@ -11,6 +11,8 @@ export interface VaultEntry {
   created_at: string;
   updated_at: string;
   notes?: string;
+  /** Origin marker, e.g. "scratchpad" when saved from the Scratchpad */
+  source_file?: string;
 }
 
 export interface AnalyzeCandidate {
