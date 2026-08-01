@@ -348,7 +348,9 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   const initial = useRef(loadTabs());
   const [tabs, setTabs] = useState<ScratchTab[]>(initial.current);
-  const [activeId, setActiveId] = useState<string>(initial.current[0].id);
+  const [activeId, setActiveId] = useState<string>(
+    initial.current && initial.current.length > 0 ? initial.current[0].id : "default"
+  );
   const [detections, setDetections] = useState<Record<string, Detection>>({});
   const [busy, setBusy] = useState<Record<string, Busy>>({});
   const [statusMsg, setStatusMsg] = useState("");
@@ -357,12 +359,31 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [bidiMode, setBidiMode] = useState<NoteBidiMode>("auto");
   // Long-note jump controls: shown whenever the editor content overflows.
   const [noteOverflows, setNoteOverflows] = useState(false);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
-  // Dual-language BIDI base direction (auto | force LTR | force RTL)
-  const [bidiMode, setBidiMode] = useState<NoteBidiMode>("auto");
+  // Listen for "Reopen in Scratchpad" event from Library or Command Palette
+  useEffect(() => {
+    const handleReopenEvent = () => {
+      try {
+        const raw = localStorage.getItem("indexarc-reopen-note");
+        if (!raw) return;
+        localStorage.removeItem("indexarc-reopen-note");
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.title && parsed.html) {
+          const newId = `note-${Date.now()}`;
+          const newTab = { id: newId, title: parsed.title, content: parsed.html, archived: false };
+          setTabs((prev) => [...prev, newTab]);
+          setActiveId(newId);
+        }
+      } catch (_) {}
+    };
+    window.addEventListener("indexarc-reopen-note", handleReopenEvent);
+    handleReopenEvent();
+    return () => window.removeEventListener("indexarc-reopen-note", handleReopenEvent);
+  }, []);
   const shellRef = useRef<HTMLDivElement>(null);
   const scratchRootRef = useRef<HTMLDivElement>(null);
   // Per-tab undo stack for rephrase: each entry is a previous version of the
@@ -565,7 +586,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     [historyInit]
   );
 
-  const active = tabs.find((x) => x.id === activeId) || tabs[0];
+  const fallbackTab: ScratchTab = { id: activeId || "default", title: "Scratch", content: "" };
+  const active = tabs.find((x) => x.id === activeId) || tabs[0] || fallbackTab;
   const b = busy[activeId] || {};
   const detection = detections[activeId];
   const hasSecret =
@@ -589,6 +611,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   }, [activeId]);
 
   const checkWords = useCallback(async (words: string[]): Promise<string[]> => {
+    if (settings?.enable_live_spellcheck === false) return [];
     if (typeof window !== "undefined" && window.electronAPI?.spellcheckWords) {
       return window.electronAPI.spellcheckWords(words);
     }
@@ -604,7 +627,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     } catch {
       return [];
     }
-  }, []);
+  }, [settings?.enable_live_spellcheck]);
 
   // Debounced bilingual spellcheck (custom nspell pipeline — Chromium has no
   // Arabic dict and would underline correct Arabic as English misspellings).
@@ -778,7 +801,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     const plainText = htmlToPlainText(html);
     if (plainText.trim() && !titleTouched.current[id]) {
       const firstLine = plainText.split("\n").map((l) => l.trim()).find(Boolean) || "";
-      const auto = firstLine.slice(0, 40) || active.title;
+      const auto = firstLine.slice(0, 40) || (active?.title || "Scratch");
       setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, title: auto } : x)));
     }
     // Sync content into React state so persistence (localStorage + server)
@@ -920,14 +943,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   };
 
   const handleSaveNote = async () => {
-    const plainText = htmlToPlainText(active.content).trim();
+    const plainText = htmlToPlainText(active?.content || "").trim();
     if (!plainText) return;
     const items: Array<Partial<AnalyzeCandidate> & { notes?: string; source_file?: string }> = [
       {
         value: plainText,
         type: "note",
-        name: active.title,
-        raw_fragment: plainText,
+        name: active?.title || "Scratch",
+        raw_fragment: active?.content || "",
         labels: [],
         type_aliases: ["note"],
         family: "note",
@@ -968,7 +991,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   };
 
   const handleSaveSecret = async () => {
-    const plainText = htmlToPlainText(active.content).trim();
+    const plainText = htmlToPlainText(active?.content || "").trim();
     if (!plainText) return;
     const stripUrl = (v: string) => v.replace(/^https?:\/\//, "");
     const secretItems: Array<Partial<AnalyzeCandidate> & { notes?: string }> =
@@ -980,7 +1003,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
             {
               value: stripUrl(plainText),
               type: "note",
-              name: active.title,
+              name: active?.title || "Scratch",
               raw_fragment: plainText,
               labels: [],
               type_aliases: ["note"],
@@ -1023,7 +1046,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   };
 
   const handleRephrase = async () => {
-    const original = active.content;
+    const original = active?.content || "";
     const text = htmlToPlainText(original).trim();
     if (!text) return;
     setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], rewrite: true } }));
@@ -1056,6 +1079,38 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     }
   };
 
+  const handleProofread = async () => {
+    const original = active?.content || "";
+    const text = htmlToPlainText(original).trim();
+    if (!text) return;
+    setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], proofread: true } }));
+    setStatus(t("scratchpad_proofreading" as any) || "Proofreading...");
+    try {
+      const res = await fetch("/api/proofread", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (res.ok && data.corrected) {
+        setRephraseUndo((prev) => ({
+          ...prev,
+          [activeId]: [...(prev[activeId] || []), original],
+        }));
+        const newHtml = data.corrected.replace(/\n/g, "<br>");
+        setContent(activeId, newHtml);
+        setStatus(t("scratchpad_proofread_ok" as any) || "Proofread complete");
+        analyze(activeId, data.corrected);
+      } else {
+        setStatus(data.error || t("scratchpad_proofread_err" as any) || "Proofread failed");
+      }
+    } catch (e: any) {
+      setStatus(e?.message || t("scratchpad_proofread_err" as any) || "Proofread failed");
+    } finally {
+      setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], proofread: false } }));
+    }
+  };
+
   const handleUndoRephrase = () => {
     const stack = rephraseUndo[activeId] || [];
     if (stack.length === 0) return;
@@ -1071,7 +1126,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
    const handleCopy = async () => {
      try {
-       await navigator.clipboard.writeText(htmlToPlainText(active.content));
+       await navigator.clipboard.writeText(htmlToPlainText(active?.content || ""));
        setCopied(true);
        setTimeout(() => setCopied(false), 1500);
      } catch {}
@@ -1262,8 +1317,8 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => analyze(activeId, htmlToPlainText(active.content))}
-            disabled={b.analyze || !htmlToPlainText(active.content).trim()}
+            onClick={() => analyze(activeId, htmlToPlainText(active?.content || ""))}
+            disabled={b.analyze || !htmlToPlainText(active?.content || "").trim()}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
             style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
           >
@@ -1305,17 +1360,31 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
             {copied ? t("scratchpad_copied") : t("scratchpad_copy")}
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setContent(activeId, "");
-            }}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
-            style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
-          >
-           <Trash2 className="w-3.5 h-3.5" />
-             {t("scratchpad_clear")}
-           </button>
+           <button
+             type="button"
+             onClick={() => {
+               setContent(activeId, "");
+             }}
+             className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
+             style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+           >
+            <Trash2 className="w-3.5 h-3.5" />
+              {t("scratchpad_clear")}
+            </button>
+
+            {settings?.enable_ai_proofreader !== false && (
+              <button
+                type="button"
+                onClick={handleProofread}
+                disabled={b.proofread || !(active?.content || "").trim()}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
+                style={{ background: "transparent", color: "var(--amber)", border: "1px solid rgba(245, 158, 11, 0.2)" }}
+                title={t("scratchpad_proofread")}
+              >
+                {b.proofread ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+                {t("scratchpad_proofread")}
+              </button>
+            )}
 
            <div className="flex-1" />
 
@@ -1349,7 +1418,7 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
             <button
               type="button"
               onClick={handleRephrase}
-              disabled={b.rewrite || !active.content.trim()}
+              disabled={b.rewrite || !(active?.content || "").trim()}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
               style={{ background: "var(--bg-active)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
             >

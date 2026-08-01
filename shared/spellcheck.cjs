@@ -1,14 +1,32 @@
 /**
  * Shared bilingual spellcheck helpers for Electron main + Express server.
  *
- * English: nspell + en-US Hunspell dictionary (works well).
- * Arabic: dedicated ArabicSpellEngine (SymSpell-style index + morphology)
- *         — NOT Hunspell/nspell, whose Arabic suggestions are unusable.
+ * Primary engine: LanguageTool (local server or public API).
+ * Fallback: ArabicSpellEngine (SymSpell) + EnglishSpellEngine (SymSpell).
  */
 
 "use strict";
 
 const { loadArabicEngine } = require("./arabic-spell-engine.cjs");
+const { loadEnglishEngine } = require("./english-spell-engine.cjs");
+const { ensureLanguageTool, getLanguageTool } = require("./languagetool.cjs");
+
+let ltService = null;
+
+async function initLanguageTool() {
+  if (ltService) return ltService;
+  ltService = require("./languagetool.cjs").getLanguageTool();
+  try {
+    await ensureLanguageTool();
+  } catch (e) {
+    console.log(`[spellcheck] LanguageTool init error: ${e && e.message ? e.message : e}`);
+  }
+  return ltService;
+}
+
+function isLanguageToolAvailable() {
+  return ltService && ltService.getAvailable();
+}
 
 const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
 const LATIN_WORD_RE = /^[A-Za-z]+(?:['\u2019-][A-Za-z]+)*$/;
@@ -1127,17 +1145,17 @@ function isArabicEngine(ar) {
 }
 
 /**
- * Arabic correctness. Prefers ArabicSpellEngine; falls back to nspell+morph.
+ * Arabic correctness. Uses ArabicSpellEngine (SymSpell).
  */
 function checkArabicWord(w, arSpell) {
   if (!arSpell) return true;
-  // New engine: full morph + word-set membership
+  const clean = stripArabicDiacritics(sanitizeToken(w));
+  if (!clean || clean.length <= 1) return true;
+  if (USER_CUSTOM_WORDS.has(w) || USER_CUSTOM_WORDS.has(clean)) return true;
+
   if (isArabicEngine(arSpell)) {
     return arSpell.correct(w);
   }
-  // Legacy nspell path
-  const clean = stripArabicDiacritics(sanitizeToken(w));
-  if (!clean || clean.length <= 1) return true;
   if (checkArabicCore(clean, arSpell)) return true;
 
   for (const p of AR_PREFIXES_SHORT) {
@@ -1216,9 +1234,16 @@ const AR_CONFUSABLES = {
  *
  * Example: تنظرك + accidental س → تنظرسك → suggestion "تنظرك" (distance 1).
  */
-function suggestArabicWord(w, arSpell, limit) {
+async function suggestArabicWord(w, arSpell, limit) {
   const max = typeof limit === "number" && limit > 0 ? limit : 8;
   if (!arSpell) return [];
+
+  if (isLanguageToolAvailable()) {
+    try {
+      return await ltService.suggest(w, "ar", max);
+    } catch { }
+  }
+
   if (isArabicEngine(arSpell)) {
     return arSpell.suggest(w, max);
   }
@@ -1376,8 +1401,74 @@ function suggestArabicWord(w, arSpell, limit) {
   return ranked.slice(0, max);
 }
 
-// App / product names common in this vault + bilingual notes.
+// App / product / technical names common in developer vaults + bilingual notes.
 const EN_EXTRA_WORDS = new Set([
+  "repo",
+  "repos",
+  "git",
+  "github",
+  "gitlab",
+  "bitbucket",
+  "cli",
+  "sdk",
+  "dev",
+  "prod",
+  "env",
+  "auth",
+  "async",
+  "await",
+  "config",
+  "init",
+  "param",
+  "params",
+  "arg",
+  "args",
+  "payload",
+  "dto",
+  "src",
+  "dir",
+  "subagent",
+  "agent",
+  "prompt",
+  "prompts",
+  "webhook",
+  "callback",
+  "middleware",
+  "cors",
+  "token",
+  "bearer",
+  "regex",
+  "href",
+  "elem",
+  "el",
+  "div",
+  "span",
+  "modal",
+  "modals",
+  "ui",
+  "ux",
+  "app",
+  "apps",
+  "sync",
+  "syncing",
+  "timestamp",
+  "datetime",
+  "struct",
+  "enum",
+  "fn",
+  "db",
+  "fs",
+  "id",
+  "ids",
+  "req",
+  "res",
+  "err",
+  "bidi",
+  "i18n",
+  "ltr",
+  "rtl",
+  "scratchpad",
+  "scratchpads",
   "indexarc",
   "ollama",
   "openai",
@@ -1385,9 +1476,6 @@ const EN_EXTRA_WORDS = new Set([
   "gemini",
   "anthropic",
   "claude",
-  "github",
-  "gitlab",
-  "bitbucket",
   "javascript",
   "typescript",
   "nodejs",
@@ -1425,30 +1513,80 @@ const EN_EXTRA_WORDS = new Set([
   "debian",
 ]);
 
+const USER_CUSTOM_WORDS = new Set();
+let loadedUserDictPath = null;
+
+function loadUserDictionary(dictPath, arSpell, enSpell) {
+  if (!dictPath) return;
+  loadedUserDictPath = dictPath;
+  try {
+    const fs = require("fs");
+    if (fs.existsSync(dictPath)) {
+      const content = fs.readFileSync(dictPath, "utf8");
+      const lines = content.split(/\r?\n/);
+      for (const rawLine of lines) {
+        const word = rawLine.trim();
+        if (!word || word.startsWith("#")) continue;
+        USER_CUSTOM_WORDS.add(word);
+        USER_CUSTOM_WORDS.add(word.toLowerCase());
+        if (arSpell && typeof arSpell.add === "function") arSpell.add(word);
+        if (enSpell && typeof enSpell.add === "function") enSpell.add(word);
+      }
+      console.log(`[spellcheck] loaded ${USER_CUSTOM_WORDS.size} custom user dictionary words from ${dictPath}`);
+    }
+  } catch (e) {
+    console.log(`[spellcheck] user dictionary load failed: ${e && e.message ? e.message : e}`);
+  }
+}
+
+function addCustomWord(word, dictPath, arSpell, enSpell) {
+  if (!word || typeof word !== "string") return;
+  const clean = sanitizeToken(word).trim();
+  if (!clean) return;
+
+  USER_CUSTOM_WORDS.add(clean);
+  USER_CUSTOM_WORDS.add(clean.toLowerCase());
+
+  if (arSpell && typeof arSpell.add === "function") arSpell.add(clean);
+  if (enSpell && typeof enSpell.add === "function") enSpell.add(clean);
+
+  const savePath = dictPath || loadedUserDictPath;
+  if (savePath) {
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const dir = path.dirname(savePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.appendFileSync(savePath, clean + "\n", "utf8");
+      console.log(`[spellcheck] persisted custom word "${clean}" to ${savePath}`);
+    } catch (e) {
+      console.log(`[spellcheck] failed to write custom word to user dictionary: ${e && e.message ? e.message : e}`);
+    }
+  }
+}
+
 function checkEnglishWord(w, enSpell) {
   if (!enSpell) return true;
   const clean = sanitizeToken(w);
   if (!clean || clean.length <= 1) return true;
 
-  // Short ALL-CAPS tokens are almost always acronyms (API, JSON, ID, …)
   if (/^[A-Z]{2,6}$/.test(clean)) return true;
-  // Mixed camel/Pascal identifiers and product names — skip
   if (/[a-z][A-Z]/.test(clean) || /[A-Z]{2,}[a-z]/.test(clean)) return true;
 
   const lower = clean.toLowerCase();
-  if (EN_EXTRA_WORDS.has(lower)) return true;
+  if (USER_CUSTOM_WORDS.has(clean) || USER_CUSTOM_WORDS.has(lower) || EN_EXTRA_WORDS.has(lower)) {
+    return true;
+  }
 
   if (enSpell.correct(clean)) return true;
   if (lower !== clean && enSpell.correct(lower)) return true;
 
-  // British orthography → American for the bundled en-US dictionary
   if (lower.endsWith("our") && enSpell.correct(lower.replace(/our$/, "or"))) return true;
   if (lower.endsWith("ise") && enSpell.correct(lower.replace(/ise$/, "ize"))) return true;
   if (lower.endsWith("isation") && enSpell.correct(lower.replace(/isation$/, "ization"))) return true;
   if (lower.endsWith("yse") && enSpell.correct(lower.replace(/yse$/, "yze"))) return true;
   if (lower.endsWith("re") && lower.length > 4 && enSpell.correct(lower.replace(/re$/, "er"))) return true;
 
-  // Hyphenated / apostrophe compounds: accept if every segment is known
   if (/[-']/.test(clean) || /\u2019/.test(clean)) {
     const parts = clean.split(/[-'\u2019]+/).filter(Boolean);
     if (parts.length > 1 && parts.every((p) => checkEnglishWord(p, enSpell))) {
@@ -1456,7 +1594,6 @@ function checkEnglishWord(w, enSpell) {
     }
   }
 
-  // Mild plural / possessive tolerance for bare stems missing from dict
   if (lower.endsWith("'s") || lower.endsWith("\u2019s")) {
     const stem = lower.slice(0, -2);
     if (stem.length > 1 && enSpell.correct(stem)) return true;
@@ -1477,12 +1614,154 @@ function checkEnglishWord(w, enSpell) {
   return false;
 }
 
+const EN_CONTRACTIONS = {
+  dont: "don't",
+  cant: "can't",
+  wont: "won't",
+  didnt: "didn't",
+  couldnt: "couldn't",
+  shouldnt: "shouldn't",
+  wouldnt: "wouldn't",
+  isnt: "isn't",
+  arent: "aren't",
+  wasnt: "wasn't",
+  werent: "weren't",
+  hasnt: "hasn't",
+  havent: "haven't",
+  hadnt: "hadn't",
+  doesnt: "doesn't",
+  mustnt: "mustn't",
+  neednt: "needn't",
+  shant: "shan't",
+  im: "I'm",
+  ive: "I've",
+  ill: "I'll",
+  id: "I'd",
+  youre: "you're",
+  youve: "you've",
+  youll: "you'll",
+  youd: "you'd",
+  hes: "he's",
+  shes: "she's",
+  its: "it's",
+  thats: "that's",
+  whats: "what's",
+  there: "they're",
+  theyre: "they're",
+  whos: "who's",
+  lets: "let's",
+};
+
 /**
- * Batch-check words. Returns only the misspelled ones (original token form
- * as provided by the client, after sanitize).
- */
-function findMisspelled(words, arSpell, enSpell) {
+  * English suggestions. Prefers LanguageTool; falls back to SymSpell.
+  */
+async function suggestEnglishWord(w, enSpell, limit) {
+  const max = typeof limit === "number" && limit > 0 ? limit : 6;
+  if (!enSpell) return [];
+  const clean = sanitizeToken(w);
+  if (!clean || clean.length <= 1) return [];
+
+  if (isLanguageToolAvailable()) {
+    try {
+      return await ltService.suggest(clean, "en-US", max);
+    } catch { }
+  }
+
+  const lower = clean.toLowerCase();
+  const candidates = new Map();
+
+  const addCand = (cand, bonus = 0) => {
+    if (!cand || cand === clean || cand === w) return;
+    const cleanW = clean.replace(/['\u2019]/g, "").toLowerCase();
+    const cleanC = cand.replace(/['\u2019]/g, "").toLowerCase();
+    let dist = editDistance(cleanW, cleanC);
+
+    if (cleanW === cleanC && cand.includes("'")) {
+      dist = 0;
+      bonus -= 2.5;
+    }
+
+    let score = dist + bonus;
+    if (clean[0] === clean[0].toUpperCase() && cand[0] === cand[0].toUpperCase()) {
+      score -= 0.2;
+    }
+
+    const prev = candidates.get(cand);
+    if (prev === undefined || score < prev) candidates.set(cand, score);
+  };
+
+  if (EN_CONTRACTIONS[lower]) {
+    let matched = EN_CONTRACTIONS[lower];
+    if (clean[0] === clean[0].toUpperCase() && matched[0] !== matched[0].toUpperCase()) {
+      matched = matched[0].toUpperCase() + matched.slice(1);
+    }
+    addCand(matched, -3.0);
+  }
+
+  for (let i = 0; i < clean.length - 1; i++) {
+    const swapped = clean.slice(0, i) + clean[i + 1] + clean[i] + clean.slice(i + 2);
+    if (enSpell.correct(swapped)) {
+      addCand(swapped, -0.6);
+    }
+  }
+
+  try {
+    const raw = enSpell.suggest(clean) || [];
+    for (const r of raw) {
+      addCand(r, 0);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return [...candidates.entries()]
+    .sort((a, b) => {
+      if (a[1] !== b[1]) return a[1] - b[1];
+      return a[0].localeCompare(b[0], "en");
+    })
+    .map(([s]) => s)
+    .slice(0, max);
+}
+
+/**
+  * Batch-check words. Returns only the misspelled ones (original token form
+  * as provided by the client, after sanitize). Prefers LanguageTool batch
+  * check when available.
+  */
+async function findMisspelled(words, arSpell, enSpell) {
   if (!Array.isArray(words)) return [];
+
+  if (isLanguageToolAvailable()) {
+    const bad = [];
+    const seen = new Set();
+    const ltWords = [];
+    for (const w of words) {
+      if (typeof w !== "string" || seen.has(w)) continue;
+      seen.add(w);
+      const clean = sanitizeToken(w);
+      if (!clean || clean.length <= 1) continue;
+      if (isArabicToken(clean)) {
+        ltWords.push({ word: clean, lang: "ar" });
+      } else if (isLatinToken(clean)) {
+        ltWords.push({ word: clean, lang: "en-US" });
+      }
+    }
+    for (const { word, lang } of ltWords) {
+      try {
+        const matches = await ltService.check(word, lang);
+        if (matches.length > 0) bad.push(word);
+      } catch {
+        // Fall through to per-word SymSpell check
+        if (isArabicToken(word)) {
+          if (arSpell && !checkArabicWord(word, arSpell)) bad.push(word);
+        } else if (isLatinToken(word)) {
+          if (enSpell && !checkEnglishWord(word, enSpell)) bad.push(word);
+        }
+      }
+    }
+    return bad;
+  }
+
   const bad = [];
   const seen = new Set();
   for (const w of words) {
@@ -1511,9 +1790,16 @@ module.exports = {
   checkArabicWord,
   suggestArabicWord,
   checkEnglishWord,
+  suggestEnglishWord,
   findMisspelled,
+  loadUserDictionary,
+  addCustomWord,
   isArabicEngine,
   loadArabicEngine,
+  loadEnglishEngine,
+  initLanguageTool,
+  isLanguageToolAvailable,
+  getLanguageTool,
   AR_PREFIXES,
   AR_SUFFIXES,
   AR_ENCLITICS,

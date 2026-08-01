@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   startOllama: () => ipcRenderer.invoke("start-ollama"),
   openExternal: (url) => ipcRenderer.invoke("open-external", url),
   spellcheckWords: (words) => ipcRenderer.invoke("spellcheck-words", words),
+  spellcheckSuggest: (word) => ipcRenderer.invoke("spellcheck-suggest", word),
 });
 
 // On right-click inside a text field, select the word under the cursor when

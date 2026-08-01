@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from "react";
-import { HelpCircle, KeyRound, LayoutGrid, RefreshCw, Search, StickyNote, Terminal, Inbox, Copy, AlertTriangle } from "lucide-react";
+import { HelpCircle, KeyRound, LayoutGrid, List, RefreshCw, Search, StickyNote, Terminal, Inbox, Copy, AlertTriangle } from "lucide-react";
 import { LibraryFilter, VaultEntry, Settings } from "../types";
 import { EntryCard } from "./EntryCard";
+import { NoteDetailModal } from "./NoteDetailModal";
 import { getTranslation } from "../utils/i18n";
 
 interface LibraryTabProps {
@@ -14,6 +15,7 @@ interface LibraryTabProps {
   onOpenClarify: (entry: VaultEntry) => void;
   onDeleteEntry: (id: string) => Promise<void>;
   onBulkDeleteEntries: (ids: string[]) => Promise<void>;
+  onReopenInScratchpad?: (title: string, contentHtml: string) => void;
   settings: Settings | null;
 }
 
@@ -27,6 +29,7 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
   onOpenClarify,
   onDeleteEntry,
   onBulkDeleteEntries,
+  onReopenInScratchpad,
   settings,
 }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
@@ -35,6 +38,8 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [selectedDuplicates, setSelectedDuplicates] = useState<string[]>([]);
   const [selectAllDuplicates, setSelectAllDuplicates] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "grid">("grid");
+  const [activeDetailEntry, setActiveDetailEntry] = useState<VaultEntry | null>(null);
 
   // Sync selectAll with selection
   React.useEffect(() => {
@@ -300,38 +305,77 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
         })}
       </div>
 
-      <div className="relative">
-        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--text-muted)" }} />
-        <input
-          value={libraryQuery}
-          onChange={(e) => setLibraryQuery(e.target.value)}
-          placeholder={t("lib_search_placeholder")}
-          dir="auto"
-          className="w-full rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none transition-colors"
-          style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
-        />
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--text-muted)" }} />
+          <input
+            value={libraryQuery}
+            onChange={(e) => setLibraryQuery(e.target.value)}
+            placeholder={t("lib_search_placeholder")}
+            dir="auto"
+            className="w-full rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none transition-colors"
+            style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
+          />
+        </div>
+
+        <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}>
+          <button
+            type="button"
+            onClick={() => setViewMode("grid")}
+            className="p-1.5 rounded-lg transition-all"
+            style={{
+              background: viewMode === "grid" ? "var(--bg-surface)" : "transparent",
+              color: viewMode === "grid" ? "var(--accent-bright)" : "var(--text-muted)",
+            }}
+            title="Grid View"
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("list")}
+            className="p-1.5 rounded-lg transition-all"
+            style={{
+              background: viewMode === "list" ? "var(--bg-surface)" : "transparent",
+              color: viewMode === "list" ? "var(--accent-bright)" : "var(--text-muted)",
+            }}
+            title="List View"
+          >
+            <List className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
-      <div className="space-y-2">
+      <div className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 gap-3" : "space-y-2"}>
         {libraryFiltered.map((e) => (
           <EntryCard
             key={e.id}
             entry={e}
             onOpenClarify={onOpenClarify}
             onDeleteEntry={onDeleteEntry}
+            onOpenDetail={(entry) => setActiveDetailEntry(entry)}
+            viewMode={viewMode}
             settings={settings}
           />
         ))}
         {!entries.length && (
-          <p className="text-sm italic" style={{ color: "var(--text-muted)" }}>{t("lib_empty")}</p>
+          <p className="text-sm italic col-span-full" style={{ color: "var(--text-muted)" }}>{t("lib_empty")}</p>
         )}
         {!!entries.length && !libraryFiltered.length && (
-          <p className="text-sm italic" style={{ color: "var(--text-muted)" }}>
+          <p className="text-sm italic col-span-full" style={{ color: "var(--text-muted)" }}>
             {t("lib_no_match")}
             {libraryQuery.trim() ? ` "${libraryQuery.trim()}"` : ""}.
           </p>
         )}
       </div>
+
+      <NoteDetailModal
+        entry={activeDetailEntry}
+        isOpen={!!activeDetailEntry}
+        onClose={() => setActiveDetailEntry(null)}
+        onReopenInScratchpad={onReopenInScratchpad}
+        settings={settings}
+      />
     </div>
   );
 };

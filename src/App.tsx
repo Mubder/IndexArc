@@ -47,6 +47,7 @@ import { SetupChecker } from "./components/SetupChecker";
 import { FsBrowserModal } from "./components/FsBrowserModal";
 import { ClarifyModal } from "./components/ClarifyModal";
 import { ConfirmModal } from "./components/ConfirmModal";
+import { CommandPaletteModal } from "./components/CommandPaletteModal";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => {
@@ -101,6 +102,7 @@ export default function App() {
   // library
   const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("all");
   const [libraryQuery, setLibraryQuery] = useState("");
+  const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
 
   // folder scan
   const [folderPath, setFolderPath] = useState("");
@@ -1055,6 +1057,18 @@ return (
                 {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </button>
 
+              {/* Command Palette Trigger */}
+              <button
+                onClick={() => setCmdPaletteOpen(true)}
+                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs transition-all"
+                style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-muted)" }}
+                title="Global Search (Ctrl + K)"
+              >
+                <Search className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Search...</span>
+                <kbd className="px-1.5 py-0.5 rounded text-[10px] font-mono" style={{ background: "var(--bg-input)" }}>Ctrl+K</kbd>
+              </button>
+
               {/* Language Toggle */}
               <button
                 onClick={toggleLanguage}
@@ -1182,6 +1196,13 @@ return (
                 onOpenClarify={openClarify}
                 onDeleteEntry={deleteEntry}
                 onBulkDeleteEntries={bulkDeleteEntries}
+                onReopenInScratchpad={(title, html) => {
+                  try {
+                    localStorage.setItem("indexarc-reopen-note", JSON.stringify({ title, html, time: Date.now() }));
+                    window.dispatchEvent(new Event("indexarc-reopen-note"));
+                  } catch (_) {}
+                  setTab("scratchpad");
+                }}
                 settings={settings}
               />
             )}
@@ -1251,6 +1272,24 @@ return (
           confirmText={confirmState.confirmText}
         />
       )}
+
+      {/* Global Command Palette Modal */}
+      <CommandPaletteModal
+        isOpen={cmdPaletteOpen}
+        onClose={() => setCmdPaletteOpen(false)}
+        entries={entries}
+        onSelectEntry={(entry) => {
+          if (entry.family === "note") {
+            setTab("library");
+            setLibraryQuery(entry.name);
+          } else {
+            navigator.clipboard?.writeText(entry.value);
+            showToast(`Copied ${entry.name}`, "success");
+          }
+        }}
+        onNavigateTab={(t) => setTab(t)}
+        settings={settings}
+      />
 
       {/* Toast notifications */}
       <div className="toast-wrap">

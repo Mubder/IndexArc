@@ -299,6 +299,15 @@ class ArabicSpellEngine {
       consider(del, -0.1);
     }
 
+    // 1b) Tanween-noon ending conversion (phonetic typo: شكرن → شكرا / شكراً, أهلن → أهلا / أهلاً)
+    if (clean.endsWith("ن") && clean.length >= 3) {
+      const stem = clean.slice(0, -1);
+      consider(stem + "ا", -3.0);
+      consider(stem + "اً", -3.0);
+      consider(stem + "ة", -2.5);
+      consider(stem, -1.0);
+    }
+
     // 2) SymSpell index: dict words that share a single-delete with input
     //    Only keep distance ≤ 1 to avoid "تندرسك"-style noise.
     const fromIndex = this.deleteIndex.get(clean);
@@ -315,10 +324,10 @@ class ArabicSpellEngine {
       }
     }
 
-    // 3) Adjacent transposition
+    // 3) Adjacent transposition (high-priority bonus for swapped adjacent keys like المستخمدين → المستخدمين)
     for (let i = 0; i < clean.length - 1; i++) {
       const t = clean.slice(0, i) + clean[i + 1] + clean[i] + clean.slice(i + 2);
-      consider(t, 0);
+      consider(t, -2.0);
     }
 
     // 4) Confusable substitutions

@@ -70,6 +70,8 @@ export interface Settings {
   ui_language: "en" | "ar";
   font_size_en: number;
   font_size_ar: number;
+  enable_live_spellcheck?: boolean;
+  enable_ai_proofreader?: boolean;
 }
 
 export type Tab = "home" | "scratchpad" | "analyze" | "folders" | "library" | "ask" | "settings";

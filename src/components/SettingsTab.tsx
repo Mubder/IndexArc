@@ -238,6 +238,50 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         </div>
       </div>
 
+      <div className="space-y-4" style={{ borderBottom: "1px solid var(--border)", paddingBottom: "1.25rem" }}>
+        <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--text)" }}>
+          {t("spellcheck_title")}
+        </h2>
+        
+        <label className="flex items-start gap-3 cursor-pointer group">
+          <div className="relative flex items-center mt-0.5">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={settings.enable_live_spellcheck !== false}
+              onChange={(e) => onPatchSettings({ enable_live_spellcheck: e.target.checked })}
+            />
+            <div className="w-9 h-5 rounded-full transition-colors peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-var(--accent)/50" 
+                 style={{ background: settings.enable_live_spellcheck !== false ? "var(--accent)" : "var(--bg-input)", border: "1px solid var(--border)" }}>
+            </div>
+            <div className="absolute left-[2px] top-[2px] w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-full shadow-sm"></div>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs font-medium" style={{ color: "var(--text)" }}>{t("spellcheck_live_label")}</span>
+            <span className="text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{t("spellcheck_live_desc")}</span>
+          </div>
+        </label>
+
+        <label className="flex items-start gap-3 cursor-pointer group">
+          <div className="relative flex items-center mt-0.5">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={settings.enable_ai_proofreader !== false}
+              onChange={(e) => onPatchSettings({ enable_ai_proofreader: e.target.checked })}
+            />
+            <div className="w-9 h-5 rounded-full transition-colors peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-var(--accent)/50" 
+                 style={{ background: settings.enable_ai_proofreader !== false ? "var(--accent)" : "var(--bg-input)", border: "1px solid var(--border)" }}>
+            </div>
+            <div className="absolute left-[2px] top-[2px] w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-full shadow-sm"></div>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs font-medium" style={{ color: "var(--text)" }}>{t("spellcheck_ai_label")}</span>
+            <span className="text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{t("spellcheck_ai_desc")}</span>
+          </div>
+        </label>
+      </div>
+
       <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("ai_provider_choice")}</h2>
       <div className="flex flex-wrap gap-2">
         {([

@@ -2,14 +2,32 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import fs from "fs";
-import nspell from "nspell";
+import os from "os";
 import { ensurePortableLayout } from "./server/paths.js";
 // Shared CJS helpers — esbuild inlines this into dist/server.cjs; tsx loads it
 // at runtime for `npm run dev`. Electron main uses the same file via require().
 import spellcheckHelpers from "./shared/spellcheck.cjs";
-const { findMisspelled, loadArabicEngine } = spellcheckHelpers as {
-  findMisspelled: (words: string[], ar: any, en: any) => string[];
+const {
+  findMisspelled,
+  loadArabicEngine,
+  suggestArabicWord,
+  suggestEnglishWord,
+  isArabicToken,
+  loadUserDictionary,
+  addCustomWord,
+  loadEnglishEngine,
+  initLanguageTool,
+} = spellcheckHelpers as {
+  findMisspelled: (words: string[], ar: any, en: any) => Promise<string[]>;
   loadArabicEngine: (dir: string) => any;
+  loadEnglishEngine: (dir: string) => any;
+  suggestArabicWord: (word: string, ar: any, limit?: number) => Promise<string[]>;
+  suggestEnglishWord: (word: string, en: any, limit?: number) => Promise<string[]>;
+  isArabicToken: (word: string) => boolean;
+  loadUserDictionary: (dictPath: string, ar: any, en: any) => void;
+  addCustomWord: (word: string, dictPath: string, ar: any, en: any) => void;
+  loadEnglishEngine: (dir: string) => any;
+  initLanguageTool: () => Promise<any>;
 };
 import { VaultStore } from "./server/store.js";
 import { addLog, getLogs } from "./server/logs.js";
@@ -17,6 +35,7 @@ import {
   checkOllama,
   pullOllamaModel,
   resolveActiveProvider,
+  generateText,
   warmOllamaLlm,
   warmOllamaEmbed,
 } from "./server/ai/providers.js";
@@ -240,6 +259,8 @@ app.post("/api/settings", (req, res) => {
     "ui_language",
     "font_size_en",
     "font_size_ar",
+    "enable_live_spellcheck",
+    "enable_ai_proofreader",
   ];
   const patch: Record<string, unknown> = {};
   for (const k of allowed) {
@@ -266,15 +287,12 @@ app.post("/api/settings", (req, res) => {
 });
 
 // --- Note editor spellchecker (mirrors Electron main) ---
-// Arabic: ArabicSpellEngine (SymSpell + morphology). English: nspell.
+// Primary: LanguageTool (local server or public API).
+// Fallback: ArabicSpellEngine (SymSpell) + EnglishSpellEngine (SymSpell).
 function loadServerEnDict(): any {
   try {
     const dicDir = path.join(process.cwd(), "dictionaries", "en");
-    const affPath = path.join(dicDir, "en.aff");
-    const dicPath = path.join(dicDir, "en.dic");
-    if (fs.existsSync(affPath) && fs.existsSync(dicPath)) {
-      return nspell({ aff: fs.readFileSync(affPath), dic: fs.readFileSync(dicPath) });
-    }
+    return loadEnglishEngine(dicDir);
   } catch {
     /* optional */
   }
@@ -282,13 +300,63 @@ function loadServerEnDict(): any {
 }
 const serverArSpell: any = loadArabicEngine(path.join(process.cwd(), "dictionaries", "ar"));
 const serverEnSpell: any = loadServerEnDict();
+const serverUserDictPath = path.join(process.cwd(), "config", "user_dict.txt");
+loadUserDictionary(serverUserDictPath, serverArSpell, serverEnSpell);
 
-app.post("/api/spellcheck-words", (req, res) => {
+initLanguageTool().then(() => {
+  console.log("[spellcheck] LanguageTool initialized");
+}).catch((e: any) => {
+  console.log(`[spellcheck] LanguageTool init failed: ${e && e.message ? e.message : e}`);
+});
+
+app.post("/api/spellcheck-words", async (req, res) => {
   const words: string[] = req.body?.words || [];
   if (!Array.isArray(words)) {
     return res.json({ bad: [] });
   }
-  res.json({ bad: findMisspelled(words, serverArSpell, serverEnSpell) });
+  const bad = await findMisspelled(words, serverArSpell, serverEnSpell);
+  res.json({ bad });
+});
+
+app.post("/api/spellcheck-suggest", async (req, res) => {
+  const word: string = typeof req.body?.word === "string" ? req.body.word.trim() : "";
+  if (!word) {
+    return res.json({ suggestions: [] });
+  }
+  if (isArabicToken(word)) {
+    const suggestions = await suggestArabicWord(word, serverArSpell, 8);
+    return res.json({ suggestions });
+  }
+  const suggestions = await suggestEnglishWord(word, serverEnSpell, 6);
+  res.json({ suggestions });
+});
+
+app.post("/api/spellcheck-add-word", (req, res) => {
+  const word: string = typeof req.body?.word === "string" ? req.body.word.trim() : "";
+  if (word) {
+    addCustomWord(word, serverUserDictPath, serverArSpell, serverEnSpell);
+  }
+  res.json({ ok: true });
+});
+
+// --- Local AI Proofreader ---
+app.post("/api/proofread", async (req, res) => {
+  const text = String(req.body?.text ?? "").trim();
+  if (!text) return res.status(400).json({ error: "Text is required" });
+  try {
+    const settings = store.getSettings();
+    const system = "You are a helpful and meticulous proofreader. Review the user text for spelling, grammar, and punctuation errors. Return ONLY the corrected text. Do not add any conversational filler, explanations, or quotes around the output. Keep the original formatting and language (Arabic or English) intact.";
+    
+    const gen = await generateText(settings, text, system);
+    if (!gen || !gen.text) {
+      return res.status(503).json({ error: "No AI provider available or proofreading generated empty text." });
+    }
+    
+    res.json({ corrected: gen.text.trim() });
+  } catch (e: any) {
+    addLog("PROOFREAD", `Failed: ${e.message}`);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // --- Ollama helpers ---

@@ -10,8 +10,8 @@ const { execSync } = require("child_process");
 // ── Note editor spellchecker ──
 // Chromium has no Arabic Hunspell dict, so the note editor keeps spellCheck
 // OFF and we run our own bilingual pipeline:
-//   • Arabic → ArabicSpellEngine (SymSpell index + morphology) — NOT nspell
-//   • English → nspell + en-US Hunspell (works well)
+//   • Primary: LanguageTool (local server or public API)
+//   • Fallback: ArabicSpellEngine (SymSpell + morphology) + EnglishSpellEngine (SymSpell)
 const {
   isArabicToken,
   isLatinToken,
@@ -19,27 +19,37 @@ const {
   checkArabicWord,
   suggestArabicWord,
   checkEnglishWord,
+  suggestEnglishWord,
   findMisspelled,
   loadArabicEngine,
+  loadEnglishEngine,
+  loadUserDictionary,
+  addCustomWord,
+  initLanguageTool,
+  getLanguageTool,
 } = require("./shared/spellcheck.cjs");
 
 let arSpell = null; // ArabicSpellEngine
-let enSpell = null; // nspell
+let enSpell = null; // EnglishSpellEngine (SymSpell)
+let ltService = null; // LanguageTool
+
+function getUserDictPath() {
+  try {
+    return path.join(getPortableRoot(), "config", "user_dict.txt");
+  } catch {
+    return null;
+  }
+}
 
 function loadEnglishDict() {
   try {
-    const nspell = require("nspell");
     const dir = path.join(getResourcePath(), "dictionaries", "en");
-    const affPath = path.join(dir, "en.aff");
-    const dicPath = path.join(dir, "en.dic");
-    if (!fs.existsSync(affPath) || !fs.existsSync(dicPath)) {
-      console.log(`[spellcheck] en dictionary not found at ${dir}`);
-      return null;
+    const enEngine = loadEnglishEngine(dir);
+    if (enEngine && enEngine.loaded) {
+      console.log(`[spellcheck] en (SymSpell) dictionary loaded (${enEngine.wordCount} words)`);
+      return enEngine;
     }
-    const aff = fs.readFileSync(affPath);
-    const dic = fs.readFileSync(dicPath);
-    console.log("[spellcheck] en (nspell) dictionary loaded");
-    return nspell({ aff, dic });
+    return null;
   } catch (e) {
     console.log(`[spellcheck] en dictionary load failed: ${e && e.message ? e.message : e}`);
     return null;
@@ -55,6 +65,18 @@ function loadSpellcheckers() {
     console.log("[spellcheck] ar engine failed to load");
   }
   enSpell = loadEnglishDict();
+
+  const userDictPath = getUserDictPath();
+  if (userDictPath) {
+    loadUserDictionary(userDictPath, arSpell, enSpell);
+  }
+
+  initLanguageTool().then(() => {
+    const lt = getLanguageTool();
+    console.log(`[spellcheck] LanguageTool mode: ${lt.getMode()}`);
+  }).catch((e) => {
+    console.log(`[spellcheck] LanguageTool init failed: ${e && e.message ? e.message : e}`);
+  });
 }
 
 function isArabicWord(word) {
@@ -388,7 +410,16 @@ ipcMain.handle("open-external", async (_e, url) => {
 // Check a batch of words (English and/or Arabic, mixed-language notes are
 // the whole point) and return the ones that are misspelled.
 ipcMain.handle("spellcheck-words", async (_e, words) => {
-  return findMisspelled(words, arSpell, enSpell);
+  return await findMisspelled(words, arSpell, enSpell);
+});
+
+ipcMain.handle("spellcheck-suggest", async (_e, word) => {
+  if (typeof word !== "string" || !word.trim()) return [];
+  const w = word.trim();
+  if (isArabicToken(w)) {
+    return await suggestArabicWord(w, arSpell, 8);
+  }
+  return await suggestEnglishWord(w, enSpell, 6);
 });
 
 async function startOllamaIfNeeded() {
@@ -552,7 +583,7 @@ function createWindow() {
   }
 
   // Right-click spelling suggestions + standard edit actions
-  mainWindow.webContents.on("context-menu", (_event, params) => {
+  mainWindow.webContents.on("context-menu", async (_event, params) => {
     const menu = new Menu();
 
     // English (and other Chromium-supported languages): native suggestions.
@@ -575,8 +606,12 @@ function createWindow() {
       menu.append(
         new MenuItem({
           label: `Add "${params.misspelledWord}" to dictionary`,
-          click: () =>
-            mainWindow.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord),
+          click: () => {
+            try {
+              mainWindow.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord);
+              addCustomWord(params.misspelledWord, getUserDictPath(), arSpell, enSpell);
+            } catch (_) {}
+          },
         })
       );
       menu.append(new MenuItem({ type: "separator" }));
@@ -593,21 +628,15 @@ function createWindow() {
       const isEn = !isAr && isLatinWord(word);
       const engine = isAr ? arSpell : isEn ? enSpell : null;
       const misspelled = isAr
-        ? !checkArabicWord(word, arSpell)
+        ? !(await checkArabicWord(word, arSpell))
         : isEn
-          ? !checkEnglishWord(word, enSpell)
+          ? !(await checkEnglishWord(word, enSpell))
           : false;
 
       if ((engine || (isAr && arSpell)) && misspelled) {
-        const clean = isAr ? stripArabicDiacritics(word) : word;
         const suggestions = isAr
-          ? suggestArabicWord(word, arSpell, 8)
-          : Array.from(
-              new Set([
-                ...((engine && engine.suggest(word)) || []),
-                ...((engine && engine.suggest(clean)) || []),
-              ])
-            ).slice(0, 6);
+          ? await suggestArabicWord(word, arSpell, 8)
+          : await suggestEnglishWord(word, enSpell, 6);
 
         if (suggestions.length) {
           for (const s of suggestions) {
@@ -627,14 +656,19 @@ function createWindow() {
             label: `Add "${word}" to dictionary`,
             click: () => {
               try {
-                if (isAr && arSpell && typeof arSpell.add === "function") {
-                  arSpell.add(word);
-                } else if (engine && typeof engine.add === "function") {
-                  engine.add(word);
-                }
-              } catch (_) {
-                /* best-effort */
-              }
+                addCustomWord(word, getUserDictPath(), arSpell, enSpell);
+                mainWindow.webContents.session.addWordToSpellCheckerDictionary(word);
+              } catch (_) {}
+            },
+          })
+        );
+        menu.append(
+          new MenuItem({
+            label: `Ignore "${word}"`,
+            click: () => {
+              try {
+                addCustomWord(word, getUserDictPath(), arSpell, enSpell);
+              } catch (_) {}
             },
           })
         );

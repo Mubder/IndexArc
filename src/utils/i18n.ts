@@ -156,6 +156,12 @@ export interface TranslationDict {
   font_size_en_desc: string;
   font_size_ar_label: string;
   font_size_ar_desc: string;
+  
+  spellcheck_title: string;
+  spellcheck_live_label: string;
+  spellcheck_live_desc: string;
+  spellcheck_ai_label: string;
+  spellcheck_ai_desc: string;
 
   candidates_title: string;
   save_selected_btn: string;
@@ -247,6 +253,10 @@ export interface TranslationDict {
   scratchpad_rewriting: string;
   scratchpad_rephrased: string;
   scratchpad_rewrite_err: string;
+  scratchpad_proofread: string;
+  scratchpad_proofreading: string;
+  scratchpad_proofread_ok: string;
+  scratchpad_proofread_err: string;
   scratchpad_clear: string;
   scratchpad_copy: string;
   scratchpad_copied: string;
@@ -471,6 +481,12 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     font_size_ar_label: "Arabic Font Size",
     font_size_ar_desc: "Adjust the font size for Arabic text.",
 
+    spellcheck_title: "Spellchecking & Proofreading",
+    spellcheck_live_label: "Live Spellcheck (Red Squiggles)",
+    spellcheck_live_desc: "Show red squiggles under misspelled words as you type using high-speed local dictionaries.",
+    spellcheck_ai_label: "AI Proofreader",
+    spellcheck_ai_desc: "Show the 'Proofread' button in the Scratchpad to fix grammar and spelling using local AI.",
+
     candidates_title: "Extraction Candidates",
     save_selected_btn: "Save Selected to Vault",
     park_incomplete_title: "Park Incomplete Items",
@@ -560,10 +576,14 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_rephrase_undone: "Reverted to previous text",
     scratchpad_rewriting: "Rephrasing…",
     scratchpad_rephrased: "Rephrased",
-    scratchpad_rewrite_err: "Rephrase failed",
+    scratchpad_rewrite_err: "Rewrite failed",
+    scratchpad_proofread: "Proofread",
+    scratchpad_proofreading: "Proofreading...",
+    scratchpad_proofread_ok: "Proofread complete",
+    scratchpad_proofread_err: "Proofread failed",
     scratchpad_clear: "Clear",
     scratchpad_copy: "Copy",
-    scratchpad_copied: "Copied",
+    scratchpad_copied: "Copied!",
     scratchpad_go_to_top: "Go to top",
     scratchpad_go_to_bottom: "Go to bottom",
     scratchpad_bidi_auto: "Auto direction",
@@ -783,6 +803,12 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     font_size_ar_label: "حجم الخط العربي",
     font_size_ar_desc: "ضبط حجم الخط للنص العربي.",
 
+    spellcheck_title: "التدقيق الإملائي والمراجعة اللغوية",
+    spellcheck_live_label: "التدقيق الإملائي المباشر (خطوط حمراء متعرجة)",
+    spellcheck_live_desc: "إظهار خطوط حمراء متعرجة أسفل الكلمات التي بها أخطاء إملائية أثناء الكتابة باستخدام قواميس محلية عالية السرعة.",
+    spellcheck_ai_label: "مصحح لغوي بالذكاء الاصطناعي",
+    spellcheck_ai_desc: "إظهار زر 'مراجعة' في المسودة لتصحيح القواعد والإملاء باستخدام الذكاء الاصطناعي المحلي.",
+
     candidates_title: "المرشحون المستخرجون",
     save_selected_btn: "حفظ العناصر المحددة في الخزنة",
     park_incomplete_title: "تأجيل العناصر غير المكتملة",
@@ -873,9 +899,13 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_rewriting: "جاري إعادة الصياغة…",
     scratchpad_rephrased: "تمت إعادة الصياغة",
     scratchpad_rewrite_err: "فشلت إعادة الصياغة",
+    scratchpad_proofread: "تدقيق لغوي",
+    scratchpad_proofreading: "جاري التدقيق...",
+    scratchpad_proofread_ok: "اكتمل التدقيق",
+    scratchpad_proofread_err: "فشل التدقيق",
     scratchpad_clear: "مسح",
     scratchpad_copy: "نسخ",
-    scratchpad_copied: "تم النسخ",
+    scratchpad_copied: "تم النسخ!",
     scratchpad_go_to_top: "انتقال إلى الأعلى",
     scratchpad_go_to_bottom: "انتقال إلى الأسفل",
     scratchpad_bidi_auto: "اتجاه تلقائي",
