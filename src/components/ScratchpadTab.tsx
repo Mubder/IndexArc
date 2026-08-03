@@ -872,7 +872,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     requestAnimationFrame(recomputeSpellRects);
   };
 
-  const handleIgnoreWord = (word: string) => {
+  const handleIgnoreWord = async (word: string) => {
+    try {
+      await fetch("/api/spellcheck-ignore-word", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word }),
+      });
+    } catch {}
     setIgnoredWords((prev) => new Set(prev).add(word).add(word.toLowerCase()));
     setContextMenu(null);
     setStatus(`Ignored "${word}"`);

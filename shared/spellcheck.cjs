@@ -1376,6 +1376,7 @@ function loadUserDictionary(dictPath, arSpell, enSpell) {
         if (!word || word.startsWith("#")) continue;
         USER_CUSTOM_WORDS.add(word);
         USER_CUSTOM_WORDS.add(word.toLowerCase());
+        cspellEngine.addCustomWord(word);
         if (arSpell && typeof arSpell.add === "function") arSpell.add(word);
         if (enSpell && typeof enSpell.add === "function") enSpell.add(word);
       }

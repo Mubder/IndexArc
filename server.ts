@@ -319,8 +319,13 @@ if (serverArSpell && serverArSpell.loaded) {
 const serverEnSpell: any = loadServerEnDict();
 
 const serverUserDictPath = path.join(process.cwd(), "config", "user_dict.txt");
+const serverIgnoredDictPath = path.join(process.cwd(), "config", "ignored_words.txt");
+
 if (fs.existsSync(serverUserDictPath)) {
   loadUserDictionary(serverUserDictPath, serverArSpell, serverEnSpell);
+}
+if (fs.existsSync(serverIgnoredDictPath)) {
+  loadUserDictionary(serverIgnoredDictPath, serverArSpell, serverEnSpell);
 }
 
 initLanguageTool().then(() => {
@@ -355,6 +360,14 @@ app.post("/api/spellcheck-add-word", (req, res) => {
   const word: string = typeof req.body?.word === "string" ? req.body.word.trim() : "";
   if (word) {
     addCustomWord(word, serverUserDictPath, serverArSpell, serverEnSpell);
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/spellcheck-ignore-word", (req, res) => {
+  const word: string = typeof req.body?.word === "string" ? req.body.word.trim() : "";
+  if (word) {
+    addCustomWord(word, serverIgnoredDictPath, serverArSpell, serverEnSpell);
   }
   res.json({ ok: true });
 });
