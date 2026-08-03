@@ -143,6 +143,19 @@ Server-side directory browser (no upload, **no lock required**).
 
 ---
 
+## Spellcheck, Auto-Complete & Proofread
+
+| Method | Path | Description | Request | Response | Lock req. |
+|--------|------|-------------|---------|----------|:--------:|
+| POST | `/api/spellcheck-words` | Batch check array of words | `{ words: string[] }` | `{ bad: string[] }` | No |
+| POST | `/api/spellcheck-suggest` | Get spelling suggestions | `{ word: string }` | `{ suggestions: string[] }` | No |
+| POST | `/api/spellcheck-add-word` | Add word to custom dictionary | `{ word: string }` | `{ ok: true }` (Persisted to `config/user_dict.txt`) | No |
+| POST | `/api/spellcheck-ignore-word` | Ignore word persistently | `{ word: string }` | `{ ok: true }` (Persisted to `config/ignored_words.txt`) | No |
+| POST | `/api/autocomplete` | Live inline ghost text prediction | `{ prefix: string, maxTokens?: number }` | `{ completion: string }` (Anti-duplication filtered) | No |
+| POST | `/api/proofread` | Proofread text (AI with local CSpell fallback) | `{ text: string }` | `{ original, proofread, changes, provider_used }` | No |
+
+---
+
 ## Ollama helpers
 
 | Method | Path | Description | Request | Response |

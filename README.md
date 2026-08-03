@@ -23,6 +23,9 @@ Full documentation lives in [`docs/`](./docs/README.md):
 | Smart types | Freeform types (`telegram user id`, `Hermes profile id`, …) |
 | Always named | Every secret/token gets a name (model or you) |
 | Unidentified inbox | Incomplete items wait on Home for type/name |
+| CSpell Trie Engine | High-precision $O(L)$ English & Arabic spellcheck (`cspell-lib` + `ar.trie.gz`) |
+| Persistent Dictionaries | Custom words and ignored words saved permanently in `config/` |
+| Inline Ghost Text | Copilot-style inline live text predictions at cursor (`Tab` to accept) |
 | Ask AR/EN | “Telegram ID” / “معرف تيليجرام” / “bot bAlfaris_1 token” |
 | AI mode | **Local (Ollama)** or **API (Gemini)** or **Auto** — your choice |
 | Portable | `data/` + `config/` next to the app — no AppData dependency |

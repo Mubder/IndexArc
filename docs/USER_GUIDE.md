@@ -120,13 +120,24 @@ Secret values are **masked by default**. Use the reveal (eye) or copy buttons to
 
 ## Scratchpad
 
-The **Scratchpad** is a multi-tab notepad for working with text before committing it to the vault. It persists between sessions (stored locally in the app, **not** in the encrypted vault).
+The **Scratchpad** is an advanced multi-tab notepad for working with text before committing it to the vault. It persists between sessions (stored locally in the app, **not** in the encrypted vault).
 
 - **Multiple tabs** — keep several scratches at once; rename them (the title auto-fills from the first line).
+- **CSpell Trie Spellcheck Engine** — Powered by `cspell-lib` and binary Arabic Tries (`ar.trie.gz`) with a developer technical dictionary (`checkpointer`, `hardcoded`, `autocompletion`, etc.) so code identifiers are never marked as errors.
+- **Custom Right-Click Spelling Context Menu**:
+  - Right-clicking any word (English or Arabic) under the mouse cursor opens a custom context menu without needing manual text selection.
+  - Offers high-precision spelling suggestions.
+  - **`Add "[word]" to Dictionary`** — Appends the word to `config/user_dict.txt` so it is permanently remembered across app restarts.
+  - **`Ignore "[word]"`** — Appends the word to `config/ignored_words.txt` so it is permanently ignored across app restarts.
+- **Inline Ghost-Text Auto-Complete ("Text Predictions Engine")**:
+  - As you type, live AI predictions appear as faint, italicized gray ghost text directly ahead of your typing cursor inside the text box.
+  - Includes anti-repetition filtering across all AI backends (Ollama, Gemini, OpenAI, Groq, OpenRouter, Anthropic) so text is never duplicated.
+  - Press **`Tab ↹`** or **`Right-Arrow`** to accept the prediction, or press **`Esc`** or type to dismiss it.
 - **Auto-analyze on paste** — paste text and IndexArc detects what it is.
 - **Save to Vault** — if the text is a secret/unknown, save it as a vault secret; otherwise **Save as Note**.
-- **Rephrase** — rewrite the text in a chosen style (human, professional, technical, concise, formal, casual) using AI.
-- **Copy / Clear** and native **spellcheck** (right-click for suggestions).
+- **Rephrase & Offline Proofread**:
+  - Rewrite text in chosen styles (human, professional, technical, concise, formal, casual).
+  - Proofread text with AI or automatic local CSpell Trie fallback if offline.
 
 ---
 

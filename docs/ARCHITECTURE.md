@@ -216,6 +216,30 @@ The top matches are then passed to `generateText()` to produce a short bilingual
 
 ---
 
+## Spellcheck & Live Prediction Engine Architecture
+
+IndexArc includes an offline-first, high-precision spelling and live auto-complete engine designed for bilingual (English & Arabic) developer environments.
+
+### 1. CSpell Trie Spellcheck Engine (`shared/cspell-engine.cjs` & `shared/spellcheck.cjs`)
+- **Trie Data Structure**: Replaced traditional flag-stripped Hunspell dictionaries with VS Code's official binary Trie engine (`cspell-lib`). Provides $O(L)$ instant dictionary lookups and eliminates compounding artifacts.
+- **Precompiled Arabic Trie (`ar.trie.gz`)**: Loaded from `dictionaries/ar_trie/package/ar.trie.gz`, offering instant $O(L)$ validation and clean edit-distance candidate ranking for complex Arabic prefixes and suffixes.
+- **Developer Technical Dictionary**: Built-in developer vocabulary (`checkpointer`, `hardcoded`, `autocompletion`, `proofread`, `scratchpad`, `indexarc`, etc.) prevents false red squiggles on code tokens and technical terms.
+- **Persistent User Dictionaries**:
+  - `config/user_dict.txt` — Custom words added via **"Add to Dictionary"**.
+  - `config/ignored_words.txt` — Words ignored via **"Ignore Word"**.
+  - Both files are auto-loaded on server and Electron startup and dynamically injected into CSpell Trie.
+
+### 2. Live Inline Ghost-Text Auto-Complete (`/api/autocomplete`)
+- **Cursor-Aligned Inline Rendering**: As the user types in the Scratchpad editor, a debounced worker (180ms) requests completions. Ghost text is rendered directly inside the editor DOM at the typing cursor as faint, italicized gray text with a `Tab ↹` hint badge.
+- **Anti-Duplication Filter (`extractContinuation`)**: Strips any repeated input text or echoed prompts across all AI providers (Ollama, Gemini, OpenAI, Groq, OpenRouter, Anthropic) to ensure text is never cloned or duplicated upon acceptance.
+- **Keyboard Intercepts**: `Tab` or `Right-Arrow` accepts the prediction; `Esc` or typing dismisses it.
+
+### 3. Local / AI Proofreader (`/api/proofread`)
+- **AI Mode**: Sends text to the active LLM provider with a bilingual system prompt instructing strict preservation of code blocks, technical terms, and markdown formatting.
+- **Offline Fallback**: If AI models are offline or unavailable, `/api/proofread` automatically degrades to tokenized local CSpell Trie correction.
+
+---
+
 ## Folder scanning & watching
 
 - **`services/folderScan.ts`** (`scanFolder`) recursively walks a folder, reads and extracts text from many file types — `.txt`, `.env`, `.json`, source code, plus `.docx` (mammoth), `.pdf` (pdf-parse), `.xlsx` (xlsx). JSON is flattened. Each file is run through heuristics (or AI per file), candidates are de-duplicated and annotated with source metadata, and a `FolderScanSession` + human-readable **brief** is produced.
