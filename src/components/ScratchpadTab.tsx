@@ -886,10 +886,18 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     requestAnimationFrame(recomputeSpellRects);
   };
 
+  const removeGhostPreview = () => {
+    const el = document.getElementById("inline-ghost-preview");
+    if (el && el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  };
+
   const [ghostCompletion, setGhostCompletion] = useState<string>("");
   const autocompleteTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const triggerAutocomplete = useCallback((prefixText: string) => {
+    removeGhostPreview();
     if (autocompleteTimerRef.current) clearTimeout(autocompleteTimerRef.current);
     const cleanPrefix = prefixText.trim();
     if (!cleanPrefix || cleanPrefix.length < 3) {
@@ -905,11 +913,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         });
         const data = await res.json();
         if (data && data.completion && typeof data.completion === "string") {
-          let comp = data.completion;
-          if (comp.startsWith(cleanPrefix)) {
-            comp = comp.slice(cleanPrefix.length);
-          }
-          if (comp.trim()) {
+          const comp = data.completion.trim();
+          if (comp) {
             setGhostCompletion(comp);
           } else {
             setGhostCompletion("");
@@ -920,8 +925,53 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       } catch {
         setGhostCompletion("");
       }
-    }, 180);
+    }, 220);
   }, []);
+
+  useEffect(() => {
+    removeGhostPreview();
+    if (!ghostCompletion) return;
+
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !editor.contains(sel.anchorNode)) return;
+
+    const range = sel.getRangeAt(0);
+
+    const ghostSpan = document.createElement("span");
+    ghostSpan.id = "inline-ghost-preview";
+    ghostSpan.contentEditable = "false";
+    ghostSpan.className = "select-none pointer-events-none italic";
+    ghostSpan.style.color = "rgba(156, 163, 175, 0.65)";
+    ghostSpan.style.opacity = "0.75";
+    ghostSpan.style.userSelect = "none";
+    ghostSpan.style.pointerEvents = "none";
+    ghostSpan.style.fontStyle = "italic";
+    ghostSpan.style.marginLeft = "3px";
+    ghostSpan.innerText = `${ghostCompletion} `;
+
+    const badge = document.createElement("span");
+    badge.style.fontSize = "10px";
+    badge.style.fontStyle = "normal";
+    badge.style.marginLeft = "6px";
+    badge.style.padding = "1px 4px";
+    badge.style.borderRadius = "3px";
+    badge.style.background = "rgba(99, 102, 241, 0.2)";
+    badge.style.border = "1px solid rgba(99, 102, 241, 0.4)";
+    badge.style.color = "var(--accent-bright)";
+    badge.innerText = "Tab ↹";
+    ghostSpan.appendChild(badge);
+
+    try {
+      range.insertNode(ghostSpan);
+      range.setStartBefore(ghostSpan);
+      range.setEndBefore(ghostSpan);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch {}
+  }, [ghostCompletion]);
 
   const analyze = useCallback(async (id: string, content: string) => {
     const text = content.trim();
@@ -969,11 +1019,12 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   );
 
   const onEditorInput = useCallback(() => {
+    removeGhostPreview();
     const editor = editorRef.current;
     if (!editor) return;
     const html = editor.innerHTML;
     const id = activeIdRef.current;
-    // The editor DOM is authoritative â€” mirror into the ref buffer.
+    // The editor DOM is authoritative — mirror into the ref buffer.
     contentRef.current[id] = html;
     // Coalesce typing into discrete history entries.
     scheduleHistoryPush();
@@ -1032,9 +1083,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if ((e.key === "Tab" || e.key === "ArrowRight") && ghostCompletion) {
         e.preventDefault();
+        removeGhostPreview();
         const editor = editorRef.current;
         if (editor) {
-          const textNode = document.createTextNode(ghostCompletion);
+          const textNode = document.createTextNode(" " + ghostCompletion);
           const sel = window.getSelection();
           if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
             const range = sel.getRangeAt(0);
@@ -1052,6 +1104,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         return;
       }
       if (e.key === "Escape" && ghostCompletion) {
+        removeGhostPreview();
         setGhostCompletion("");
         return;
       }
@@ -1639,33 +1692,6 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
           <p className="text-xs" style={{ color: "var(--accent-bright)" }}>
             {statusMsg}
           </p>
-        )}
-
-        {ghostCompletion && (
-          <div
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-all animate-pulse"
-            style={{
-              background: "rgba(99, 102, 241, 0.12)",
-              border: "1px solid rgba(99, 102, 241, 0.3)",
-              color: "var(--accent-bright)",
-            }}
-          >
-            <span
-              className="font-bold px-1.5 py-0.5 rounded text-[10px]"
-              style={{ background: "var(--accent-bg)", color: "var(--accent-bright)" }}
-            >
-              Tab ↹
-            </span>
-            <span>Prediction: <strong className="font-semibold text-white">{ghostCompletion}</strong></span>
-            <button
-              type="button"
-              onClick={() => setGhostCompletion("")}
-              className="ml-auto opacity-70 hover:opacity-100 text-xs px-1"
-              title="Dismiss"
-            >
-              ✕
-            </button>
-          </div>
         )}
 
         <div

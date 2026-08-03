@@ -953,20 +953,38 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 
 // --- Auto-complete / Live Prediction ---
 
-const AUTO_COMPLETION_SYSTEM = `You are an AI text completion assistant. Given the partial text, complete it with the most likely continuation.
-Return ONLY the completed text, nothing else. Do not quote, explain, or add anything.
+const AUTO_COMPLETION_SYSTEM = `You are a live text completion engine. Predict ONLY the next 2 to 8 words that naturally continue the user's text.
+STRICT RULES:
+1. Return ONLY the new continuation words that come AFTER the input.
+2. DO NOT repeat, echo, or duplicate any part of the input text.
+3. Keep the same language (Arabic or English), tone, and style.
+4. Do NOT add quotes, explanations, or quotes.`;
 
-Key rules:
-1. Maintain the original style, tone, and language (English or Arabic)
-2. Complete naturally - as if typing the next few words
-3. For code: complete syntax correctly
-4. For lists: number/bullet properly
-5. For sentences: complete the full sentence or paragraph snippet
-6. Keep punctuation natural
+function extractContinuation(prefix: string, rawCompletion: string): string | null {
+  if (!rawCompletion || !rawCompletion.trim()) return null;
+  let comp = rawCompletion.trim();
 
-If the input is just a few characters or appears incomplete/ungrammatical, make a best guess and complete it naturally.
+  // Strip common labels
+  comp = comp.replace(/^(Input|Output|Completion|Continuation):\s*/i, "").trim();
 
-Input:`;
+  const cleanPrefix = prefix.trim();
+  if (comp.toLowerCase().startsWith(cleanPrefix.toLowerCase())) {
+    comp = comp.slice(cleanPrefix.length).trim();
+  }
+
+  const words = cleanPrefix.split(/\s+/);
+  for (let len = Math.min(6, words.length); len >= 2; len--) {
+    const tail = words.slice(-len).join(" ");
+    if (tail && comp.toLowerCase().startsWith(tail.toLowerCase())) {
+      comp = comp.slice(tail.length).trim();
+      break;
+    }
+  }
+
+  comp = comp.replace(/^[.,;:!?\s]+/, "").trim();
+  if (!comp || comp.length <= 1) return null;
+  return comp;
+}
 
 /**
  * Generate text completion for live auto-complete
@@ -978,21 +996,21 @@ Input:`;
 export async function autoComplete(
   settings: AppSettings,
   prefix: string,
-  maxTokens: number = 64
+  maxTokens: number = 32
 ): Promise<string | null> {
   const text = prefix.trim();
   if (!text) return null;
 
   const active = await resolveActiveProvider(settings);
   if (active === "heuristic") {
-    // No AI available - return null for basic mode
     return null;
   }
 
-  const prompt = `${AUTO_COMPLETION_SYSTEM}
-${text}`;
+  const prompt = `${AUTO_COMPLETION_SYSTEM}\n\nUser Text:\n${text}`;
 
   try {
+    let raw: string | null = null;
+
     if (active === "local") {
       const base = settings.ollama_base_url.replace(/\/$/, "");
       const res = await fetch(`${base}/api/generate`, {
@@ -1004,22 +1022,16 @@ ${text}`;
           stream: false,
           keep_alive: "5m",
           options: {
-            temperature: 0.3,
+            temperature: 0.2,
             num_predict: maxTokens,
             num_ctx: 2048,
           },
         }),
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(15000),
       });
       if (res.ok) {
         const data = await res.json() as { response?: string };
-        if (data.response) {
-          const completion = data.response.trim();
-          // Only return if it's a continuation (starts with more text)
-          if (completion && !completion.startsWith(text.trim())) {
-            return completion;
-          }
-        }
+        raw = data.response || null;
       }
     } else if (active === "local_openai") {
       const baseUrl = settings.local_openai_base_url.replace(/\/$/, "");
@@ -1033,29 +1045,65 @@ ${text}`;
             { role: "user", content: text },
           ],
           max_tokens: maxTokens,
-          temperature: 0.3,
+          temperature: 0.2,
         }),
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(15000),
       });
       if (res.ok) {
         const data = await res.json() as { choices?: { message?: { content?: string } }[] };
-        const completion = data.choices?.[0]?.message?.content?.trim();
-        if (completion) return completion;
+        raw = data.choices?.[0]?.message?.content || null;
       }
     } else if (active === "api") {
-      // Use Gemini for completion
       const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
       const response = await ai.models.generateContent({
         model: settings.gemini_llm_model,
-        contents: `${AUTO_COMPLETION_SYSTEM}\n${text}`,
+        contents: `${AUTO_COMPLETION_SYSTEM}\n\nUser Text:\n${text}`,
         config: {
-          temperature: 0.3,
+          temperature: 0.2,
           maxOutputTokens: maxTokens,
         },
       });
-      return response.text || null;
+      raw = response.text || null;
+    } else if (active === "openai") {
+      raw = await fetchOpenAiCompatible(
+        "https://api.openai.com/v1/chat/completions",
+        settings.openai_api_key,
+        settings.openai_llm_model,
+        text,
+        AUTO_COMPLETION_SYSTEM,
+        {},
+        false
+      );
+    } else if (active === "groq") {
+      raw = await fetchOpenAiCompatible(
+        "https://api.groq.com/openai/v1/chat/completions",
+        settings.groq_api_key,
+        settings.groq_llm_model,
+        text,
+        AUTO_COMPLETION_SYSTEM,
+        {},
+        false
+      );
+    } else if (active === "openrouter") {
+      raw = await fetchOpenAiCompatible(
+        "https://openrouter.ai/api/v1/chat/completions",
+        settings.openrouter_api_key,
+        settings.openrouter_llm_model,
+        text,
+        AUTO_COMPLETION_SYSTEM,
+        {
+          "HTTP-Referer": "https://github.com/Mubder/IndexArc",
+          "X-Title": "IndexArc",
+        },
+        false
+      );
+    } else if (active === "anthropic") {
+      raw = await anthropicGenerate(settings, text, AUTO_COMPLETION_SYSTEM);
     }
-    // Add other providers as needed
+
+    if (raw) {
+      return extractContinuation(text, raw);
+    }
   } catch (e: any) {
     addLog("AUTOCOMPLETE", `Failed: ${e.message}`);
   }
