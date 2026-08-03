@@ -14,7 +14,7 @@ export async function checkOllama(baseUrl: string): Promise<{ online: boolean; m
   }
   try {
     const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/tags`, {
-      signal: AbortSignal.timeout(1000),
+      signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) {
       lastOllamaCheck = { online: false, models: [] };
@@ -35,6 +35,33 @@ export async function checkOllama(baseUrl: string): Promise<{ online: boolean; m
 export async function resolveActiveProvider(
   settings: AppSettings
 ): Promise<"local" | "api" | "openai" | "groq" | "openrouter" | "anthropic" | "local_openai" | "heuristic"> {
+  // Check for LLM provider override first (allows mixing providers)
+  if (settings.llm_provider_override) {
+    if (settings.llm_provider_override === "local") {
+      const o = await checkOllama(settings.ollama_base_url);
+      return o.online ? "local" : "heuristic";
+    }
+    if (settings.llm_provider_override === "api") {
+      return settings.gemini_api_key ? "api" : "heuristic";
+    }
+    if (settings.llm_provider_override === "openai") {
+      return settings.openai_api_key ? "openai" : "heuristic";
+    }
+    if (settings.llm_provider_override === "groq") {
+      return settings.groq_api_key ? "groq" : "heuristic";
+    }
+    if (settings.llm_provider_override === "openrouter") {
+      return settings.openrouter_api_key ? "openrouter" : "heuristic";
+    }
+    if (settings.llm_provider_override === "anthropic") {
+      return settings.anthropic_api_key ? "anthropic" : "heuristic";
+    }
+    if (settings.llm_provider_override === "local_openai") {
+      return "local_openai";
+    }
+    if (settings.llm_provider_override === "heuristic") return "heuristic";
+  }
+  
   if (settings.ai_provider === "local") {
     const o = await checkOllama(settings.ollama_base_url);
     return o.online ? "local" : "heuristic";
@@ -388,9 +415,10 @@ async function fetchOpenAiEmbeddings(
 export async function embedText(
   settings: AppSettings,
   text: string,
-  provider?: "local" | "api" | "openai" | "groq" | "openrouter" | "anthropic" | "local_openai" | "heuristic"
+  providerOverride?: "local" | "api" | "openai" | "groq" | "openrouter" | "anthropic" | "local_openai" | "heuristic"
 ): Promise<number[] | null> {
-  const active = provider || (await resolveActiveProvider(settings));
+  // Allow per-request provider override (for flexible LM Studio + Ollama mixing)
+  const active = providerOverride || settings.embed_provider_override || (await resolveActiveProvider(settings));
   if (active === "local") return ollamaEmbed(settings, text);
   if (active === "api") return geminiEmbed(settings, text);
   if (active === "openai") {
@@ -403,10 +431,12 @@ export async function embedText(
   }
   if (active === "local_openai") {
     const baseUrl = settings.local_openai_base_url.replace(/\/$/, "");
+    // Use local_openai_embed_model for embeddings, fallback to llm_model
+    const embedModel = settings.local_openai_embed_model || settings.local_openai_llm_model;
     return fetchOpenAiEmbeddings(
       `${baseUrl}/embeddings`,
       settings.local_openai_api_key,
-      settings.local_openai_llm_model,
+      embedModel,
       text
     );
   }
@@ -823,33 +853,65 @@ async function ollamaGenerateText(
 ): Promise<string | null> {
   const base = settings.ollama_base_url.replace(/\/$/, "");
   const model = settings.ollama_llm_model;
-  const timeoutMs = 60_000;
-  try {
-    addLog("OLLAMA", `generateText → ${model}`);
-    const res = await fetch(`${base}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        prompt,
-        system,
-        stream: false,
-        keep_alive: "30m",
-        options: {
-          temperature: 0.3,
-          num_predict: 1024,
-          num_ctx: 4096,
-        },
-      }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { response?: string };
-    return data.response?.trim() || null;
-  } catch (e: any) {
-    addLog("OLLAMA", `generateText failed: ${e.message}`);
-    return null;
-  }
+  // Long documents need generous context and output budget. Scale with input:
+  // rough token estimate (~4 chars/token) plus headroom for the rewritten text.
+  const inputTokens = Math.ceil(prompt.length / 4) + 64;
+  const outputTokens = Math.max(1024, inputTokens * 2);
+  const numCtx = Math.min(32768, Math.max(8192, inputTokens + outputTokens + 512));
+  const timeoutMs = 180_000;
+
+  const attempt = async (useLargeBudget: boolean): Promise<string | null> => {
+    try {
+      addLog("OLLAMA", `generateText → ${model} (ctx ${numCtx}, predict ${useLargeBudget ? outputTokens * 2 : outputTokens})`);
+      const res = await fetch(`${base}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          prompt,
+          system,
+          stream: false,
+          keep_alive: "30m",
+          options: {
+            temperature: 0.3,
+            num_predict: useLargeBudget ? outputTokens * 2 : outputTokens,
+            num_ctx: numCtx,
+          },
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        addLog("OLLAMA", `generateText HTTP ${res.status}: ${body.slice(0, 200)}`);
+        return null;
+      }
+      const data = (await res.json()) as {
+        response?: string;
+        error?: string;
+        done_reason?: string;
+      };
+      if (data.error) {
+        addLog("OLLAMA", `generateText error: ${data.error}`);
+        return null;
+      }
+      const text = data.response?.trim();
+      if (!text) {
+        addLog("OLLAMA", `generateText returned empty response (done_reason=${data.done_reason || "unknown"})`);
+        return null;
+      }
+      addLog("OLLAMA", `generateText ok (${text.length} chars, done_reason=${data.done_reason || "unknown"})`);
+      return text;
+    } catch (e: any) {
+      addLog("OLLAMA", `generateText failed: ${e.message}`);
+      return null;
+    }
+  };
+
+  // Some models return an empty response when they hit the output budget early.
+  // Retry once with a larger budget before giving up.
+  const first = await attempt(false);
+  if (first) return first;
+  return attempt(true);
 }
 
 async function geminiGenerateText(
@@ -887,4 +949,116 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   }
   if (na === 0 || nb === 0) return 0;
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+// --- Auto-complete / Live Prediction ---
+
+const AUTO_COMPLETION_SYSTEM = `You are an AI text completion assistant. Given the partial text, complete it with the most likely continuation.
+Return ONLY the completed text, nothing else. Do not quote, explain, or add anything.
+
+Key rules:
+1. Maintain the original style, tone, and language (English or Arabic)
+2. Complete naturally - as if typing the next few words
+3. For code: complete syntax correctly
+4. For lists: number/bullet properly
+5. For sentences: complete the full sentence or paragraph snippet
+6. Keep punctuation natural
+
+If the input is just a few characters or appears incomplete/ungrammatical, make a best guess and complete it naturally.
+
+Input:`;
+
+/**
+ * Generate text completion for live auto-complete
+ * @param settings - App settings with AI provider configuration
+ * @param prefix - The current text prefix (what the user has typed)
+ * @param maxTokens - Maximum tokens to generate (default 64)
+ * @returns Completed text continuation, or null if failed
+ */
+export async function autoComplete(
+  settings: AppSettings,
+  prefix: string,
+  maxTokens: number = 64
+): Promise<string | null> {
+  const text = prefix.trim();
+  if (!text) return null;
+
+  const active = await resolveActiveProvider(settings);
+  if (active === "heuristic") {
+    // No AI available - return null for basic mode
+    return null;
+  }
+
+  const prompt = `${AUTO_COMPLETION_SYSTEM}
+${text}`;
+
+  try {
+    if (active === "local") {
+      const base = settings.ollama_base_url.replace(/\/$/, "");
+      const res = await fetch(`${base}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: settings.ollama_llm_model,
+          prompt,
+          stream: false,
+          keep_alive: "5m",
+          options: {
+            temperature: 0.3,
+            num_predict: maxTokens,
+            num_ctx: 2048,
+          },
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (res.ok) {
+        const data = await res.json() as { response?: string };
+        if (data.response) {
+          const completion = data.response.trim();
+          // Only return if it's a continuation (starts with more text)
+          if (completion && !completion.startsWith(text.trim())) {
+            return completion;
+          }
+        }
+      }
+    } else if (active === "local_openai") {
+      const baseUrl = settings.local_openai_base_url.replace(/\/$/, "");
+      const res = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: settings.local_openai_llm_model,
+          messages: [
+            { role: "system", content: AUTO_COMPLETION_SYSTEM },
+            { role: "user", content: text },
+          ],
+          max_tokens: maxTokens,
+          temperature: 0.3,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (res.ok) {
+        const data = await res.json() as { choices?: { message?: { content?: string } }[] };
+        const completion = data.choices?.[0]?.message?.content?.trim();
+        if (completion) return completion;
+      }
+    } else if (active === "api") {
+      // Use Gemini for completion
+      const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
+      const response = await ai.models.generateContent({
+        model: settings.gemini_llm_model,
+        contents: `${AUTO_COMPLETION_SYSTEM}\n${text}`,
+        config: {
+          temperature: 0.3,
+          maxOutputTokens: maxTokens,
+        },
+      });
+      return response.text || null;
+    }
+    // Add other providers as needed
+  } catch (e: any) {
+    addLog("AUTOCOMPLETE", `Failed: ${e.message}`);
+  }
+
+  return null;
 }

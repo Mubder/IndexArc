@@ -1,6 +1,13 @@
 "use strict";
 
 const fs = require("fs");
+const path = require("path");
+let nspell;
+try {
+  nspell = require("nspell");
+} catch (e) {
+  console.log("[en-spell] nspell not available, using fallback engine");
+}
 
 function editDistance(a, b) {
   if (a === b) return 0;
@@ -25,15 +32,16 @@ function editDistance(a, b) {
 }
 
 class EnglishSpellEngine {
-  constructor(dicPath) {
+  constructor(dicPath, affPath) {
     this.words = new Set();
     this.deleteIndex = new Map();
     this.loaded = false;
     this.wordCount = 0;
-    if (dicPath) this.load(dicPath);
+    this.nspellInstance = null;
+    if (dicPath) this.load(dicPath, affPath);
   }
 
-  load(dicPath) {
+  load(dicPath, affPath) {
     let raw;
     try {
       raw = fs.readFileSync(dicPath, "utf8");
@@ -41,11 +49,13 @@ class EnglishSpellEngine {
       console.log("[en-spell] failed to read dictionary:", e && e.message ? e.message : e);
       return;
     }
-    const lines = raw.split(/\r?\n/);
+    // Handle both CRLF and LF line endings
+    const lines = raw.replace(/\r\n/g, "\n").split("\n");
     let start = 0;
     if (lines[0] && /^\d+$/.test(lines[0].trim())) start = 1;
 
     let n = 0;
+    const dicWords = [];
     for (let i = start; i < lines.length; i++) {
       let line = lines[i];
       if (!line) continue;
@@ -53,13 +63,41 @@ class EnglishSpellEngine {
       if (slash >= 0) line = line.slice(0, slash);
       line = line.trim().toLowerCase();
       if (line.length < 2) continue;
-      if (!/^[a-z]+(?:['\-][a-z]+)*$/.test(line)) continue;
+      if (!/^[a-z][a-z]*$|^\d+[a-z]*$|^\w+$/.test(line)) continue;
       this._addWord(line);
+      dicWords.push(line);
       n++;
     }
     this.wordCount = n;
     this.loaded = true;
-    console.log(`[en-spell] loaded ${n} words, delete-index keys=${this.deleteIndex.size}`);
+
+    if (nspell && dicWords.length > 0) {
+      try {
+        const affContent = affPath && fs.existsSync(affPath)
+          ? fs.readFileSync(affPath, "utf8")
+          : "";
+        if (affContent.trim()) {
+          this.nspellInstance = nspell({ aff: affContent, dic: dicWords.join("\n") });
+          console.log("[en-spell] nspell initialized with Hunspell affix rules");
+        } else {
+          this.nspellInstance = nspell({ aff: "", dic: dicWords.join("\n") });
+          console.log("[en-spell] nspell initialized without affix rules");
+        }
+      } catch (e) {
+        console.log("[en-spell] nspell init failed:", e && e.message ? e.message : e);
+        this.nspellInstance = null;
+      }
+    } else if (nspell) {
+      try {
+        this.nspellInstance = nspell({ aff: "", dic: dicWords.join("\n") });
+        console.log("[en-spell] nspell initialized (basic mode)");
+      } catch (e) {
+        console.log("[en-spell] nspell basic init failed");
+        this.nspellInstance = null;
+      }
+    }
+
+    console.log("[en-spell] loaded " + n + " words, delete-index keys=" + this.deleteIndex.size);
   }
 
   _addWord(word) {
@@ -86,31 +124,82 @@ class EnglishSpellEngine {
 
   add(word) {
     const clean = String(word || "").trim().toLowerCase();
-    if (clean.length >= 2) this._addWord(clean);
+    if (clean.length >= 2) {
+      this._addWord(clean);
+      if (this.nspellInstance) {
+        try {
+          this.nspellInstance.add(word);
+        } catch (e) {}
+      }
+    }
   }
 
   correct(word) {
     const clean = String(word || "").trim().toLowerCase();
     if (!clean || clean.length <= 1) return true;
-    
-    if (this.hasExact(clean)) return true;
-    
-    // Very basic English morphology fallbacks if the dic was strictly roots
-    if (clean.endsWith('s') && this.hasExact(clean.slice(0, -1))) return true;
-    if (clean.endsWith('es') && this.hasExact(clean.slice(0, -2))) return true;
-    if (clean.endsWith('ed') && this.hasExact(clean.slice(0, -2))) return true;
-    if (clean.endsWith('ed') && this.hasExact(clean.slice(0, -1))) return true;
-    if (clean.endsWith('ing') && this.hasExact(clean.slice(0, -3))) return true;
-    if (clean.endsWith('ing') && this.hasExact(clean.slice(0, -3) + 'e')) return true;
-    
-    // 'nt
-    if (clean.endsWith("n't")) {
-      const stem = clean.slice(0, -3);
-      if (stem === "do" || stem === "does" || stem === "did" || stem === "ca" || stem === "wo" || stem === "could" || stem === "should" || stem === "would" || stem === "are" || stem === "is" || stem === "were" || stem === "was" || stem === "have" || stem === "has" || stem === "had") {
-        return true;
+
+    if (this.nspellInstance) {
+      try {
+        return this.nspellInstance.correct(clean);
+      } catch (e) {
+        console.log("[en-spell] nspell.correct failed for \"" + clean + "\":", e && e.message ? e.message : e);
       }
     }
-    
+
+    return this._fallbackCorrect(clean);
+  }
+
+  _fallbackCorrect(clean) {
+    if (this.hasExact(clean)) return true;
+
+    if (clean.endsWith("s") && clean.length > 3) {
+      if (this.hasExact(clean.slice(0, -1))) return true;
+      if (clean.endsWith("es")) {
+        if (this.hasExact(clean.slice(0, -2))) return true;
+        if (this.hasExact(clean.slice(0, -3))) return true;
+      }
+    }
+
+    if (clean.endsWith("ed")) {
+      const stem1 = clean.slice(0, -2);
+      const stem2 = clean.slice(0, -1);
+      if (this.hasExact(stem1) || this.hasExact(stem2)) return true;
+      if (clean.endsWith("ied")) {
+        if (this.hasExact(clean.slice(0, -3) + "y")) return true;
+      }
+    }
+
+    if (clean.endsWith("ing")) {
+      if (this.hasExact(clean.slice(0, -3))) return true;
+    }
+
+    if (clean.endsWith("er") && clean.length > 5) {
+      if (this.hasExact(clean.slice(0, -2))) return true;
+    }
+
+    if (clean.endsWith("ly")) {
+      if (this.hasExact(clean.slice(0, -2))) return true;
+    }
+
+    if (clean.endsWith("ment") && clean.length > 7) {
+      if (this.hasExact(clean.slice(0, -4))) return true;
+    }
+
+    if (clean.endsWith("tion") && clean.length > 6) {
+      if (this.hasExact(clean.slice(0, -3) + "e")) return true;
+    }
+    if (clean.endsWith("sion") && clean.length > 6) {
+      if (this.hasExact(clean.slice(0, -3))) return true;
+    }
+
+    if (clean.endsWith("en") && clean.length > 5) {
+      if (this.hasExact(clean.slice(0, -2) + "e")) return true;
+    }
+
+    if (clean.endsWith("ive") && clean.length > 5) {
+      if (this.hasExact(clean.slice(0, -3))) return true;
+    }
+
     return false;
   }
 
@@ -120,6 +209,20 @@ class EnglishSpellEngine {
     const clean = original.toLowerCase();
     if (!clean || clean.length <= 1) return [];
 
+    if (this.nspellInstance) {
+      try {
+        const nspellSuggs = this.nspellInstance.suggest(clean) || [];
+        if (nspellSuggs.length > 0) {
+          const isCapitalized = original[0] === original[0].toUpperCase();
+          return nspellSuggs.slice(0, max).map(s =>
+            isCapitalized ? s.charAt(0).toUpperCase() + s.slice(1) : s
+          );
+        }
+      } catch (e) {
+        console.log("[en-spell] nspell.suggest failed:", e && e.message ? e.message : e);
+      }
+    }
+
     const best = new Map();
     const singleDeletes = new Set();
     for (let i = 0; i < clean.length; i++) {
@@ -127,26 +230,51 @@ class EnglishSpellEngine {
     }
 
     const isCapitalized = original[0] === original[0].toUpperCase();
+    const seenSuggestions = new Set();
 
     const consider = (cand, bonus) => {
       if (!cand || cand === clean || cand.length < 2) return;
-      if (!this.correct(cand)) return;
+      if (seenSuggestions.has(cand)) return;
+      if (!this._suggestionValid(cand)) return;
       const dist = editDistance(clean, cand);
       if (dist > 2) return;
       let score = dist + (typeof bonus === "number" ? bonus : 0);
-      
       if (singleDeletes.has(cand)) score -= 0.85;
       if (this.hasExact(cand)) score -= 0.25;
       score += Math.abs(cand.length - clean.length) * 0.08;
-      
-      const prev = best.get(cand);
-      if (prev === undefined || score < prev) best.set(cand, score);
+      best.set(cand, score);
+      seenSuggestions.add(cand);
     };
 
-    // 1) Single deletes of the input
+    this._generateSymSpellSuggestions(consider, singleDeletes, clean, isCapitalized, best);
+
+    const suggestions = [...best.entries()]
+      .sort((a, b) => {
+        if (a[1] !== b[1]) return a[1] - b[1];
+        const da = Math.abs(a[0].length - clean.length);
+        const db = Math.abs(b[0].length - clean.length);
+        if (da !== db) return da - db;
+        return a[0].localeCompare(b[0]);
+      })
+      .map(([s]) => isCapitalized ? s.charAt(0).toUpperCase() + s.slice(1) : s)
+      .slice(0, max);
+
+    return suggestions;
+  }
+
+  _suggestionValid(cand) {
+    if (!this._fallbackCorrect(cand)) return false;
+    if (this.nspellInstance) {
+      try {
+        return this.nspellInstance.correct(cand);
+      } catch (e) {}
+    }
+    return true;
+  }
+
+  _generateSymSpellSuggestions(consider, singleDeletes, clean, isCapitalized, best) {
     for (const del of singleDeletes) consider(del, -0.1);
 
-    // 2) SymSpell index
     const fromIndex = this.deleteIndex.get(clean);
     if (fromIndex) {
       for (const w of fromIndex) {
@@ -161,35 +289,27 @@ class EnglishSpellEngine {
       }
     }
 
-    // 3) Adjacent transposition
     for (let i = 0; i < clean.length - 1; i++) {
       const t = clean.slice(0, i) + clean[i + 1] + clean[i] + clean.slice(i + 2);
       consider(t, -2.0);
     }
-    
-    // 4) Missing apostrophe logic (dont -> don't)
+
     if (clean.endsWith("nt")) {
-        const withApos = clean.slice(0, -2) + "n't";
-        consider(withApos, -2.0);
+      consider(clean.slice(0, -2) + "n't", -2.0);
     }
     if (clean.endsWith("s")) {
-        const withApos = clean.slice(0, -1) + "'s";
-        consider(withApos, -2.0);
+      consider(clean.slice(0, -1) + "'s", -2.0);
     }
     if (clean.endsWith("re")) {
-        const withApos = clean.slice(0, -2) + "'re";
-        consider(withApos, -2.0);
+      consider(clean.slice(0, -2) + "'re", -2.0);
     }
     if (clean.endsWith("ve")) {
-        const withApos = clean.slice(0, -2) + "'ve";
-        consider(withApos, -2.0);
+      consider(clean.slice(0, -2) + "'ve", -2.0);
     }
     if (clean.endsWith("ll")) {
-        const withApos = clean.slice(0, -2) + "'ll";
-        consider(withApos, -2.0);
+      consider(clean.slice(0, -2) + "'ll", -2.0);
     }
 
-    // Double delete if sparse
     if (clean.length >= 5 && best.size < 3) {
       for (let i = 0; i < clean.length; i++) {
         const one = clean.slice(0, i) + clean.slice(i + 1);
@@ -198,30 +318,24 @@ class EnglishSpellEngine {
         }
       }
     }
+  }
 
-    const suggestions = [...best.entries()]
-      .sort((a, b) => {
-        if (a[1] !== b[1]) return a[1] - b[1];
-        const da = Math.abs(a[0].length - clean.length);
-        const db = Math.abs(b[0].length - clean.length);
-        if (da !== db) return da - db;
-        return a[0].localeCompare(b[0]);
-      })
-      .map(([s]) => isCapitalized ? s.charAt(0).toUpperCase() + s.slice(1) : s)
-      .slice(0, max);
-      
-    return suggestions;
+  getDicPath() {
+    return this.dicPath;
   }
 }
 
 function loadEnglishEngine(dicDir) {
-  const path = require("path");
   const dicPath = path.join(dicDir, "en.dic");
+  const affPath = path.join(dicDir, "en.aff");
+
   if (!fs.existsSync(dicPath)) {
     console.log("[en-spell] en.dic not found at", dicPath);
     return null;
   }
-  return new EnglishSpellEngine(dicPath);
+
+  const engine = new EnglishSpellEngine(dicPath, affPath);
+  return engine;
 }
 
 module.exports = {

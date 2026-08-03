@@ -72,11 +72,17 @@ export interface AppSettings {
   local_openai_base_url: string;
   local_openai_api_key: string;
   local_openai_llm_model: string;
+  local_openai_embed_model: string;
   ui_language: "en" | "ar";
   font_size_en: number;
   font_size_ar: number;
   bind_host: string;
   port: number;
+  enable_live_spellcheck?: boolean;
+  enable_ai_proofreader?: boolean;
+  // Per-provider selection for flexible model mixing (LM Studio + Ollama + etc)
+  llm_provider_override?: "local" | "api" | "openai" | "groq" | "openrouter" | "anthropic" | "local_openai" | "heuristic";
+  embed_provider_override?: "local" | "api" | "openai" | "local_openai";
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -98,11 +104,16 @@ export const DEFAULT_SETTINGS: AppSettings = {
   local_openai_base_url: "http://127.0.0.1:1234/v1",
   local_openai_api_key: "",
   local_openai_llm_model: "meta-llama-3-8b-instruct",
+  local_openai_embed_model: "bge-m3",
   ui_language: "en",
   font_size_en: 14,
   font_size_ar: 16,
   bind_host: "127.0.0.1",
   port: 3000,
+  enable_live_spellcheck: true,
+  enable_ai_proofreader: true,
+  llm_provider_override: undefined as "local" | "api" | "openai" | "groq" | "openrouter" | "anthropic" | "local_openai" | "heuristic" | undefined,
+  embed_provider_override: undefined as "local" | "api" | "openai" | "local_openai" | undefined,
 };
 
 export interface AnalyzeCandidate {

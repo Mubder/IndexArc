@@ -44,31 +44,46 @@ function getUserDictPath() {
 function loadEnglishDict() {
   try {
     const dir = path.join(getResourcePath(), "dictionaries", "en");
+    const dicPath = path.join(dir, "en.dic");
+    if (!fs.existsSync(dicPath)) {
+      console.log(`[spellcheck] en.spell: dictionary file not found at ${dicPath}`);
+      console.log("[spellcheck] en.spell: falling back to LanguageTool for English spelling");
+    }
     const enEngine = loadEnglishEngine(dir);
     if (enEngine && enEngine.loaded) {
       console.log(`[spellcheck] en (SymSpell) dictionary loaded (${enEngine.wordCount} words)`);
       return enEngine;
     }
+    console.log("[spellcheck] en.spell: engine loaded but not ready, using LanguageTool fallback");
     return null;
   } catch (e) {
     console.log(`[spellcheck] en dictionary load failed: ${e && e.message ? e.message : e}`);
+    console.log("[spellcheck] en.spell: falling back to LanguageTool for English spelling");
     return null;
   }
 }
 
 function loadSpellcheckers() {
   const arDir = path.join(getResourcePath(), "dictionaries", "ar");
+  const arDicPath = path.join(arDir, "ar.dic");
+  if (!fs.existsSync(arDicPath)) {
+    console.log(`[spellcheck] ar.spell: dictionary file not found at ${arDicPath}`);
+  }
   arSpell = loadArabicEngine(arDir);
-  if (arSpell) {
+  if (arSpell && arSpell.loaded) {
     console.log(`[spellcheck] ar engine ready (${arSpell.wordCount} words)`);
+  } else if (arSpell) {
+    console.log("[spellcheck] ar engine loaded but dictionary not ready");
   } else {
     console.log("[spellcheck] ar engine failed to load");
   }
   enSpell = loadEnglishDict();
 
   const userDictPath = getUserDictPath();
-  if (userDictPath) {
+  if (userDictPath && fs.existsSync(userDictPath)) {
     loadUserDictionary(userDictPath, arSpell, enSpell);
+  } else if (userDictPath) {
+    console.log(`[spellcheck] user dictionary not found at ${userDictPath}`);
   }
 
   initLanguageTool().then(() => {

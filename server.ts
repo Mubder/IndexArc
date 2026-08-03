@@ -20,7 +20,6 @@ const {
 } = spellcheckHelpers as {
   findMisspelled: (words: string[], ar: any, en: any) => Promise<string[]>;
   loadArabicEngine: (dir: string) => any;
-  loadEnglishEngine: (dir: string) => any;
   suggestArabicWord: (word: string, ar: any, limit?: number) => Promise<string[]>;
   suggestEnglishWord: (word: string, en: any, limit?: number) => Promise<string[]>;
   isArabicToken: (word: string) => boolean;
@@ -38,6 +37,7 @@ import {
   generateText,
   warmOllamaLlm,
   warmOllamaEmbed,
+  autoComplete,
 } from "./server/ai/providers.js";
 import { askVault } from "./server/services/ask.js";
 import {
@@ -256,11 +256,14 @@ app.post("/api/settings", (req, res) => {
     "local_openai_base_url",
     "local_openai_api_key",
     "local_openai_llm_model",
+    "local_openai_embed_model",
     "ui_language",
     "font_size_en",
     "font_size_ar",
     "enable_live_spellcheck",
     "enable_ai_proofreader",
+    "llm_provider_override",
+    "embed_provider_override",
   ];
   const patch: Record<string, unknown> = {};
   for (const k of allowed) {
@@ -292,21 +295,38 @@ app.post("/api/settings", (req, res) => {
 function loadServerEnDict(): any {
   try {
     const dicDir = path.join(process.cwd(), "dictionaries", "en");
-    return loadEnglishEngine(dicDir);
-  } catch {
-    /* optional */
+    const dicPath = path.join(dicDir, "en.dic");
+    if (!fs.existsSync(dicPath)) {
+      console.log(`[spellcheck-server] English dictionary not found at ${dicPath}`);
+      console.log("[spellcheck-server] English spellcheck will rely on LanguageTool");
+    }
+    const engine = loadEnglishEngine(dicDir);
+    if (engine && engine.loaded) {
+      console.log(`[spellcheck-server] English dictionary loaded (${engine.wordCount} words)`);
+    } else if (engine) {
+      console.log("[spellcheck-server] English engine loaded but dictionary not ready");
+    }
+    return engine;
+  } catch (e: any) {
+    console.log(`[spellcheck-server] English dictionary load failed: ${e && e.message ? e.message : e}`);
+    return null;
   }
-  return null;
 }
 const serverArSpell: any = loadArabicEngine(path.join(process.cwd(), "dictionaries", "ar"));
+if (serverArSpell && serverArSpell.loaded) {
+  console.log(`[spellcheck-server] Arabic dictionary loaded (${serverArSpell.wordCount} words)`);
+}
 const serverEnSpell: any = loadServerEnDict();
+
 const serverUserDictPath = path.join(process.cwd(), "config", "user_dict.txt");
-loadUserDictionary(serverUserDictPath, serverArSpell, serverEnSpell);
+if (fs.existsSync(serverUserDictPath)) {
+  loadUserDictionary(serverUserDictPath, serverArSpell, serverEnSpell);
+}
 
 initLanguageTool().then(() => {
-  console.log("[spellcheck] LanguageTool initialized");
+  console.log("[spellcheck-server] LanguageTool initialized");
 }).catch((e: any) => {
-  console.log(`[spellcheck] LanguageTool init failed: ${e && e.message ? e.message : e}`);
+  console.log(`[spellcheck-server] LanguageTool init failed: ${e && e.message ? e.message : e}`);
 });
 
 app.post("/api/spellcheck-words", async (req, res) => {
@@ -339,23 +359,73 @@ app.post("/api/spellcheck-add-word", (req, res) => {
   res.json({ ok: true });
 });
 
-// --- Local AI Proofreader ---
+// --- Local / AI Proofreader ---
 app.post("/api/proofread", async (req, res) => {
   const text = String(req.body?.text ?? "").trim();
   if (!text) return res.status(400).json({ error: "Text is required" });
   try {
     const settings = store.getSettings();
-    const system = "You are a helpful and meticulous proofreader. Review the user text for spelling, grammar, and punctuation errors. Return ONLY the corrected text. Do not add any conversational filler, explanations, or quotes around the output. Keep the original formatting and language (Arabic or English) intact.";
-    
+    const system = "You are an expert bilingual proofreader (Arabic and English). Meticulously correct spelling, grammar, and punctuation errors in the provided text while strictly maintaining markdown formatting, code blocks, technical terms, and original tone. Do not add any conversational filler, explanations, or quotes around the output. Return ONLY the corrected text.";
+
     const gen = await generateText(settings, text, system);
-    if (!gen || !gen.text) {
-      return res.status(503).json({ error: "No AI provider available or proofreading generated empty text." });
+    if (gen && gen.text && gen.text.trim()) {
+      return res.json({ corrected: gen.text.trim(), mode: "ai", provider: gen.provider_used });
     }
-    
-    res.json({ corrected: gen.text.trim() });
+
+    // Local Proofread Fallback (CSpell Trie Engine)
+    addLog("PROOFREAD", "AI unavailable or returned empty text. Falling back to local CSpell Trie proofreader.");
+    const tokens = text.split(/(\s+|[^\w\u0600-\u06FF\u0750-\u077F]+)/);
+    let localCorrected = "";
+    for (const token of tokens) {
+      if (!token || /^\s+$/.test(token) || token.length <= 1 || /^[^\w\u0600-\u06FF\u0750-\u077F]+$/.test(token)) {
+        localCorrected += token;
+        continue;
+      }
+      if (isArabicToken(token)) {
+        if (!checkArabicWord(token, serverArSpell)) {
+          const sugs = await suggestArabicWord(token, serverArSpell, 1);
+          localCorrected += (sugs && sugs[0]) ? sugs[0] : token;
+        } else {
+          localCorrected += token;
+        }
+      } else if (isLatinToken(token)) {
+        if (!checkEnglishWord(token, serverEnSpell)) {
+          const sugs = await suggestEnglishWord(token, serverEnSpell, 1);
+          localCorrected += (sugs && sugs[0]) ? sugs[0] : token;
+        } else {
+          localCorrected += token;
+        }
+      } else {
+        localCorrected += token;
+      }
+    }
+
+    res.json({ corrected: localCorrected || text, mode: "local" });
   } catch (e: any) {
     addLog("PROOFREAD", `Failed: ${e.message}`);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Live AI Auto-complete (predict next words as user types) ---
+app.post("/api/autocomplete", async (req, res) => {
+  const prefix = String(req.body?.prefix ?? "").trim();
+  const maxTokens = Number(req.body?.maxTokens) || 64;
+  if (!prefix) {
+    return res.json({ completion: "", done: true });
+  }
+  try {
+    const settings = store.getSettings();
+    const completion = await autoComplete(settings, prefix, maxTokens);
+    if (completion) {
+      res.json({ completion, done: false });
+    } else {
+      // No AI available - return empty for basic mode
+      res.json({ completion: prefix, done: true });
+    }
+  } catch (e: any) {
+    addLog("AUTOCOMPLETE", `Failed: ${e.message}`);
+    res.json({ completion: prefix, done: true });
   }
 });
 

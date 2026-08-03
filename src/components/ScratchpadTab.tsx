@@ -739,6 +739,43 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     if (msg) setTimeout(() => setStatusMsg(""), 3200);
   }, []);
 
+  const [ghostCompletion, setGhostCompletion] = useState<string>("");
+  const autocompleteTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const triggerAutocomplete = useCallback((prefixText: string) => {
+    if (autocompleteTimerRef.current) clearTimeout(autocompleteTimerRef.current);
+    const cleanPrefix = prefixText.trim();
+    if (!cleanPrefix || cleanPrefix.length < 3) {
+      setGhostCompletion("");
+      return;
+    }
+    autocompleteTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/autocomplete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prefix: cleanPrefix, maxTokens: 16 }),
+        });
+        const data = await res.json();
+        if (data && data.completion && typeof data.completion === "string") {
+          let comp = data.completion;
+          if (comp.startsWith(cleanPrefix)) {
+            comp = comp.slice(cleanPrefix.length);
+          }
+          if (comp.trim()) {
+            setGhostCompletion(comp);
+          } else {
+            setGhostCompletion("");
+          }
+        } else {
+          setGhostCompletion("");
+        }
+      } catch {
+        setGhostCompletion("");
+      }
+    }, 180);
+  }, []);
+
   const analyze = useCallback(async (id: string, content: string) => {
     const text = content.trim();
     if (!text) {
@@ -804,24 +841,23 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       const auto = firstLine.slice(0, 40) || (active?.title || "Scratch");
       setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, title: auto } : x)));
     }
+    // Fire live text prediction trigger
+    triggerAutocomplete(plainText);
+
     // Sync content into React state so persistence (localStorage + server)
-    // and the Arabic overlay fire. This is SAFE now because the editor is
-    // uncontrolled â€” React no longer re-applies innerHTML to it (we removed
-    // dangerouslySetInnerHTML), so this re-render cannot destroy the
-    // selection or corrupt the undo stack.
+    // and the Arabic overlay fire.
     setTabs((prev) => {
       const cur = prev.find((x) => x.id === id);
       if (cur && cur.content === html) return prev;
       return prev.map((x) => (x.id === id ? { ...x, content: html } : x));
     });
-  }, [active?.title, analyze, scheduleHistoryPush]);
+  }, [active?.title, analyze, scheduleHistoryPush, triggerAutocomplete]);
 
   const [pastePlain, setPastePlain] = useState(true);
 
   const onPaste = (e: React.ClipboardEvent) => {
     pasteFlag.current[activeId] = true;
     if (!pastePlain) {
-      // Rich paste still needs a later measure after browser mutates the DOM.
       requestAnimationFrame(updateScrollAffordances);
       return;
     }
@@ -839,16 +875,40 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     range.setEndAfter(textNode);
     sel.removeAllRanges();
     sel.addRange(range);
-    // Manual insert does not always fire `input` — keep state + scroll UI in sync.
     onEditorInput();
     requestAnimationFrame(updateScrollAffordances);
   };
 
-  // Intercept Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl+Y) so they drive OUR
-  // history stack instead of the browser's native execCommand undo, which is
-  // unreliable under React reconciliation.
+  // Intercept Tab / ArrowRight to accept inline ghost text auto-complete,
+  // and Ctrl/Cmd+Z/Y for undo/redo history.
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if ((e.key === "Tab" || e.key === "ArrowRight") && ghostCompletion) {
+        e.preventDefault();
+        const editor = editorRef.current;
+        if (editor) {
+          const textNode = document.createTextNode(ghostCompletion);
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
+            const range = sel.getRangeAt(0);
+            range.insertNode(textNode);
+            range.setStartAfter(textNode);
+            range.setEndAfter(textNode);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          } else {
+            editor.appendChild(textNode);
+          }
+          setGhostCompletion("");
+          onEditorInput();
+        }
+        return;
+      }
+      if (e.key === "Escape" && ghostCompletion) {
+        setGhostCompletion("");
+        return;
+      }
+
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
       const key = e.key.toLowerCase();
@@ -860,7 +920,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         historyRedo();
       }
     },
-    [historyUndo, historyRedo]
+    [ghostCompletion, historyUndo, historyRedo, onEditorInput]
   );
 
   const nextTitle = useCallback((prev: ScratchTab[]) => {
@@ -1432,6 +1492,33 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
           <p className="text-xs" style={{ color: "var(--accent-bright)" }}>
             {statusMsg}
           </p>
+        )}
+
+        {ghostCompletion && (
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-all animate-pulse"
+            style={{
+              background: "rgba(99, 102, 241, 0.12)",
+              border: "1px solid rgba(99, 102, 241, 0.3)",
+              color: "var(--accent-bright)",
+            }}
+          >
+            <span
+              className="font-bold px-1.5 py-0.5 rounded text-[10px]"
+              style={{ background: "var(--accent-bg)", color: "var(--accent-bright)" }}
+            >
+              Tab ↹
+            </span>
+            <span>Prediction: <strong className="font-semibold text-white">{ghostCompletion}</strong></span>
+            <button
+              type="button"
+              onClick={() => setGhostCompletion("")}
+              className="ml-auto opacity-70 hover:opacity-100 text-xs px-1"
+              title="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
         )}
 
         <div

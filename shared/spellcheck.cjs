@@ -10,6 +10,7 @@
 const { loadArabicEngine } = require("./arabic-spell-engine.cjs");
 const { loadEnglishEngine } = require("./english-spell-engine.cjs");
 const { ensureLanguageTool, getLanguageTool } = require("./languagetool.cjs");
+const cspellEngine = require("./cspell-engine.cjs");
 
 let ltService = null;
 
@@ -1057,7 +1058,7 @@ function stripArabicDiacritics(str) {
 }
 
 function isArabicToken(token) {
-  return typeof token === "string" && ARABIC_RE.test(token);
+  return typeof token === "string" && ARABIC_RE.test(token) && !/[A-Za-z]/.test(token);
 }
 
 function isLatinToken(token) {
@@ -1148,22 +1149,16 @@ function isArabicEngine(ar) {
  * Arabic correctness. Uses ArabicSpellEngine (SymSpell).
  */
 function checkArabicWord(w, arSpell) {
-  if (!arSpell) return true;
   const clean = stripArabicDiacritics(sanitizeToken(w));
   if (!clean || clean.length <= 1) return true;
   if (USER_CUSTOM_WORDS.has(w) || USER_CUSTOM_WORDS.has(clean)) return true;
 
-  if (isArabicEngine(arSpell)) {
-    return arSpell.correct(w);
+  try {
+    return cspellEngine.isWordCorrect(clean, "ar");
+  } catch {
+    if (isArabicEngine(arSpell)) return arSpell.correct(w);
+    return checkArabicCore(clean, arSpell);
   }
-  if (checkArabicCore(clean, arSpell)) return true;
-
-  for (const p of AR_PREFIXES_SHORT) {
-    if (clean.startsWith(p) && clean.length - p.length >= 3) {
-      if (checkArabicCore(clean.slice(p.length), arSpell)) return true;
-    }
-  }
-  return false;
 }
 
 /** Damerau–Levenshtein distance (insert/delete/substitute/transpose). */
@@ -1173,7 +1168,6 @@ function editDistance(a, b) {
   const n = b.length;
   if (!m) return n;
   if (!n) return m;
-  // Cap work for long tokens
   if (Math.abs(m - n) > 4) return Math.abs(m - n) + 4;
   const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
   for (let i = 0; i <= m; i++) dp[i][0] = i;
@@ -1229,176 +1223,29 @@ const AR_CONFUSABLES = {
 };
 
 /**
- * Arabic suggestions. Delegates to ArabicSpellEngine (SymSpell + edit-distance
- * ranking). Legacy nspell path kept as a thin fallback.
- *
- * Example: تنظرك + accidental س → تنظرسك → suggestion "تنظرك" (distance 1).
+ * Arabic suggestions via CSpell Trie Engine.
  */
 async function suggestArabicWord(w, arSpell, limit) {
   const max = typeof limit === "number" && limit > 0 ? limit : 8;
-  if (!arSpell) return [];
+  const clean = stripArabicDiacritics(sanitizeToken(w));
+  if (!clean || clean.length <= 1) return [];
 
   if (isLanguageToolAvailable()) {
     try {
-      return await ltService.suggest(w, "ar", max);
+      const ltSugs = await ltService.suggest(w, "ar", max);
+      if (ltSugs && ltSugs.length > 0) return ltSugs;
     } catch { }
   }
+
+  try {
+    const sugs = await cspellEngine.getSuggestions(clean, max, "ar");
+    if (sugs && sugs.length > 0) return sugs;
+  } catch { }
 
   if (isArabicEngine(arSpell)) {
     return arSpell.suggest(w, max);
   }
-  const clean = stripArabicDiacritics(sanitizeToken(w));
-  if (!clean || clean.length <= 1) return [];
-
-  // score = editDistance (+ quality bias); lower is better.
-  const best = new Map(); // candidate -> score
-
-  const isDictHit = (cand) => {
-    if (AR_EXTRA_WORDS.has(cand)) return true;
-    try {
-      if (arSpell.correct(cand)) return true;
-      for (const v of arabicWordVariants(cand)) {
-        if (v !== cand && arSpell.correct(v)) return true;
-      }
-    } catch {
-      /* ignore */
-    }
-    return false;
-  };
-
-  const consider = (cand, bonus) => {
-    if (!cand || cand === clean || cand === w) return;
-    if (cand.length < 2) return;
-    // Must be a real accepted form (dict + our morph)
-    if (!checkArabicWord(cand, arSpell)) return;
-    const dist = editDistance(clean, cand);
-    // Reject far-away junk from nspell (e.g. تنظرسك vs تندرس)
-    if (dist > 3) return;
-    let score = dist + (typeof bonus === "number" ? bonus : 0);
-    // Prefer true dictionary hits over morph-only recoveries
-    if (isDictHit(cand)) score -= 0.55;
-    // Prefer forms whose bare stem (drop one pronoun) is in the raw dict
-    // e.g. تنظرك → تنظر (dict) ranks above ترسك → ترس (also dict but farther)
-    for (const suf of ["كما", "هما", "ها", "هم", "هن", "كم", "كن", "نا", "ك", "ه", "ي"]) {
-      if (cand.length - suf.length >= 3 && cand.endsWith(suf)) {
-        const stem = cand.slice(0, cand.length - suf.length);
-        if (isDictHit(stem)) {
-          score -= 0.35;
-          break;
-        }
-      }
-    }
-    // Mild preference for similar length
-    score += Math.abs(cand.length - clean.length) * 0.05;
-    const prev = best.get(cand);
-    if (prev === undefined || score < prev) best.set(cand, score);
-  };
-
-  // --- 1) Single-character deletions (extra typed letter: تنظرسك → تنظرك) ---
-  for (let i = 0; i < clean.length; i++) {
-    consider(clean.slice(0, i) + clean.slice(i + 1), 0);
-  }
-
-  // --- 2) Adjacent transposition ---
-  for (let i = 0; i < clean.length - 1; i++) {
-    consider(
-      clean.slice(0, i) + clean[i + 1] + clean[i] + clean.slice(i + 2),
-      0
-    );
-  }
-
-  // --- 3) Confusable single substitutions ---
-  for (let i = 0; i < clean.length; i++) {
-    const ch = clean[i];
-    const alts = AR_CONFUSABLES[ch] || "";
-    for (const a of alts) {
-      consider(clean.slice(0, i) + a + clean.slice(i + 1), 0);
-    }
-  }
-
-  // --- 4) Double deletion only if few hits so far (two extra chars) ---
-  if (clean.length >= 5 && best.size < 4) {
-    for (let i = 0; i < clean.length; i++) {
-      const one = clean.slice(0, i) + clean.slice(i + 1);
-      for (let j = 0; j < one.length; j++) {
-        consider(one.slice(0, j) + one.slice(j + 1), 0.15);
-      }
-    }
-  }
-
-  // --- 5) Strip one enclitic / ending, fix stem, re-attach ---
-  // e.g. تنظرسك → strip ك → تنظرس → delete س → تنظر → reattach ك → تنظرك
-  const tryReattach = (stem, suffix) => {
-    if (!stem || stem.length < 2) return;
-    // stem as-is
-    if (checkArabicWord(stem, arSpell)) {
-      consider(stem, 0.25);
-      if (suffix) consider(stem + suffix, 0.1);
-    }
-    // delete one from stem
-    for (let i = 0; i < stem.length; i++) {
-      const s2 = stem.slice(0, i) + stem.slice(i + 1);
-      if (checkArabicWord(s2, arSpell)) {
-        consider(s2, 0.3);
-        if (suffix) consider(s2 + suffix, 0.05);
-      }
-    }
-  };
-
-  for (const s of AR_ENCLITICS) {
-    if (clean.endsWith(s) && clean.length - s.length >= 3) {
-      tryReattach(clean.slice(0, clean.length - s.length), s);
-    }
-  }
-  for (const s of AR_ENDINGS) {
-    if (clean.endsWith(s) && clean.length - s.length >= 3) {
-      tryReattach(clean.slice(0, clean.length - s.length), s);
-    }
-  }
-
-  // --- 6) Orthographic variants of the whole token ---
-  for (const v of arabicWordVariants(clean)) {
-    consider(v, 0);
-  }
-
-  // --- 7) nspell suggestions ONLY if they are near the input ---
-  try {
-    for (const s of arSpell.suggest(clean) || []) {
-      const d = editDistance(clean, stripArabicDiacritics(s));
-      if (d <= 2) consider(s, 0.2);
-    }
-  } catch {
-    /* ignore */
-  }
-
-  // --- 8) Known morphological stems of near-neighbors (bare form) ---
-  // Prefer offering the clean verb/noun if a clitic form is also suggested.
-  const near = [...best.keys()];
-  for (const cand of near) {
-    const morphSeen = new Set([cand]);
-    const morphQ = [];
-    expandArabicMorphology(cand, morphQ, morphSeen);
-    let steps = 0;
-    while (morphQ.length && steps < 12) {
-      const cur = morphQ.shift();
-      steps++;
-      if (arabicWordIsKnown(cur, arSpell)) consider(cur, 0.4);
-    }
-  }
-
-  // Sort: lower score first, then shorter forms, then lexicographic.
-  const ranked = [...best.entries()]
-    .sort((a, b) => {
-      if (a[1] !== b[1]) return a[1] - b[1];
-      // Prefer candidates closer in length to the typo
-      const da = Math.abs(a[0].length - clean.length);
-      const db = Math.abs(b[0].length - clean.length);
-      if (da !== db) return da - db;
-      return a[0].localeCompare(b[0], "ar");
-    })
-    .map(([s]) => s);
-
-  return ranked.slice(0, max);
+  return [];
 }
 
 // App / product / technical names common in developer vaults + bilingual notes.
@@ -1546,6 +1393,7 @@ function addCustomWord(word, dictPath, arSpell, enSpell) {
 
   USER_CUSTOM_WORDS.add(clean);
   USER_CUSTOM_WORDS.add(clean.toLowerCase());
+  cspellEngine.addCustomWord(clean);
 
   if (arSpell && typeof arSpell.add === "function") arSpell.add(clean);
   if (enSpell && typeof enSpell.add === "function") enSpell.add(clean);
@@ -1566,7 +1414,6 @@ function addCustomWord(word, dictPath, arSpell, enSpell) {
 }
 
 function checkEnglishWord(w, enSpell) {
-  if (!enSpell) return true;
   const clean = sanitizeToken(w);
   if (!clean || clean.length <= 1) return true;
 
@@ -1578,40 +1425,13 @@ function checkEnglishWord(w, enSpell) {
     return true;
   }
 
-  if (enSpell.correct(clean)) return true;
-  if (lower !== clean && enSpell.correct(lower)) return true;
-
-  if (lower.endsWith("our") && enSpell.correct(lower.replace(/our$/, "or"))) return true;
-  if (lower.endsWith("ise") && enSpell.correct(lower.replace(/ise$/, "ize"))) return true;
-  if (lower.endsWith("isation") && enSpell.correct(lower.replace(/isation$/, "ization"))) return true;
-  if (lower.endsWith("yse") && enSpell.correct(lower.replace(/yse$/, "yze"))) return true;
-  if (lower.endsWith("re") && lower.length > 4 && enSpell.correct(lower.replace(/re$/, "er"))) return true;
-
-  if (/[-']/.test(clean) || /\u2019/.test(clean)) {
-    const parts = clean.split(/[-'\u2019]+/).filter(Boolean);
-    if (parts.length > 1 && parts.every((p) => checkEnglishWord(p, enSpell))) {
-      return true;
-    }
+  try {
+    return cspellEngine.isWordCorrect(clean, "en");
+  } catch {
+    if (enSpell && enSpell.correct(clean)) return true;
+    if (enSpell && lower !== clean && enSpell.correct(lower)) return true;
+    return false;
   }
-
-  if (lower.endsWith("'s") || lower.endsWith("\u2019s")) {
-    const stem = lower.slice(0, -2);
-    if (stem.length > 1 && enSpell.correct(stem)) return true;
-  }
-  if (lower.endsWith("s") && lower.length > 3) {
-    const stem = lower.slice(0, -1);
-    if (enSpell.correct(stem)) return true;
-  }
-  if (lower.endsWith("es") && lower.length > 4) {
-    const stem = lower.slice(0, -2);
-    if (enSpell.correct(stem)) return true;
-  }
-  if (lower.endsWith("ies") && lower.length > 5) {
-    const stem = lower.slice(0, -3) + "y";
-    if (enSpell.correct(stem)) return true;
-  }
-
-  return false;
 }
 
 const EN_CONTRACTIONS = {
@@ -1653,129 +1473,81 @@ const EN_CONTRACTIONS = {
 };
 
 /**
-  * English suggestions. Prefers LanguageTool; falls back to SymSpell.
-  */
+ * English suggestions via CSpell Trie Engine.
+ */
 async function suggestEnglishWord(w, enSpell, limit) {
   const max = typeof limit === "number" && limit > 0 ? limit : 6;
-  if (!enSpell) return [];
   const clean = sanitizeToken(w);
   if (!clean || clean.length <= 1) return [];
 
   if (isLanguageToolAvailable()) {
     try {
-      return await ltService.suggest(clean, "en-US", max);
+      const ltSugs = await ltService.suggest(clean, "en-US", max);
+      if (ltSugs && ltSugs.length > 0) return ltSugs;
     } catch { }
   }
 
-  const lower = clean.toLowerCase();
-  const candidates = new Map();
-
-  const addCand = (cand, bonus = 0) => {
-    if (!cand || cand === clean || cand === w) return;
-    const cleanW = clean.replace(/['\u2019]/g, "").toLowerCase();
-    const cleanC = cand.replace(/['\u2019]/g, "").toLowerCase();
-    let dist = editDistance(cleanW, cleanC);
-
-    if (cleanW === cleanC && cand.includes("'")) {
-      dist = 0;
-      bonus -= 2.5;
-    }
-
-    let score = dist + bonus;
-    if (clean[0] === clean[0].toUpperCase() && cand[0] === cand[0].toUpperCase()) {
-      score -= 0.2;
-    }
-
-    const prev = candidates.get(cand);
-    if (prev === undefined || score < prev) candidates.set(cand, score);
-  };
-
-  if (EN_CONTRACTIONS[lower]) {
-    let matched = EN_CONTRACTIONS[lower];
-    if (clean[0] === clean[0].toUpperCase() && matched[0] !== matched[0].toUpperCase()) {
-      matched = matched[0].toUpperCase() + matched.slice(1);
-    }
-    addCand(matched, -3.0);
-  }
-
-  for (let i = 0; i < clean.length - 1; i++) {
-    const swapped = clean.slice(0, i) + clean[i + 1] + clean[i] + clean.slice(i + 2);
-    if (enSpell.correct(swapped)) {
-      addCand(swapped, -0.6);
-    }
-  }
-
   try {
-    const raw = enSpell.suggest(clean) || [];
-    for (const r of raw) {
-      addCand(r, 0);
-    }
-  } catch {
-    /* ignore */
+    const sugs = await cspellEngine.getSuggestions(clean, max, "en");
+    if (sugs && sugs.length > 0) return sugs;
+  } catch { }
+
+  if (enSpell) {
+    try {
+      return enSpell.suggest(clean) || [];
+    } catch { }
   }
 
-  return [...candidates.entries()]
-    .sort((a, b) => {
-      if (a[1] !== b[1]) return a[1] - b[1];
-      return a[0].localeCompare(b[0], "en");
-    })
-    .map(([s]) => s)
-    .slice(0, max);
+  return [];
 }
 
 /**
-  * Batch-check words. Returns only the misspelled ones (original token form
-  * as provided by the client, after sanitize). Prefers LanguageTool batch
-  * check when available.
-  */
+ * Batch-check words via CSpell Trie Engine.
+ */
 async function findMisspelled(words, arSpell, enSpell) {
-  if (!Array.isArray(words)) return [];
+  if (!Array.isArray(words) || words.length === 0) return [];
 
   if (isLanguageToolAvailable()) {
-    const bad = [];
-    const seen = new Set();
-    const ltWords = [];
-    for (const w of words) {
-      if (typeof w !== "string" || seen.has(w)) continue;
-      seen.add(w);
-      const clean = sanitizeToken(w);
-      if (!clean || clean.length <= 1) continue;
-      if (isArabicToken(clean)) {
-        ltWords.push({ word: clean, lang: "ar" });
-      } else if (isLatinToken(clean)) {
-        ltWords.push({ word: clean, lang: "en-US" });
-      }
-    }
-    for (const { word, lang } of ltWords) {
-      try {
-        const matches = await ltService.check(word, lang);
-        if (matches.length > 0) bad.push(word);
-      } catch {
-        // Fall through to per-word SymSpell check
-        if (isArabicToken(word)) {
-          if (arSpell && !checkArabicWord(word, arSpell)) bad.push(word);
-        } else if (isLatinToken(word)) {
-          if (enSpell && !checkEnglishWord(word, enSpell)) bad.push(word);
+    try {
+      const bad = [];
+      const seen = new Set();
+      const ltWords = [];
+      for (const w of words) {
+        if (typeof w !== "string" || seen.has(w)) continue;
+        seen.add(w);
+        const clean = sanitizeToken(w);
+        if (!clean || clean.length <= 1) continue;
+        if (isArabicToken(clean)) {
+          ltWords.push({ word: clean, lang: "ar" });
+        } else if (isLatinToken(clean)) {
+          ltWords.push({ word: clean, lang: "en-US" });
         }
+      }
+      for (const { word, lang } of ltWords) {
+        try {
+          const matches = await ltService.check(word, lang);
+          if (matches.length > 0) bad.push(word);
+        } catch {
+          if (!await isWordCorrect(word, lang)) bad.push(word);
+        }
+      }
+      if (bad.length > 0) return bad;
+    } catch { }
+  }
+
+  try {
+    return await cspellEngine.batchFindMisspelled(words);
+  } catch {
+    const bad = [];
+    for (const w of words) {
+      if (typeof w === "string" && w.trim().length > 1) {
+        const clean = sanitizeToken(w);
+        if (isArabicToken(clean) && !checkArabicWord(clean, arSpell)) bad.push(clean);
+        if (isLatinToken(clean) && !checkEnglishWord(clean, enSpell)) bad.push(clean);
       }
     }
     return bad;
   }
-
-  const bad = [];
-  const seen = new Set();
-  for (const w of words) {
-    if (typeof w !== "string" || seen.has(w)) continue;
-    seen.add(w);
-    const clean = sanitizeToken(w);
-    if (!clean || clean.length <= 1) continue;
-    if (isArabicToken(clean)) {
-      if (arSpell && !checkArabicWord(clean, arSpell)) bad.push(clean);
-    } else if (isLatinToken(clean)) {
-      if (enSpell && !checkEnglishWord(clean, enSpell)) bad.push(clean);
-    }
-  }
-  return bad;
 }
 
 module.exports = {
