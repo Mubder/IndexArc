@@ -27,6 +27,8 @@ import {
   AlignLeft,
   AlignRight,
   Languages,
+  BookPlus,
+  EyeOff,
 } from "lucide-react";
 import { AnalyzeCandidate, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
@@ -206,6 +208,47 @@ function extractSpellWords(text: string): string[] {
     }
   }
   return Array.from(new Set(words));
+}
+
+function getWordAtPoint(root: HTMLElement, x: number, y: number): { word: string; range: Range } | null {
+  let range: Range | null = null;
+  if (document.caretRangeFromPoint) {
+    range = document.caretRangeFromPoint(x, y);
+  } else if ((document as any).caretPositionFromPoint) {
+    const pos = (document as any).caretPositionFromPoint(x, y);
+    if (pos && pos.offsetNode) {
+      range = document.createRange();
+      range.setStart(pos.offsetNode, pos.offset);
+      range.setEnd(pos.offsetNode, pos.offset);
+    }
+  }
+  if (!range || !range.startContainer || !root.contains(range.startContainer)) {
+    return null;
+  }
+
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) return null;
+
+  const text = node.nodeValue || "";
+  const offset = range.startOffset;
+
+  let start = offset;
+  while (start > 0 && /[\w\u0600-\u06FF\u0750-\u077F]/.test(text[start - 1])) {
+    start--;
+  }
+  let end = offset;
+  while (end < text.length && /[\w\u0600-\u06FF\u0750-\u077F]/.test(text[end])) {
+    end++;
+  }
+
+  const word = text.slice(start, end).trim();
+  if (!word || word.length <= 1) return null;
+
+  const wordRange = document.createRange();
+  wordRange.setStart(node, start);
+  wordRange.setEnd(node, end);
+
+  return { word, range: wordRange };
 }
 
 /** First strong character decides a paragraph/note's natural base direction. */
@@ -738,6 +781,103 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setStatusMsg(msg);
     if (msg) setTimeout(() => setStatusMsg(""), 3200);
   }, []);
+
+  const [ignoredWords, setIgnoredWords] = useState<Set<string>>(new Set());
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    word: string;
+    range: Range | null;
+    suggestions: string[];
+  } | null>(null);
+
+  useEffect(() => {
+    const handleClick = () => setContextMenu(null);
+    window.addEventListener("click", handleClick);
+    return () => window.removeEventListener("click", handleClick);
+  }, []);
+
+  const onContextMenu = useCallback(async (e: React.MouseEvent<HTMLDivElement>) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const targetInfo = getWordAtPoint(editor, e.clientX, e.clientY);
+    if (!targetInfo) {
+      setContextMenu(null);
+      return;
+    }
+
+    const { word, range } = targetInfo;
+    const clean = sanitizeToken(word);
+    if (!clean || clean.length <= 1) {
+      setContextMenu(null);
+      return;
+    }
+
+    e.preventDefault();
+
+    let suggestions: string[] = [];
+    try {
+      const res = await fetch("/api/spellcheck-suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word: clean }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        suggestions = data.suggestions || [];
+      }
+    } catch {}
+
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      word: clean,
+      range,
+      suggestions,
+    });
+  }, []);
+
+  const handleApplySuggestion = (replacement: string) => {
+    if (!contextMenu || !contextMenu.range) {
+      setContextMenu(null);
+      return;
+    }
+    const { range } = contextMenu;
+    range.deleteContents();
+    const textNode = document.createTextNode(replacement);
+    range.insertNode(textNode);
+    range.setStartAfter(textNode);
+    range.setEndAfter(textNode);
+    const sel = window.getSelection();
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    setContextMenu(null);
+    onEditorInput();
+  };
+
+  const handleAddToDictionary = async (word: string) => {
+    try {
+      await fetch("/api/spellcheck-add-word", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word }),
+      });
+    } catch {}
+    setIgnoredWords((prev) => new Set(prev).add(word).add(word.toLowerCase()));
+    setContextMenu(null);
+    setStatus(`Added "${word}" to dictionary`);
+    requestAnimationFrame(recomputeSpellRects);
+  };
+
+  const handleIgnoreWord = (word: string) => {
+    setIgnoredWords((prev) => new Set(prev).add(word).add(word.toLowerCase()));
+    setContextMenu(null);
+    setStatus(`Ignored "${word}"`);
+    requestAnimationFrame(recomputeSpellRects);
+  };
 
   const [ghostCompletion, setGhostCompletion] = useState<string>("");
   const autocompleteTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -1553,6 +1693,7 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
               }}
               onPaste={onPaste}
               onKeyDown={onKeyDown}
+              onContextMenu={onContextMenu}
               onScroll={onEditorScroll}
               className="note-editor relative z-10 w-full rounded-xl px-3 py-2 focus:outline-none transition-colors"
               style={{
@@ -1587,6 +1728,60 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
                     }}
                   />
                 ))}
+              </div>
+            )}
+
+            {/* Custom Spelling Context Menu Popup */}
+            {contextMenu && (
+              <div
+                className="fixed z-50 rounded-xl shadow-2xl p-2 w-64 space-y-1 text-xs backdrop-blur-md animate-in fade-in zoom-in-95"
+                style={{
+                  top: Math.min(contextMenu.y, window.innerHeight - 280),
+                  left: Math.min(contextMenu.x, window.innerWidth - 270),
+                  background: "var(--bg-surface)",
+                  border: "1px solid var(--border-glow)",
+                  boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                <div className="px-2 py-1 font-semibold text-muted border-b border-border flex items-center justify-between">
+                  <span>Spelling: <strong className="text-white">{contextMenu.word}</strong></span>
+                  <button onClick={() => setContextMenu(null)} className="opacity-60 hover:opacity-100">✕</button>
+                </div>
+
+                {contextMenu.suggestions.length > 0 ? (
+                  <div className="space-y-0.5 max-h-40 overflow-y-auto">
+                    {contextMenu.suggestions.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => handleApplySuggestion(s)}
+                        className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg hover:text-accent-bright font-medium transition-colors flex items-center gap-1.5"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber" />
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="px-2 py-1 text-muted italic">No suggestions</p>
+                )}
+
+                <div className="border-t border-border pt-1 space-y-0.5">
+                  <button
+                    onClick={() => handleAddToDictionary(contextMenu.word)}
+                    className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-surface-highlight hover:text-emerald font-medium transition-colors flex items-center gap-1.5"
+                  >
+                    <BookPlus className="w-3.5 h-3.5 text-emerald" />
+                    Add "{contextMenu.word}" to Dictionary
+                  </button>
+
+                  <button
+                    onClick={() => handleIgnoreWord(contextMenu.word)}
+                    className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-surface-highlight hover:text-muted font-medium transition-colors flex items-center gap-1.5"
+                  >
+                    <EyeOff className="w-3.5 h-3.5 text-muted" />
+                    Ignore "{contextMenu.word}"
+                  </button>
+                </div>
               </div>
             )}
             {/* Always-visible corners of the editor frame (not mid-document). */}
