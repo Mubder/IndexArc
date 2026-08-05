@@ -29,6 +29,8 @@ import {
   Languages,
   BookPlus,
   EyeOff,
+  Zap,
+  ZapOff,
 } from "lucide-react";
 import { AnalyzeCandidate, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
@@ -249,6 +251,40 @@ function getWordAtPoint(root: HTMLElement, x: number, y: number): { word: string
   wordRange.setEnd(node, end);
 
   return { word, range: wordRange };
+}
+
+function measureCaretPos(editor: HTMLElement): { top: number; left: number } | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !editor.contains(sel.anchorNode)) return null;
+
+  const range = sel.getRangeAt(0);
+  const editorBox = editor.getBoundingClientRect();
+  const rects = range.getClientRects();
+
+  if (rects && rects.length > 0) {
+    const lastRect = rects[rects.length - 1];
+    if (lastRect.width >= 0 && lastRect.height >= 0) {
+      return {
+        top: lastRect.top - editorBox.top,
+        left: lastRect.right - editorBox.left,
+      };
+    }
+  }
+
+  try {
+    const cl = range.cloneRange();
+    const span = document.createElement("span");
+    span.appendChild(document.createTextNode("\u200b"));
+    cl.insertNode(span);
+    const box = span.getBoundingClientRect();
+    if (span.parentNode) span.parentNode.removeChild(span);
+    return {
+      top: box.top - editorBox.top,
+      left: box.left - editorBox.left,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** First strong character decides a paragraph/note's natural base direction. */
@@ -886,22 +922,45 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     requestAnimationFrame(recomputeSpellRects);
   };
 
-  const removeGhostPreview = () => {
-    const el = document.getElementById("inline-ghost-preview");
-    if (el && el.parentNode) {
-      el.parentNode.removeChild(el);
-    }
+  // User toggle for AI ghost predictions (persisted in localStorage)
+  const [enablePredictions, setEnablePredictions] = useState<boolean>(() => {
+    return localStorage.getItem("indexarc_enable_ghost") !== "false";
+  });
+
+  const togglePredictions = () => {
+    setEnablePredictions((prev) => {
+      const next = !prev;
+      localStorage.setItem("indexarc_enable_ghost", String(next));
+      if (!next) {
+        setGhostCompletion("");
+        setCaretPos(null);
+      }
+      return next;
+    });
   };
 
   const [ghostCompletion, setGhostCompletion] = useState<string>("");
+  const [caretPos, setCaretPos] = useState<{ top: number; left: number } | null>(null);
   const autocompleteTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const updateCaretPos = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const pos = measureCaretPos(editor);
+    setCaretPos(pos);
+  }, []);
+
   const triggerAutocomplete = useCallback((prefixText: string) => {
-    removeGhostPreview();
+    if (!enablePredictions) {
+      setGhostCompletion("");
+      setCaretPos(null);
+      return;
+    }
     if (autocompleteTimerRef.current) clearTimeout(autocompleteTimerRef.current);
     const cleanPrefix = prefixText.trim();
     if (!cleanPrefix || cleanPrefix.length < 3) {
       setGhostCompletion("");
+      setCaretPos(null);
       return;
     }
     autocompleteTimerRef.current = setTimeout(async () => {
@@ -916,62 +975,23 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           const comp = data.completion.trim();
           if (comp) {
             setGhostCompletion(comp);
+            updateCaretPos();
           } else {
             setGhostCompletion("");
+            setCaretPos(null);
           }
         } else {
           setGhostCompletion("");
+          setCaretPos(null);
         }
       } catch {
         setGhostCompletion("");
+        setCaretPos(null);
       }
     }, 220);
-  }, []);
+  }, [enablePredictions, updateCaretPos]);
 
-  useEffect(() => {
-    removeGhostPreview();
-    if (!ghostCompletion) return;
 
-    const editor = editorRef.current;
-    if (!editor) return;
-
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || !editor.contains(sel.anchorNode)) return;
-
-    const range = sel.getRangeAt(0);
-
-    const ghostSpan = document.createElement("span");
-    ghostSpan.id = "inline-ghost-preview";
-    ghostSpan.contentEditable = "false";
-    ghostSpan.className = "select-none pointer-events-none italic";
-    ghostSpan.style.color = "rgba(156, 163, 175, 0.65)";
-    ghostSpan.style.opacity = "0.75";
-    ghostSpan.style.userSelect = "none";
-    ghostSpan.style.pointerEvents = "none";
-    ghostSpan.style.fontStyle = "italic";
-    ghostSpan.style.marginLeft = "3px";
-    ghostSpan.innerText = `${ghostCompletion} `;
-
-    const badge = document.createElement("span");
-    badge.style.fontSize = "10px";
-    badge.style.fontStyle = "normal";
-    badge.style.marginLeft = "6px";
-    badge.style.padding = "1px 4px";
-    badge.style.borderRadius = "3px";
-    badge.style.background = "rgba(99, 102, 241, 0.2)";
-    badge.style.border = "1px solid rgba(99, 102, 241, 0.4)";
-    badge.style.color = "var(--accent-bright)";
-    badge.innerText = "Tab ↹";
-    ghostSpan.appendChild(badge);
-
-    try {
-      range.insertNode(ghostSpan);
-      range.setStartBefore(ghostSpan);
-      range.setEndBefore(ghostSpan);
-      sel.removeAllRanges();
-      sel.addRange(range);
-    } catch {}
-  }, [ghostCompletion]);
 
   const analyze = useCallback(async (id: string, content: string) => {
     const text = content.trim();
@@ -1019,7 +1039,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   );
 
   const onEditorInput = useCallback(() => {
-    removeGhostPreview();
+    if (ghostCompletion) {
+      setGhostCompletion("");
+      setCaretPos(null);
+    }
     const editor = editorRef.current;
     if (!editor) return;
     const html = editor.innerHTML;
@@ -1049,7 +1072,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       if (cur && cur.content === html) return prev;
       return prev.map((x) => (x.id === id ? { ...x, content: html } : x));
     });
-  }, [active?.title, analyze, scheduleHistoryPush, triggerAutocomplete]);
+  }, [active?.title, analyze, ghostCompletion, scheduleHistoryPush, triggerAutocomplete]);
 
   const [pastePlain, setPastePlain] = useState(true);
 
@@ -1081,9 +1104,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   // and Ctrl/Cmd+Z/Y for undo/redo history.
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if ((e.key === "Tab" || e.key === "ArrowRight") && ghostCompletion) {
+      if ((e.key === "Tab" || e.key === "ArrowRight") && ghostCompletion && enablePredictions) {
         e.preventDefault();
-        removeGhostPreview();
         const editor = editorRef.current;
         if (editor) {
           const textNode = document.createTextNode(" " + ghostCompletion);
@@ -1099,13 +1121,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
             editor.appendChild(textNode);
           }
           setGhostCompletion("");
+          setCaretPos(null);
           onEditorInput();
         }
         return;
       }
-      if (e.key === "Escape" && ghostCompletion) {
-        removeGhostPreview();
+      if ((e.key === "Escape" || e.key === "Backspace") && ghostCompletion) {
         setGhostCompletion("");
+        setCaretPos(null);
         return;
       }
 
@@ -1646,6 +1669,21 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
               </button>
             )}
 
+            <button
+              type="button"
+              onClick={togglePredictions}
+              title={enablePredictions ? "AI Predictions Enabled (Click to Disable)" : "AI Predictions Disabled (Click to Enable)"}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+              style={{
+                background: enablePredictions ? "rgba(99, 102, 241, 0.15)" : "transparent",
+                color: enablePredictions ? "var(--accent-bright)" : "var(--text-muted)",
+                border: `1px solid ${enablePredictions ? "rgba(99, 102, 241, 0.4)" : "var(--border)"}`,
+              }}
+            >
+              {enablePredictions ? <Zap className="w-3.5 h-3.5" /> : <ZapOff className="w-3.5 h-3.5" />}
+              <span>Predictions: <strong>{enablePredictions ? "ON" : "OFF"}</strong></span>
+            </button>
+
            <div className="flex-1" />
 
           {/* Rephrase controls, moved to the right side. */}
@@ -1761,6 +1799,60 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
                     }}
                   />
                 ))}
+              </div>
+            )}
+
+            {/* Non-intrusive floating prediction overlay badge (Zero DOM mutations) */}
+            {ghostCompletion && enablePredictions && (
+              <div
+                className="absolute bottom-3 right-4 z-30 flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs backdrop-blur-md shadow-2xl animate-in fade-in zoom-in-95 pointer-events-auto"
+                style={{
+                  background: "rgba(15, 23, 42, 0.92)",
+                  border: "1px solid rgba(99, 102, 241, 0.4)",
+                  boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.6)",
+                }}
+              >
+                <Zap className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="text-muted">Prediction:</span>
+                <span className="font-medium text-white italic">{ghostCompletion}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const editor = editorRef.current;
+                    if (editor) {
+                      const textNode = document.createTextNode(" " + ghostCompletion);
+                      const sel = window.getSelection();
+                      if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
+                        const range = sel.getRangeAt(0);
+                        range.insertNode(textNode);
+                        range.setStartAfter(textNode);
+                        range.setEndAfter(textNode);
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                      } else {
+                        editor.appendChild(textNode);
+                      }
+                      setGhostCompletion("");
+                      onEditorInput();
+                    }
+                  }}
+                  className="ml-1 px-2 py-0.5 rounded font-mono text-[10px] font-bold hover:brightness-125 transition-all cursor-pointer"
+                  style={{
+                    background: "rgba(99, 102, 241, 0.25)",
+                    border: "1px solid rgba(99, 102, 241, 0.5)",
+                    color: "var(--accent-bright)",
+                  }}
+                >
+                  Tab ↹ Accept
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGhostCompletion("")}
+                  className="text-muted hover:text-white text-xs px-1 cursor-pointer"
+                  title="Dismiss"
+                >
+                  ✕
+                </button>
               </div>
             )}
 

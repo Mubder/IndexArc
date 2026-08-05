@@ -982,6 +982,9 @@ function extractContinuation(prefix: string, rawCompletion: string): string | nu
   }
 
   comp = comp.replace(/^[.,;:!?\s]+/, "").trim();
+  if (comp.length > 50) {
+    comp = comp.slice(0, 50).replace(/\s+\S*$/, "").trim();
+  }
   if (!comp || comp.length <= 1) return null;
   return comp;
 }
