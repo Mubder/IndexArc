@@ -236,11 +236,11 @@ function getWordAtPoint(root: HTMLElement, x: number, y: number): { word: string
   const offset = range.startOffset;
 
   let start = offset;
-  while (start > 0 && /[\w\u0600-\u06FF\u0750-\u077F]/.test(text[start - 1])) {
+  while (start > 0 && /[\w\u0600-\u06FF\u0750-\u077F''\u2019-]/.test(text[start - 1])) {
     start--;
   }
   let end = offset;
-  while (end < text.length && /[\w\u0600-\u06FF\u0750-\u077F]/.test(text[end])) {
+  while (end < text.length && /[\w\u0600-\u06FF\u0750-\u077F''\u2019-]/.test(text[end])) {
     end++;
   }
 

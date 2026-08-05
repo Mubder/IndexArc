@@ -1481,25 +1481,45 @@ async function suggestEnglishWord(w, enSpell, limit) {
   const clean = sanitizeToken(w);
   if (!clean || clean.length <= 1) return [];
 
+  const lower = clean.toLowerCase();
+  const results = [];
+
+  if (COMMON_ENGLISH_CONTRACTIONS[lower]) {
+    results.push(COMMON_ENGLISH_CONTRACTIONS[lower]);
+  }
+
   if (isLanguageToolAvailable()) {
     try {
       const ltSugs = await ltService.suggest(clean, "en-US", max);
-      if (ltSugs && ltSugs.length > 0) return ltSugs;
+      if (ltSugs && ltSugs.length > 0) results.push(...ltSugs);
     } catch { }
   }
 
   try {
     const sugs = await cspellEngine.getSuggestions(clean, max, "en");
-    if (sugs && sugs.length > 0) return sugs;
+    if (sugs && sugs.length > 0) results.push(...sugs);
   } catch { }
 
-  if (enSpell) {
+  if (enSpell && results.length < max) {
     try {
-      return enSpell.suggest(clean) || [];
+      const hSugs = enSpell.suggest(clean) || [];
+      if (hSugs && hSugs.length > 0) results.push(...hSugs);
     } catch { }
   }
 
-  return [];
+  // Deduplicate case-insensitively
+  const finalSugs = [];
+  const seen = new Set();
+  for (const s of results) {
+    if (!s || s.toLowerCase() === lower) continue;
+    const key = s.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      finalSugs.push(s);
+    }
+  }
+
+  return finalSugs.slice(0, max);
 }
 
 /**
