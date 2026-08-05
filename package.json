@@ -95,7 +95,7 @@
       "!**/.env",
       "!**/.env.*"
     ],
-    "asar": false,
+    "asar": true,
     "extraMetadata": {
       "main": "electron-main.cjs"
     },
