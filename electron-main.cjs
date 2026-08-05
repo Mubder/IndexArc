@@ -262,15 +262,16 @@ function getResourcePath() {
   if (!app.isPackaged) {
     return process.cwd();
   }
-  // electron-builder: app files live under resources/app (asar:false)
   const candidates = [
     path.join(process.resourcesPath, "app"),
     process.resourcesPath,
+    path.join(path.dirname(process.execPath), "resources", "app"),
     path.dirname(process.execPath),
   ];
   for (const c of candidates) {
-    if (fs.existsSync(path.join(c, "dist", "server.cjs"))) return c;
-    if (fs.existsSync(path.join(c, "electron-main.cjs"))) return c;
+    if (fs.existsSync(path.join(c, "dist", "server.cjs")) && fs.existsSync(path.join(c, "dist", "index.html"))) {
+      return c;
+    }
   }
   return path.join(process.resourcesPath, "app");
 }
