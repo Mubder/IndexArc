@@ -1052,19 +1052,27 @@ async function startServer() {
   const HOST = process.env.HOST || settings.bind_host || "127.0.0.1";
 
   if (process.env.NODE_ENV !== "production") {
-    // Vite is dev-only — dynamic import so production desktop bundle stays lean
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+    try {
+      const vitePkg = "vite";
+      const { createServer: createViteServer } = await import(/* @vite-ignore */ vitePkg);
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } catch {
+      console.log("[server] Running in production static mode.");
+    }
   } else {
-    const distPath = process.env.INDEXARC_DIST_DIR
+    const distPath = (process.env.INDEXARC_DIST_DIR && fs.existsSync(path.join(process.env.INDEXARC_DIST_DIR, "index.html")))
       ? process.env.INDEXARC_DIST_DIR
-      : path.join(paths.root, "dist");
+      : fs.existsSync(path.join(__dirname, "index.html"))
+      ? __dirname
+      : path.join(__dirname, "..", "dist");
+
+    addLog("SYSTEM", `Serving static web assets from ${distPath}`);
     app.use(express.static(distPath));
-    app.get("*", (req, res, next) => {
+    app.get("*", (req, res) => {
       if (req.path.startsWith("/api")) {
         return res.status(404).json({ error: `API route not found: ${req.path}` });
       }

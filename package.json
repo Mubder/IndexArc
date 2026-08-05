@@ -58,7 +58,6 @@
       "buildResources": "assets"
     },
     "icon": "assets/icon.png",
-    "electronDist": "node_modules/electron/dist",
     "files": [
       "dist/**/*",
       "public/**/*",
