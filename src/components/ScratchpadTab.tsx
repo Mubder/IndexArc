@@ -825,6 +825,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     word: string;
     range: Range | null;
     suggestions: string[];
+    loading: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -833,7 +834,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     return () => window.removeEventListener("click", handleClick);
   }, []);
 
-  const onContextMenu = useCallback(async (e: React.MouseEvent<HTMLDivElement>) => {
+  const onContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const editor = editorRef.current;
     if (!editor) return;
 
@@ -852,26 +853,36 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
     e.preventDefault();
 
-    let suggestions: string[] = [];
-    try {
-      const res = await fetch("/api/spellcheck-suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ word: clean }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        suggestions = data.suggestions || [];
-      }
-    } catch {}
-
+    // 1. Open context menu INSTANTLY at 0ms
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
       word: clean,
       range,
-      suggestions,
+      suggestions: [],
+      loading: true,
     });
+
+    // 2. Fetch suggestions asynchronously in background
+    fetch("/api/spellcheck-suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ word: clean }),
+    })
+      .then((res) => (res.ok ? res.json() : { suggestions: [] }))
+      .then((data) => {
+        setContextMenu((prev) => {
+          if (!prev || prev.word !== clean) return prev;
+          return {
+            ...prev,
+            suggestions: data.suggestions || [],
+            loading: false,
+          };
+        });
+      })
+      .catch(() => {
+        setContextMenu((prev) => (prev ? { ...prev, loading: false } : null));
+      });
   }, []);
 
   const handleApplySuggestion = (replacement: string) => {
@@ -895,6 +906,13 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   };
 
   const handleAddToDictionary = async (word: string) => {
+    // 1. Immediately update local state so red underline vanishes at 0ms!
+    setIgnoredWords((prev) => new Set(prev).add(word).add(word.toLowerCase()));
+    setContextMenu(null);
+    setStatus(`Added "${word}" to dictionary`);
+    requestAnimationFrame(recomputeSpellRects);
+
+    // 2. Persist to server config/user_dict.txt
     try {
       await fetch("/api/spellcheck-add-word", {
         method: "POST",
@@ -902,13 +920,16 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         body: JSON.stringify({ word }),
       });
     } catch {}
-    setIgnoredWords((prev) => new Set(prev).add(word).add(word.toLowerCase()));
-    setContextMenu(null);
-    setStatus(`Added "${word}" to dictionary`);
-    requestAnimationFrame(recomputeSpellRects);
   };
 
   const handleIgnoreWord = async (word: string) => {
+    // 1. Immediately update local state so red underline vanishes at 0ms!
+    setIgnoredWords((prev) => new Set(prev).add(word).add(word.toLowerCase()));
+    setContextMenu(null);
+    setStatus(`Ignored "${word}"`);
+    requestAnimationFrame(recomputeSpellRects);
+
+    // 2. Persist to server config/ignored_words.txt
     try {
       await fetch("/api/spellcheck-ignore-word", {
         method: "POST",
@@ -916,10 +937,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         body: JSON.stringify({ word }),
       });
     } catch {}
-    setIgnoredWords((prev) => new Set(prev).add(word).add(word.toLowerCase()));
-    setContextMenu(null);
-    setStatus(`Ignored "${word}"`);
-    requestAnimationFrame(recomputeSpellRects);
   };
 
   // User toggle for AI ghost predictions (persisted in localStorage)
@@ -1873,7 +1890,12 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
                   <button onClick={() => setContextMenu(null)} className="opacity-60 hover:opacity-100">✕</button>
                 </div>
 
-                {contextMenu.suggestions.length > 0 ? (
+                {contextMenu.loading ? (
+                  <div className="flex items-center gap-2 px-2 py-2 text-muted italic">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-accent-bright" />
+                    <span>Finding suggestions...</span>
+                  </div>
+                ) : contextMenu.suggestions.length > 0 ? (
                   <div className="space-y-0.5 max-h-40 overflow-y-auto">
                     {contextMenu.suggestions.map((s) => (
                       <button

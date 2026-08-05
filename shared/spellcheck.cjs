@@ -1508,6 +1508,17 @@ async function suggestEnglishWord(w, enSpell, limit) {
 async function findMisspelled(words, arSpell, enSpell) {
   if (!Array.isArray(words) || words.length === 0) return [];
 
+  // Instantly exclude custom user dictionary words and ignored words
+  const checkable = words.filter((w) => {
+    if (typeof w !== "string") return false;
+    const clean = sanitizeToken(w).trim();
+    if (!clean || clean.length <= 1) return false;
+    if (USER_CUSTOM_WORDS.has(clean) || USER_CUSTOM_WORDS.has(clean.toLowerCase())) return false;
+    return true;
+  });
+
+  if (checkable.length === 0) return [];
+
   if (isLanguageToolAvailable()) {
     try {
       const bad = [];
