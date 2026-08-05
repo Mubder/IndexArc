@@ -82,8 +82,10 @@ function loadSpellcheckers() {
   const userDictPath = getUserDictPath();
   if (userDictPath && fs.existsSync(userDictPath)) {
     loadUserDictionary(userDictPath, arSpell, enSpell);
-  } else if (userDictPath) {
-    console.log(`[spellcheck] user dictionary not found at ${userDictPath}`);
+  }
+  const ignoredDictPath = userDictPath ? path.join(path.dirname(userDictPath), "ignored_words.txt") : null;
+  if (ignoredDictPath && fs.existsSync(ignoredDictPath)) {
+    loadUserDictionary(ignoredDictPath, arSpell, enSpell);
   }
 
   initLanguageTool().then(() => {
@@ -435,6 +437,13 @@ ipcMain.handle("spellcheck-suggest", async (_e, word) => {
     return await suggestArabicWord(w, arSpell, 8);
   }
   return await suggestEnglishWord(w, enSpell, 6);
+});
+
+ipcMain.handle("add-custom-word", async (_e, word) => {
+  if (typeof word === "string" && word.trim()) {
+    addCustomWord(word.trim(), getUserDictPath(), arSpell, enSpell);
+  }
+  return true;
 });
 
 async function startOllamaIfNeeded() {

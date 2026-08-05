@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openExternal: (url) => ipcRenderer.invoke("open-external", url),
   spellcheckWords: (words) => ipcRenderer.invoke("spellcheck-words", words),
   spellcheckSuggest: (word) => ipcRenderer.invoke("spellcheck-suggest", word),
+  addCustomWord: (word) => ipcRenderer.invoke("add-custom-word", word),
 });
 
 // On right-click inside a text field, select the word under the cursor when

@@ -42,6 +42,7 @@ interface ScratchTab {
   title: string;
   content: string;
   archived?: boolean;
+  archivedAt?: number;
 }
 
 interface Detection {
@@ -691,22 +692,36 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   const checkWords = useCallback(async (words: string[]): Promise<string[]> => {
     if (settings?.enable_live_spellcheck === false) return [];
+
+    const filterWords = words.filter((w) => {
+      if (!w) return false;
+      const clean = sanitizeToken(w).trim();
+      if (!clean || clean.length <= 1) return false;
+      if (ignoredWords.has(clean) || ignoredWords.has(clean.toLowerCase())) return false;
+      return true;
+    });
+
+    if (!filterWords.length) return [];
+
+    let bad: string[] = [];
     if (typeof window !== "undefined" && window.electronAPI?.spellcheckWords) {
-      return window.electronAPI.spellcheckWords(words);
+      bad = await window.electronAPI.spellcheckWords(filterWords);
+    } else {
+      try {
+        const res = await fetch("/api/spellcheck-words", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ words: filterWords }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          bad = Array.isArray(data.bad) ? data.bad : [];
+        }
+      } catch {}
     }
-    try {
-      const res = await fetch("/api/spellcheck-words", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ words }),
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return Array.isArray(data.bad) ? data.bad : [];
-    } catch {
-      return [];
-    }
-  }, [settings?.enable_live_spellcheck]);
+
+    return bad.filter((w) => !ignoredWords.has(w) && !ignoredWords.has(w.toLowerCase()));
+  }, [settings?.enable_live_spellcheck, ignoredWords]);
 
   // Debounced bilingual spellcheck (custom nspell pipeline — Chromium has no
   // Arabic dict and would underline correct Arabic as English misspellings).
@@ -906,35 +921,47 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   };
 
   const handleAddToDictionary = async (word: string) => {
-    // 1. Immediately update local state so red underline vanishes at 0ms!
-    setIgnoredWords((prev) => new Set(prev).add(word).add(word.toLowerCase()));
+    const clean = sanitizeToken(word).trim();
+    if (!clean) return;
+    setIgnoredWords((prev) => new Set(prev).add(clean).add(clean.toLowerCase()));
     setContextMenu(null);
-    setStatus(`Added "${word}" to dictionary`);
+    setStatus(`Added "${clean}" to dictionary`);
     requestAnimationFrame(recomputeSpellRects);
 
-    // 2. Persist to server config/user_dict.txt
+    if (typeof window !== "undefined" && window.electronAPI?.addCustomWord) {
+      try {
+        await window.electronAPI.addCustomWord(clean);
+      } catch {}
+    }
+
     try {
       await fetch("/api/spellcheck-add-word", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ word }),
+        body: JSON.stringify({ word: clean }),
       });
     } catch {}
   };
 
   const handleIgnoreWord = async (word: string) => {
-    // 1. Immediately update local state so red underline vanishes at 0ms!
-    setIgnoredWords((prev) => new Set(prev).add(word).add(word.toLowerCase()));
+    const clean = sanitizeToken(word).trim();
+    if (!clean) return;
+    setIgnoredWords((prev) => new Set(prev).add(clean).add(clean.toLowerCase()));
     setContextMenu(null);
-    setStatus(`Ignored "${word}"`);
+    setStatus(`Ignored "${clean}"`);
     requestAnimationFrame(recomputeSpellRects);
 
-    // 2. Persist to server config/ignored_words.txt
+    if (typeof window !== "undefined" && window.electronAPI?.addCustomWord) {
+      try {
+        await window.electronAPI.addCustomWord(clean);
+      } catch {}
+    }
+
     try {
       await fetch("/api/spellcheck-ignore-word", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ word }),
+        body: JSON.stringify({ word: clean }),
       });
     } catch {}
   };
@@ -1178,8 +1205,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   // Archive soft-hides a tab (content preserved) instead of deleting it.
   const archiveTab = (id: string) => {
+    const target = tabs.find((x) => x.id === id);
+    if (!window.confirm(`Are you sure you want to archive note "${target?.title || "Scratch"}"?`)) return;
     setTabs((prev) => {
-      const archived = prev.map((x) => (x.id === id ? { ...x, archived: true } : x));
+      const archived = prev.map((x) => (x.id === id ? { ...x, archived: true, archivedAt: Date.now() } : x));
       const remaining = archived.filter((x) => !x.archived);
       if (id === activeId) {
         if (remaining.length) {
@@ -1198,7 +1227,9 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, archived: false } : x)));
   };
 
-  const closeTab = (id: string) => {
+  const closeTab = (id: string, skipConfirm: boolean = false) => {
+    const target = tabs.find((x) => x.id === id);
+    if (!skipConfirm && !window.confirm(`Are you sure you want to delete "${target?.title || "Scratch"}"?`)) return;
     if (tabs.length === 1) {
       const fresh = { id: uid(), title: "Scratch 1", content: "" };
       setTabs([fresh]);
@@ -1537,7 +1568,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
                 setDragId(null);
                 setOverId(null);
               }}
-className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 rounded-lg cursor-pointer text-xs font-medium transition-all flex-shrink-0"
+className="group relative flex h-8 w-[150px] items-center gap-1.5 px-3 py-0 rounded-lg cursor-pointer text-xs font-medium transition-all flex-shrink-0"
                style={{
                  background: isActive ? "var(--bg-surface)" : "var(--bg-base)",
                  color: isActive ? "var(--text)" : "var(--text-dim)",
@@ -1662,9 +1693,11 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
 
            <button
              type="button"
-             onClick={() => {
-               setContent(activeId, "");
-             }}
+            onClick={() => {
+              if (window.confirm("Are you sure you want to clear this note's content?")) {
+                setContent(activeId, "");
+              }
+            }}
              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
              style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
            >
@@ -2271,6 +2304,7 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
             <div className="px-4 pb-3 flex flex-col gap-1.5">
               {tabs
                 .filter((x) => x.archived)
+                .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0))
                 .map((tab) => (
                   <div
                     key={tab.id}
@@ -2299,8 +2333,12 @@ className="group relative flex h-8 w-[220px] items-center gap-1.5 px-3 py-0 roun
                     </button>
                     <button
                       type="button"
-                      onClick={() => closeTab(tab.id)}
-                      className="opacity-70 hover:opacity-100 transition-opacity"
+                      onClick={() => {
+                        if (window.confirm(`Are you sure you want to permanently delete "${tab.title || "Untitled"}"?`)) {
+                          closeTab(tab.id, true);
+                        }
+                      }}
+                      className="opacity-70 hover:opacity-100 transition-opacity text-red-400 hover:text-red-300"
                       aria-label={t("scratchpad_delete")}
                       title={t("scratchpad_delete")}
                     >
