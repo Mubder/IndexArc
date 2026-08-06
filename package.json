@@ -96,6 +96,11 @@
       "!**/.env.*"
     ],
     "asar": true,
+    "asarUnpack": [
+      "dist/server.cjs",
+      "public/**/*",
+      "dictionaries/**/*"
+    ],
     "extraMetadata": {
       "main": "electron-main.cjs"
     },

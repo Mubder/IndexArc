@@ -262,24 +262,22 @@ function getResourcePath() {
   if (!app.isPackaged) {
     return process.cwd();
   }
-  const candidates = [
-    path.join(process.resourcesPath, "app"),
-    process.resourcesPath,
-    path.join(path.dirname(process.execPath), "resources", "app"),
-    path.dirname(process.execPath),
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(path.join(c, "dist", "server.cjs")) && fs.existsSync(path.join(c, "dist", "index.html"))) {
-      return c;
-    }
-  }
-  return path.join(process.resourcesPath, "app");
+  const appUnpacked = path.join(process.resourcesPath, "app.asar.unpacked");
+  const appAsar = path.join(process.resourcesPath, "app.asar");
+  const appDir = path.join(process.resourcesPath, "app");
+
+  if (fs.existsSync(appUnpacked)) return appUnpacked;
+  if (fs.existsSync(appDir)) return appDir;
+  if (fs.existsSync(appAsar)) return appAsar;
+  return process.resourcesPath;
 }
 
 function getTrayIcon() {
   const candidates = [
+    path.join(process.resourcesPath, "app.asar.unpacked", "dist", "Logo1.png"),
+    path.join(process.resourcesPath, "app.asar", "dist", "Logo1.png"),
+    path.join(getResourcePath(), "dist", "Logo1.png"),
     path.join(getResourcePath(), "public", "Logo1.png"),
-    path.join(process.resourcesPath, "app", "public", "Logo1.png"),
     path.join(getResourcePath(), "assets", "icon.png"),
     path.join(process.cwd(), "public", "Logo1.png"),
     path.join(process.cwd(), "assets", "icon.png"),
@@ -289,7 +287,6 @@ function getTrayIcon() {
       if (p && fs.existsSync(p)) return nativeImage.createFromPath(p);
     } catch {}
   }
-  // Fallback: a tiny generated icon so the tray never fails to create.
   return nativeImage.createFromDataURL(
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAOklEQVR4nO3TMQEAAAgEoNP+nmZHwAYW0EudCRAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAg8Bv0AgfXC/0W0QAAAABJRU5ErkJggg=="
   );
@@ -525,10 +522,18 @@ function getAppIcon() {
 }
 
 function startBackendServer() {
-  const resourcePath = getResourcePath();
   const portableRoot = getPortableRoot();
-  const serverPath = path.join(resourcePath, "dist", "server.cjs");
-  const distDir = path.join(resourcePath, "dist");
+
+  const candidateServerPaths = [
+    path.join(process.resourcesPath, "app.asar.unpacked", "dist", "server.cjs"),
+    path.join(process.resourcesPath, "app", "dist", "server.cjs"),
+    path.join(process.resourcesPath, "app.asar", "dist", "server.cjs"),
+    path.join(__dirname, "dist", "server.cjs"),
+    path.join(getResourcePath(), "dist", "server.cjs"),
+  ];
+
+  let serverPath = candidateServerPaths.find((p) => fs.existsSync(p)) || candidateServerPaths[0];
+  let distDir = path.dirname(serverPath);
 
   // Ensure portable folders exist next to exe / project
   for (const sub of ["data", "config", "logs", "tmp"]) {
