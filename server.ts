@@ -644,8 +644,7 @@ app.get("/api/folders/sessions", (_req, res) => {
 
 app.get("/api/folders/sessions/active", (_req, res) => {
   const s = store.getActiveScanSession();
-  if (!s) return res.status(404).json({ error: "No active review session" });
-  res.json(s);
+  res.json(s || null);
 });
 
 app.get("/api/folders/sessions/:id", (req, res) => {
