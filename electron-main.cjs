@@ -576,9 +576,7 @@ function pollServerAndLoad(url, window, attempts = 0) {
     .get(`http://127.0.0.1:${PORT}/api/ping`, (res) => {
       if (res.statusCode === 200) {
         window.loadURL(url);
-        if (!app.isPackaged) {
-          window.webContents.openDevTools({ mode: "detach" });
-        }
+        window.webContents.openDevTools({ mode: "detach" });
       } else {
         setTimeout(() => pollServerAndLoad(url, window, attempts + 1), 400);
       }
@@ -733,6 +731,10 @@ function createWindow() {
     menu.append(new MenuItem({ label: "Select All", role: "selectAll" }));
 
     menu.popup({ window: mainWindow });
+  });
+
+  mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    console.log(`[RENDERER ${level}] ${message} (${sourceId}:${line})`);
   });
 
   pollServerAndLoad(`http://127.0.0.1:${PORT}`, mainWindow);
