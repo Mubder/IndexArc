@@ -507,6 +507,23 @@ async function startOllamaIfNeeded() {
   }
 }
 
+function getAppIcon() {
+  const res = getResourcePath();
+  const candidates = [
+    path.join(res, "dist", "Logo1.png"),
+    path.join(res, "public", "Logo1.png"),
+    path.join(res, "assets", "icon.png"),
+    path.join(process.resourcesPath, "app", "dist", "Logo1.png"),
+    path.join(process.resourcesPath, "app", "public", "Logo1.png"),
+  ];
+  for (const p of candidates) {
+    try {
+      if (p && fs.existsSync(p)) return nativeImage.createFromPath(p);
+    } catch {}
+  }
+  return getTrayIcon();
+}
+
 function startBackendServer() {
   const resourcePath = getResourcePath();
   const portableRoot = getPortableRoot();
@@ -530,7 +547,9 @@ function startBackendServer() {
       NODE_ENV: "production",
       INDEXARC_ROOT: portableRoot,
       INDEXARC_DIST_DIR: distDir,
+      ELECTRON_RUN_AS_NODE: "1",
     },
+    execPath: process.execPath,
     silent: false,
   });
 
@@ -571,7 +590,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     title: "IndexArc Vault",
-    icon: path.join(getResourcePath(), "public", "Logo1.png"),
+    icon: getAppIcon(),
     backgroundColor: "#020617",
     webPreferences: {
       nodeIntegration: false,
