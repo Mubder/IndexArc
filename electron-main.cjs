@@ -583,7 +583,9 @@ function pollServerAndLoad(url, window, attempts = 0) {
     .get(`http://127.0.0.1:${PORT}/api/ping`, (res) => {
       if (res.statusCode === 200) {
         window.loadURL(url);
-        window.webContents.openDevTools({ mode: "detach" });
+        if (!app.isPackaged) {
+          window.webContents.openDevTools({ mode: "detach" });
+        }
       } else {
         setTimeout(() => pollServerAndLoad(url, window, attempts + 1), 400);
       }
