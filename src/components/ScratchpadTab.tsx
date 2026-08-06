@@ -505,6 +505,21 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [textColor, setTextColor] = useState<string>("#ffffff");
   const [showHighlightPicker, setShowHighlightPicker] = useState(false);
   const [showTextColorPicker, setShowTextColorPicker] = useState(false);
+  const [ignoredWords, setIgnoredWords] = useState<Set<string>>(new Set());
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    word: string;
+    range: Range | null;
+    suggestions: string[];
+    loading: boolean;
+  } | null>(null);
+  const [enablePredictions, setEnablePredictions] = useState<boolean>(() => {
+    return localStorage.getItem("indexarc_enable_ghost") !== "false";
+  });
+  const [ghostCompletion, setGhostCompletion] = useState<string>("");
+  const [caretPos, setCaretPos] = useState<{ top: number; left: number } | null>(null);
+  const [pastePlain, setPastePlain] = useState(true);
   const misspelledRef = useRef(misspelledWords);
   misspelledRef.current = misspelledWords;
 
@@ -833,16 +848,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     if (msg) setTimeout(() => setStatusMsg(""), 3200);
   }, []);
 
-  const [ignoredWords, setIgnoredWords] = useState<Set<string>>(new Set());
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    word: string;
-    range: Range | null;
-    suggestions: string[];
-    loading: boolean;
-  } | null>(null);
-
   useEffect(() => {
     const handleClick = () => setContextMenu(null);
     window.addEventListener("click", handleClick);
@@ -966,11 +971,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     } catch {}
   };
 
-  // User toggle for AI ghost predictions (persisted in localStorage)
-  const [enablePredictions, setEnablePredictions] = useState<boolean>(() => {
-    return localStorage.getItem("indexarc_enable_ghost") !== "false";
-  });
-
   const togglePredictions = () => {
     setEnablePredictions((prev) => {
       const next = !prev;
@@ -983,8 +983,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     });
   };
 
-  const [ghostCompletion, setGhostCompletion] = useState<string>("");
-  const [caretPos, setCaretPos] = useState<{ top: number; left: number } | null>(null);
   const autocompleteTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const updateCaretPos = useCallback(() => {
@@ -1117,8 +1115,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       return prev.map((x) => (x.id === id ? { ...x, content: html } : x));
     });
   }, [active?.title, analyze, ghostCompletion, scheduleHistoryPush, triggerAutocomplete]);
-
-  const [pastePlain, setPastePlain] = useState(true);
 
   const onPaste = (e: React.ClipboardEvent) => {
     pasteFlag.current[activeId] = true;
