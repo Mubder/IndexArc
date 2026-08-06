@@ -541,29 +541,36 @@ function startBackendServer() {
     if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
   }
 
+  process.env.PORT = String(PORT);
+  process.env.HOST = "127.0.0.1";
+  process.env.NODE_ENV = "production";
+  process.env.INDEXARC_ROOT = portableRoot;
+  process.env.INDEXARC_DIST_DIR = distDir;
+
   console.log(`Portable root: ${portableRoot}`);
   console.log(`Starting vault server: ${serverPath}`);
 
-  serverProcess = fork(serverPath, [], {
-    env: {
-      ...process.env,
-      PORT: String(PORT),
-      HOST: "127.0.0.1",
-      NODE_ENV: "production",
-      INDEXARC_ROOT: portableRoot,
-      INDEXARC_DIST_DIR: distDir,
-      ELECTRON_RUN_AS_NODE: "1",
-    },
-    execPath: process.execPath,
-    silent: false,
-  });
+  try {
+    require(serverPath);
+    console.log("[embedded-server] Express vault server embedded cleanly in main process");
+  } catch (err) {
+    console.error("[embedded-server] Failed to require serverPath directly, attempting fork fallback:", err);
+    serverProcess = fork(serverPath, [], {
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
+      },
+      execPath: process.execPath,
+      silent: false,
+    });
 
-  serverProcess.on("close", (code) => {
-    console.log(`Backend closed: ${code}`);
-  });
-  serverProcess.on("error", (err) => {
-    console.error("Backend failed:", err);
-  });
+    serverProcess.on("close", (code) => {
+      console.log(`Backend closed: ${code}`);
+    });
+    serverProcess.on("error", (err) => {
+      console.error("Backend failed:", err);
+    });
+  }
 }
 
 function pollServerAndLoad(url, window, attempts = 0) {

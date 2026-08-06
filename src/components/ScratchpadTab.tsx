@@ -1564,7 +1564,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
                 setDragId(null);
                 setOverId(null);
               }}
-className="group relative flex h-8 w-[150px] items-center gap-1.5 px-3 py-0 rounded-lg cursor-pointer text-xs font-medium transition-all flex-shrink-0"
+className="group relative flex h-8 max-w-[180px] min-w-[120px] items-center gap-1.5 px-3 py-0 rounded-lg cursor-pointer text-xs font-medium transition-all flex-shrink-0"
                style={{
                  background: isActive ? "var(--bg-surface)" : "var(--bg-base)",
                  color: isActive ? "var(--text)" : "var(--text-dim)",
@@ -1589,7 +1589,7 @@ className="group relative flex h-8 w-[150px] items-center gap-1.5 px-3 py-0 roun
               ) : (
                 <span
                   onDoubleClick={(e) => { e.stopPropagation(); startRename(tab.id); }}
-                  className="truncate flex-1 min-w-0 pr-14"
+                  className="truncate flex-1 min-w-0"
                   title={tab.title}
                 >
                   {tab.title}
