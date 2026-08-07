@@ -571,8 +571,9 @@ export default function App() {
 
   const warmOllama = async () => {
     try {
+      showToast("Loading LLM into memory... · جارٍ التحميل", "info");
       const res = await fetch("/api/ollama/warm", { method: "POST" });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data.error || "Warm failed");
       const parts = [`classify: ${data.model}`];
       if (data.embed_model) parts.push(`embed: ${data.embed_model}`);

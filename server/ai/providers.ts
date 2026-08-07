@@ -7,27 +7,34 @@ import { randomUUID } from "crypto";
 let lastOllamaCheck: { online: boolean; models: string[] } | null = null;
 let lastOllamaCheckTime = 0;
 
-export async function checkOllama(baseUrl: string): Promise<{ online: boolean; models: string[] }> {
+export async function checkOllama(baseUrl: string, force = false): Promise<{ online: boolean; models: string[] }> {
   const now = Date.now();
-  if (lastOllamaCheck && (now - lastOllamaCheckTime < 10000)) {
+  if (!force && lastOllamaCheck && (now - lastOllamaCheckTime < 10000)) {
     return lastOllamaCheck;
   }
-  try {
-    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/tags`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) {
-      lastOllamaCheck = { online: false, models: [] };
-    } else {
-      const data = (await res.json()) as { models?: { name: string }[] };
-      lastOllamaCheck = {
-        online: true,
-        models: (data.models || []).map((m) => m.name),
-      };
-    }
-  } catch {
-    lastOllamaCheck = { online: false, models: [] };
+  const cleanBase = baseUrl ? baseUrl.replace(/\/$/, "") : "http://127.0.0.1:11434";
+  const candidates = [cleanBase];
+  if (cleanBase.includes("localhost")) candidates.push(cleanBase.replace("localhost", "127.0.0.1"));
+  else if (cleanBase.includes("127.0.0.1")) candidates.push(cleanBase.replace("127.0.0.1", "localhost"));
+
+  for (const url of candidates) {
+    try {
+      const res = await fetch(`${url}/api/tags`, {
+        signal: AbortSignal.timeout(4000),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { models?: { name: string }[] };
+        lastOllamaCheck = {
+          online: true,
+          models: (data.models || []).map((m) => m.name),
+        };
+        lastOllamaCheckTime = Date.now();
+        return lastOllamaCheck;
+      }
+    } catch {}
   }
+
+  lastOllamaCheck = { online: false, models: [] };
   lastOllamaCheckTime = Date.now();
   return lastOllamaCheck;
 }

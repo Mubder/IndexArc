@@ -480,17 +480,47 @@ app.post("/api/ollama/ensure", async (_req, res) => {
 
 app.post("/api/ollama/warm", async (_req, res) => {
   const s = store.getSettings();
-  const ollama = await checkOllama(s.ollama_base_url);
-  if (!ollama.online) return res.status(503).json({ error: "Ollama is not running" });
-  const ok = await warmOllamaLlm(s);
+  const ollama = await checkOllama(s.ollama_base_url, true);
+  if (!ollama.online) {
+    return res
+      .status(503)
+      .json({ error: "Ollama is not running. Please launch Ollama on your desktop first." });
+  }
+
+  if (!ollama.models || ollama.models.length === 0) {
+    return res
+      .status(400)
+      .json({ error: "No installed models found in Ollama. Please run 'ollama pull <model>' first." });
+  }
+
+  // Auto-resolve LLM model name if exact match is missing
+  let targetLlm = s.ollama_llm_model;
+  if (!targetLlm || !ollama.models.some((m) => m === targetLlm || m.startsWith(targetLlm) || targetLlm.startsWith(m))) {
+    targetLlm = ollama.models[0];
+  }
+
+  let targetEmbed = s.ollama_embed_model;
+  if (!targetEmbed || !ollama.models.some((m) => m === targetEmbed || m.startsWith(targetEmbed) || targetEmbed.startsWith(m))) {
+    targetEmbed = targetLlm;
+  }
+
+  const settingsToWarm = { ...s, ollama_llm_model: targetLlm, ollama_embed_model: targetEmbed };
+  const ok = await warmOllamaLlm(settingsToWarm);
   const embedOk =
-    s.ollama_embed_model && s.ollama_embed_model !== s.ollama_llm_model
-      ? await warmOllamaEmbed(s)
+    targetEmbed && targetEmbed !== targetLlm
+      ? await warmOllamaEmbed(settingsToWarm)
       : ok;
+
+  if (!ok && !embedOk) {
+    return res.status(500).json({
+      error: `Could not load Ollama model '${targetLlm}'. Check if Ollama service is responsive.`,
+    });
+  }
+
   res.json({
-    status: ok || embedOk ? "success" : "failed",
-    model: s.ollama_llm_model,
-    embed_model: s.ollama_embed_model,
+    status: "success",
+    model: targetLlm,
+    embed_model: targetEmbed,
     embed_loaded: embedOk,
   });
 });
