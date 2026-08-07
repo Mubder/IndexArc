@@ -1490,13 +1490,19 @@ async function suggestEnglishWord(w, enSpell, limit) {
 
   if (isLanguageToolAvailable()) {
     try {
-      const ltSugs = await ltService.suggest(clean, "en-US", max);
+      const ltSugs = await Promise.race([
+        ltService.suggest(clean, "en-US", max),
+        new Promise((resolve) => setTimeout(() => resolve([]), 1200)),
+      ]);
       if (ltSugs && ltSugs.length > 0) results.push(...ltSugs);
     } catch { }
   }
 
   try {
-    const sugs = await cspellEngine.getSuggestions(clean, max, "en");
+    const sugs = await Promise.race([
+      cspellEngine.getSuggestions(clean, max, "en"),
+      new Promise((resolve) => setTimeout(() => resolve([]), 1200)),
+    ]);
     if (sugs && sugs.length > 0) results.push(...sugs);
   } catch { }
 

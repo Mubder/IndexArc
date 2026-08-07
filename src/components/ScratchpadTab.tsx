@@ -883,26 +883,37 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       loading: true,
     });
 
-    // 2. Fetch suggestions asynchronously in background
-    fetch("/api/spellcheck-suggest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ word: clean }),
-    })
-      .then((res) => (res.ok ? res.json() : { suggestions: [] }))
-      .then((data) => {
-        setContextMenu((prev) => {
-          if (!prev || prev.word !== clean) return prev;
-          return {
-            ...prev,
-            suggestions: data.suggestions || [],
-            loading: false,
-          };
-        });
-      })
-      .catch(() => {
-        setContextMenu((prev) => (prev ? { ...prev, loading: false } : null));
+    // 2. Fetch suggestions asynchronously in background via IPC bridge or HTTP
+    const fetchSuggestions = async () => {
+      let list: string[] = [];
+      try {
+        if (typeof window !== "undefined" && window.electronAPI?.spellcheckSuggest) {
+          const res = await window.electronAPI.spellcheckSuggest(clean);
+          list = Array.isArray(res) ? res : (res?.suggestions || []);
+        } else {
+          const res = await fetch("/api/spellcheck-suggest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ word: clean }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            list = Array.isArray(data.suggestions) ? data.suggestions : (Array.isArray(data) ? data : []);
+          }
+        }
+      } catch (_) {}
+
+      setContextMenu((prev) => {
+        if (!prev || prev.word !== clean) return prev;
+        return {
+          ...prev,
+          suggestions: list,
+          loading: false,
+        };
       });
+    };
+
+    fetchSuggestions();
   }, []);
 
   const handleApplySuggestion = (replacement: string) => {
