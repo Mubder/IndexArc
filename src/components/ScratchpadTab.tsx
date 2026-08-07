@@ -940,6 +940,12 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     const clean = sanitizeToken(word).trim();
     if (!clean) return;
     setIgnoredWords((prev) => new Set(prev).add(clean).add(clean.toLowerCase()));
+    setMisspelledWords((prev) => {
+      const next = new Set(prev);
+      next.delete(clean);
+      next.delete(clean.toLowerCase());
+      return next;
+    });
     setContextMenu(null);
     setStatus(`Added "${clean}" to dictionary`);
     requestAnimationFrame(recomputeSpellRects);
@@ -963,6 +969,12 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     const clean = sanitizeToken(word).trim();
     if (!clean) return;
     setIgnoredWords((prev) => new Set(prev).add(clean).add(clean.toLowerCase()));
+    setMisspelledWords((prev) => {
+      const next = new Set(prev);
+      next.delete(clean);
+      next.delete(clean.toLowerCase());
+      return next;
+    });
     setContextMenu(null);
     setStatus(`Ignored "${clean}"`);
     requestAnimationFrame(recomputeSpellRects);
