@@ -1482,16 +1482,19 @@ async function suggestEnglishWord(w, enSpell, limit) {
   if (!clean || clean.length <= 1) return [];
 
   const lower = clean.toLowerCase();
+  const isUpper = clean.length > 1 && clean === clean.toUpperCase();
+  const isTitle = !isUpper && clean[0] === clean[0].toUpperCase();
+
   const results = [];
 
-  if (COMMON_ENGLISH_CONTRACTIONS[lower]) {
-    results.push(COMMON_ENGLISH_CONTRACTIONS[lower]);
+  if (EN_CONTRACTIONS[lower]) {
+    results.push(EN_CONTRACTIONS[lower]);
   }
 
   if (isLanguageToolAvailable()) {
     try {
       const ltSugs = await Promise.race([
-        ltService.suggest(clean, "en-US", max),
+        ltService.suggest(lower, "en-US", max),
         new Promise((resolve) => setTimeout(() => resolve([]), 1200)),
       ]);
       if (ltSugs && ltSugs.length > 0) results.push(...ltSugs);
@@ -1500,7 +1503,7 @@ async function suggestEnglishWord(w, enSpell, limit) {
 
   try {
     const sugs = await Promise.race([
-      cspellEngine.getSuggestions(clean, max, "en"),
+      cspellEngine.getSuggestions(lower, max, "en"),
       new Promise((resolve) => setTimeout(() => resolve([]), 1200)),
     ]);
     if (sugs && sugs.length > 0) results.push(...sugs);
@@ -1508,16 +1511,23 @@ async function suggestEnglishWord(w, enSpell, limit) {
 
   if (enSpell && results.length < max) {
     try {
-      const hSugs = enSpell.suggest(clean) || [];
+      const hSugs = enSpell.suggest(lower) || enSpell.suggest(clean) || [];
       if (hSugs && hSugs.length > 0) results.push(...hSugs);
     } catch { }
   }
 
-  // Deduplicate case-insensitively
+  // Deduplicate case-insensitively and preserve original casing style
   const finalSugs = [];
   const seen = new Set();
-  for (const s of results) {
+  for (let s of results) {
     if (!s || s.toLowerCase() === lower) continue;
+
+    if (isUpper) {
+      s = s.toUpperCase();
+    } else if (isTitle && s.length > 0) {
+      s = s[0].toUpperCase() + s.slice(1);
+    }
+
     const key = s.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
