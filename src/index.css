@@ -93,6 +93,23 @@
 .note-editor::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 .note-editor::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
 
+/* ProseMirror — ensure native selection works, not stuck */
+.ProseMirror, .tiptap, .note-editor .ProseMirror {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+  white-space: pre-wrap !important;
+}
+.ProseMirror:focus { outline: none; }
+.ProseMirror p.is-editor-empty:first-child::before {
+  color: var(--text-muted);
+  opacity: 0.55;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
 .note-editor[data-bidi="ltr"] { direction: ltr; unicode-bidi: plaintext; }
 .note-editor[data-bidi="rtl"] { direction: rtl; unicode-bidi: plaintext; }
 .note-editor[data-bidi="auto"] { unicode-bidi: plaintext; }

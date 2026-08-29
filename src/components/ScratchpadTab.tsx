@@ -8,7 +8,6 @@ import Color from "@tiptap/extension-color";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 import * as Y from "yjs";
-import { IndexeddbPersistence } from "y-indexeddb";
 import {
   Plus,
   X,
@@ -654,8 +653,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const seedHandledRef = useRef<Set<string>>(new Set()); // tracks which tab ids have been seeded
 
   void historyVersion;
-  const historyCanUndo = tiptap ? tiptap.can().undo() : historyIndexRef.current > 0;
-  const historyCanRedo = tiptap ? tiptap.can().redo() : historyIndexRef.current < historyRef.current.length - 1;
+  const historyCanUndo = (() => { try { return tiptap?.can?.().undo?.() ?? historyIndexRef.current > 0; } catch { return historyIndexRef.current > 0; } })();
+  const historyCanRedo = (() => { try { return tiptap?.can?.().redo?.() ?? historyIndexRef.current < historyRef.current.length - 1; } catch { return historyIndexRef.current < historyRef.current.length - 1; } })();
 
   const historyPushImmediate = useCallback(() => {
     const editor = editorRef.current;
@@ -828,22 +827,49 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     !!detection &&
     (detection.families.includes("secret") || detection.families.includes("unknown"));
 
-  // Yjs offline-first — IndexedDB persistence per tab (collaboration-ready)
+  // Yjs offline-first — IndexedDB persistence per tab (collaboration-ready) — dynamic import safe
   const yDocRef = useRef<Y.Doc | null>(null);
   const [yjsReady, setYjsReady] = useState(false);
   useEffect(() => {
-    const doc = new Y.Doc();
-    const persist = new IndexeddbPersistence(`scratchpad-yjs-${activeId}`, doc);
-    yDocRef.current = doc;
-    (persist as any).on?.("synced", () => setYjsReady(true));
-    // Seed from current tab if empty
-    try {
-      const yText = doc.getText("content");
-      if (yText.length === 0 && active?.content) yText.insert(0, active.content.slice(0, 8000));
-      else if (yText.length > 0) setYjsReady(true);
-    } catch {}
-    return () => { try { (persist as any).destroy?.(); doc.destroy(); } catch {} setYjsReady(false); };
+    let cancelled = false;
+    let doc: Y.Doc | null = null;
+    let persist: any = null;
+    (async () => {
+      try {
+        const { IndexeddbPersistence } = await import("y-indexeddb");
+        if (cancelled) return;
+        doc = new Y.Doc();
+        yDocRef.current = doc;
+        try { persist = new (IndexeddbPersistence as any)(`scratchpad-yjs-${activeId}`, doc); } catch {}
+        try { persist?.on?.("synced", () => !cancelled && setYjsReady(true)); } catch {}
+        try {
+          const yText = doc.getText("content");
+          if (yText.length === 0 && active?.content) yText.insert(0, active.content.slice(0, 8000));
+          if (!cancelled) setYjsReady(true);
+        } catch { if (!cancelled) setYjsReady(true); }
+      } catch { if (!cancelled) setYjsReady(false); }
+    })();
+    return () => {
+      cancelled = true;
+      try { persist?.destroy?.(); doc?.destroy(); } catch {}
+      setYjsReady(false);
+    };
   }, [activeId]);
+
+  // Fix sticky selection: ensure ProseMirror is selectable and scroll syncs overlays
+  useEffect(() => {
+    if (!tiptap) return;
+    const dom = tiptap.view.dom as HTMLElement;
+    dom.style.userSelect = "text";
+    (dom.style as any).webkitUserSelect = "text";
+    dom.style.cursor = "text";
+    const onScroll = () => {
+      updateScrollAffordances();
+      recomputeSpellRects();
+    };
+    dom.addEventListener("scroll", onScroll);
+    return () => dom.removeEventListener("scroll", onScroll);
+  }, [tiptap, updateScrollAffordances, recomputeSpellRects]);
 
   // Seed the editor DOM imperatively on mount and on every tab switch (the
   // editor has key={activeId}, so it remounts). After this, React NEVER
@@ -2007,7 +2033,15 @@ className="scratchpad-tab group cursor-pointer"
               top/bottom corners so they stay reachable on very long notes. */}
           <div className="note-editor-frame">
             {tiptap ? (
-              <div onContextMenu={onContextMenu} className="relative w-full">
+              <div
+                onContextMenu={onContextMenu}
+                onKeyDown={onKeyDown}
+                onPaste={(e) => {
+                  pasteFlag.current[activeId] = true;
+                  setTimeout(() => { try { analyze(activeId, tiptap.getHTML()); } catch {} }, 80);
+                }}
+                className="relative w-full"
+              >
                 <EditorContent editor={tiptap} className="note-editor-wrap" />
                 {tiptap && !tiptap.state.selection.empty && (
                   <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 p-1 rounded-full" style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border-glow)", boxShadow: "0 8px 24px rgba(0,0,0,0.22)" }}>
