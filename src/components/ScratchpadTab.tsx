@@ -341,8 +341,7 @@ function detectBaseDir(text: string): "ltr" | "rtl" {
 }
 
 /** Scroll a page container (main) so `el` sits near the top of the viewport. */
-function scrollContainerToReveal(el: HTMLElement) {
-  const main = el.closest("main") as HTMLElement | null;
+function scrollContainerToReveal(el: HTMLElement) {  const main = el.closest("main") as HTMLElement | null;
   if (main) {
     const mainRect = main.getBoundingClientRect();
     const elRect = el.getBoundingClientRect();
@@ -446,6 +445,18 @@ function collectMisspellRects(
     walkText(n as Text);
   }
   return out;
+}
+
+/** Safely read HTML from a TipTap editor. Returns "" if the editor is
+ *  destroyed/null (e.g. during React StrictMode remount or editor
+ *  recreation) — `getHTML()` on a destroyed editor throws internally. */
+function safeGetHTML(editor: any): string {
+  try {
+    if (!editor || editor.isDestroyed) return "";
+    return editor.getHTML();
+  } catch {
+    return "";
+  }
 }
 
 export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ settings }) => {
@@ -553,7 +564,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       },
     },
     onUpdate: ({ editor }) => {
-      const html = editor.getHTML();
+      const html = safeGetHTML(editor);
       const id = activeIdRef.current;
       contentRef.current[id] = html;
       if ((tiptap as any)._debouncedSync) window.clearTimeout((tiptap as any)._debouncedSync);
@@ -583,12 +594,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   });
   // Keep editorRef in sync with TipTap DOM for spellcheck/scroll
   useEffect(() => {
-    if (!tiptap) return;
+    if (!tiptap || tiptap.isDestroyed) return;
     const html = contentRef.current[activeId] ?? tabs.find((x) => x.id === activeId)?.content ?? "";
-    const current = tiptap.getHTML();
-    if (current !== html && html !== "<p></p>") {
-      tiptap.commands.setContent(html || "<p></p>");
-    }
+    const current = safeGetHTML(tiptap);
+    try {
+      if (current !== html && html !== "<p></p>") {
+        tiptap.commands.setContent(html || "<p></p>");
+      }
+    } catch {}
     // BIDI sync
     const plainForDir = (() => {
       const d = document.createElement("div");
@@ -598,9 +611,11 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     })();
     const dir = bidiMode === "auto" ? detectBaseDir(plainForDir) : bidiMode;
     try {
-      tiptap.view.dom.setAttribute("dir", dir);
-      tiptap.view.dom.setAttribute("data-bidi", bidiMode);
-      (editorRef as any).current = tiptap.view.dom as unknown as HTMLDivElement;
+      if (tiptap.view?.dom) {
+        tiptap.view.dom.setAttribute("dir", dir);
+        tiptap.view.dom.setAttribute("data-bidi", bidiMode);
+        (editorRef as any).current = tiptap.view.dom as unknown as HTMLDivElement;
+      }
     } catch {}
   }, [activeId, tiptap, bidiMode, tabs]);
 
@@ -862,7 +877,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   // Fix sticky selection: ensure ProseMirror is selectable and scroll syncs overlays
   useEffect(() => {
-    if (!tiptap) return;
+    if (!tiptap || tiptap.isDestroyed || !tiptap.view?.dom) return;
     const dom = tiptap.view.dom as HTMLElement;
     dom.style.userSelect = "text";
     (dom.style as any).webkitUserSelect = "text";
@@ -2049,7 +2064,7 @@ className="scratchpad-tab group cursor-pointer"
                 onKeyDown={onKeyDown}
                 onPaste={(e) => {
                   pasteFlag.current[activeId] = true;
-                  setTimeout(() => { try { analyze(activeId, tiptap.getHTML()); } catch {} }, 80);
+                  setTimeout(() => { try { analyze(activeId, safeGetHTML(tiptap)); } catch {} }, 80);
                 }}
                 className="relative w-full"
               >
