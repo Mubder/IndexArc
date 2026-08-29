@@ -494,6 +494,56 @@ Rules:
 - Do not invent values not present in the paste.
 - value must be the critical payload (e.g. the ID number, not the whole env line).`;
 
+export function resolveVerbatimValue(llmValue: string, paste: string): string {
+  const raw = String(llmValue ?? "");
+  if (!raw) return raw;
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+  // LLM often strips leading underscore(s) — recover verbatim from paste BEFORE
+  // checking paste.includes(trimmed) because the stripped value is substring of the verbatim one
+  if (!trimmed.startsWith("_")) {
+    // Prefer longest underscore run (handles __secret vs _secret)
+    try {
+      const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const m = paste.match(new RegExp(`_+${escaped}`));
+      if (m && m[0] && paste.includes(m[0])) return m[0];
+    } catch {}
+    const withUnder = "_" + trimmed;
+    if (paste.includes(withUnder)) return withUnder;
+  }
+  // LLM often strips http(s):// or ftp:// — recover full URL from paste
+  if (!/^(?:https?|ftp):\/\//i.test(trimmed)) {
+    const lines = paste.split(/\r?\n/);
+    for (const line of lines) {
+      const urlMatch = line.match(/(?:https?|ftp):\/\/[^\s"']+/i);
+      if (urlMatch && urlMatch[0].includes(trimmed)) return urlMatch[0];
+    }
+  }
+  // Generic leading special-char recovery: LLM may strip @#%*() before _secret
+  // e.g. paste "@_eq9wyu..." LLM returns "_eq9wyu..." — recover verbatim line
+  {
+    const lines = paste.split(/\r?\n/);
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t || t === trimmed) continue;
+      if (t.includes(trimmed) && t.length - trimmed.length <= 5 && t.length < 500) {
+        // prefix is 1-5 non-alphanum chars (like @, #, @_, etc)
+        const prefix = t.slice(0, t.indexOf(trimmed));
+        if (/^[^A-Za-z0-9]*$/.test(prefix) && paste.includes(t)) return t;
+      }
+    }
+  }
+  // LLM normalized underscores to spaces — recover underscore version
+  if (trimmed.includes(" ") && paste.includes(trimmed.replace(/ /g, "_"))) {
+    const underscored = trimmed.replace(/ /g, "_");
+    if (paste.includes(underscored)) return underscored;
+  }
+  // Exact verbatim hit — preserve as LLM gave (includes leading _ or http) if no longer recovery found
+  if (paste.includes(raw)) return raw;
+  if (paste.includes(trimmed)) return trimmed;
+  return trimmed;
+}
+
 function normalizeLlmCandidates(raw: any, paste: string): AnalyzeCandidate[] {
   const list = Array.isArray(raw?.candidates) ? raw.candidates : Array.isArray(raw) ? raw : [];
   if (!list.length) return heuristicAnalyze(paste);
@@ -523,12 +573,28 @@ function normalizeLlmCandidates(raw: any, paste: string): AnalyzeCandidate[] {
       String(c.name || "").trim() ||
       (family === "note" || family === "command" ? String(c.value || "").slice(0, 40) : "");
     const ready = !needs_type && !needs_name;
+    const verbatimValue = resolveVerbatimValue(c.value, paste);
+    // Prefer paste-verbatim raw_fragment as well
+    const rawFragRaw = String(c.raw_fragment || c.value || "").trim();
+    const verbatimRaw =
+      rawFragRaw && paste.includes(rawFragRaw)
+        ? rawFragRaw
+        : paste.includes(verbatimValue)
+          ? (() => {
+              const idx = paste.indexOf(verbatimValue);
+              // grab surrounding line as fragment for context
+              const start = paste.lastIndexOf("\n", idx) + 1;
+              const endIdx = paste.indexOf("\n", idx + verbatimValue.length);
+              const line = paste.slice(start, endIdx === -1 ? undefined : endIdx).trim();
+              return line || verbatimValue;
+            })()
+          : verbatimValue || paste.slice(0, 200);
     return {
       temp_id: randomUUID(),
-      value: String(c.value ?? "").trim(),
+      value: verbatimValue,
       type,
       name,
-      raw_fragment: String(c.raw_fragment || c.value || "").trim() || paste.slice(0, 200),
+      raw_fragment: verbatimRaw || paste.slice(0, 200),
       labels: Array.isArray(c.labels) ? c.labels.map(String) : [],
       type_aliases: Array.isArray(c.type_aliases) ? c.type_aliases.map(String) : [],
       family: needs_type ? "unknown" : family,
@@ -685,6 +751,24 @@ export async function analyzePaste(
       if (parsed) {
         let candidates = normalizeLlmCandidates(parsed, paste).filter((c) => !isGarbageCandidate(c));
         candidates = mergeCandidates(heuristic, candidates);
+        // Enforce verbatim: whatever pasted is what is saved — recover leading _ / http if LLM stripped them
+        candidates = candidates.map((c) => {
+          if (paste.includes(c.value)) return c;
+          const fixed = resolveVerbatimValue(c.value, paste);
+          if (fixed && paste.includes(fixed) && fixed !== c.value) {
+            const fixedRaw = c.raw_fragment && paste.includes(c.raw_fragment) ? c.raw_fragment : fixed;
+            return { ...c, value: fixed, raw_fragment: fixedRaw };
+          }
+          return c;
+        });
+        // Prefer heuristic verbatim values over hallucinated LLM values that aren't in paste
+        const heuristicValues = new Set(heuristic.map((h) => h.value));
+        candidates = candidates.filter((c) => {
+          if (paste.includes(c.value)) return true;
+          // If LLM hallucinated a secret not present verbatim in paste, drop it if heuristic has a verbatim equivalent
+          if ((c.family === "secret" || c.family === "unknown") && heuristicValues.size > 0) return false;
+          return true;
+        });
         if (candidates.length) {
           addLog("ANALYZE", `${active} classify successful → ${candidates.length} candidate(s)`);
           return { candidates, provider_used: usedLabel };

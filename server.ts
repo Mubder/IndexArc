@@ -17,6 +17,9 @@ const {
   addCustomWord,
   loadEnglishEngine,
   initLanguageTool,
+  checkArabicWord,
+  checkEnglishWord,
+  isLatinToken,
 } = spellcheckHelpers as {
   findMisspelled: (words: string[], ar: any, en: any) => Promise<string[]>;
   loadArabicEngine: (dir: string) => any;
@@ -27,6 +30,9 @@ const {
   addCustomWord: (word: string, dictPath: string, ar: any, en: any) => void;
   loadEnglishEngine: (dir: string) => any;
   initLanguageTool: () => Promise<any>;
+  checkArabicWord: (w: string, ar: any) => boolean;
+  checkEnglishWord: (w: string, en: any) => boolean;
+  isLatinToken: (w: string) => boolean;
 };
 import { VaultStore } from "./server/store.js";
 import { addLog, getLogs } from "./server/logs.js";
@@ -637,6 +643,7 @@ app.patch("/api/entries/:id", async (req, res) => {
     notes: req.body?.notes,
     labels: req.body?.labels,
     family: req.body?.family,
+    value: req.body?.value,
   });
   if (!updated) return res.status(404).json({ error: "Not found" });
   res.json(updated);

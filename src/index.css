@@ -19,18 +19,30 @@
   --font-arabic: "ArabicGlyphs", "Rubik", "Calibri", "Segoe UI", "Tahoma", ui-sans-serif, sans-serif;
 }
 
-/* ── Note editor (Scratchpad) dual-language BIDI + spell underlines ── */
+/* ── Note editor (Scratchpad) — industry-level paper ── */
 .note-editor-shell {
   position: relative;
-  /* Shell tracks the visible editor frame only — never full content height */
   isolation: isolate;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 120px),
+              var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 1.1rem;
+  box-shadow: var(--shadow-card), 0 8px 32px rgba(0,0,0,0.22);
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.note-editor-shell:focus-within {
+  border-color: var(--border-glow);
+  box-shadow: var(--shadow-card), 0 12px 40px rgba(37,99,235,0.18);
 }
 
 .note-editor-frame {
   position: relative;
-  /* Lock frame to the scroll viewport so jump FABs never sit mid-document */
-  max-height: min(55vh, 520px);
-  min-height: 200px;
+  max-height: min(58vh, 560px);
+  min-height: 280px;
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(99,102,241,0.06), transparent 38%),
+    radial-gradient(ellipse at 85% 90%, rgba(52,211,153,0.05), transparent 30%);
 }
 
 .note-editor {
@@ -39,42 +51,99 @@
   overflow-wrap: break-word !important;
   word-break: break-word !important;
   font-family: var(--font-sans) !important;
-  font-size: var(--note-font-size, var(--font-size-en, 14px)) !important;
-  line-height: 1.65 !important;
-  letter-spacing: normal !important;
+  font-size: var(--note-font-size, var(--font-size-en, 15px)) !important;
+  line-height: 1.8 !important;
+  letter-spacing: 0.01em !important;
   tab-size: 4;
   --arabic-font-scale: 1;
-  /*
-   * Dual-language BIDI: plaintext gives each paragraph its own base direction
-   * from the first strong character (needed for mixed EN/AR notes).
-   */
   unicode-bidi: plaintext;
   text-align: start;
-  /* Critical: contentEditable must scroll inside the frame, not grow the page */
-  max-height: min(55vh, 520px) !important;
-  min-height: 200px !important;
+  max-height: min(58vh, 560px) !important;
+  min-height: 280px !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
   scrollbar-gutter: stable;
+  padding: 22px 22px 28px !important;
+  outline: none !important;
+  caret-color: var(--accent-bright);
 }
+.note-editor:empty:before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  opacity: 0.55;
+  pointer-events: none;
+  font-style: italic;
+}
+.note-editor p { margin: 0.55em 0; }
+.note-editor h1 { font-size: 1.6em; font-weight: 700; margin: 0.9em 0 0.4em; letter-spacing: -0.02em; }
+.note-editor h2 { font-size: 1.3em; font-weight: 600; margin: 0.8em 0 0.35em; }
+.note-editor blockquote {
+  border-left: 3px solid var(--border-glow);
+  margin: 0.9em 0;
+  padding: 0.5em 0.9em;
+  background: var(--accent-bg);
+  border-radius: 0 0.6rem 0.6rem 0;
+  color: var(--text-dim);
+}
+.note-editor ul { list-style: disc; padding-left: 1.5em; margin: 0.6em 0; }
+.note-editor a { color: var(--accent-bright); text-decoration: underline; text-underline-offset: 3px; }
 
-.note-editor[data-bidi="ltr"] {
-  direction: ltr;
-  unicode-bidi: plaintext;
-}
-.note-editor[data-bidi="rtl"] {
-  direction: rtl;
-  unicode-bidi: plaintext;
-}
-.note-editor[data-bidi="auto"] {
-  unicode-bidi: plaintext;
-}
+/* Elegant custom scrollbar for the paper */
+.note-editor::-webkit-scrollbar { width: 6px; }
+.note-editor::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+.note-editor::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
 
-.note-editor * {
-  font-size: inherit !important;
-  line-height: inherit !important;
-  font-family: inherit !important;
+.note-editor[data-bidi="ltr"] { direction: ltr; unicode-bidi: plaintext; }
+.note-editor[data-bidi="rtl"] { direction: rtl; unicode-bidi: plaintext; }
+.note-editor[data-bidi="auto"] { unicode-bidi: plaintext; }
+.note-editor * { font-family: inherit !important; }
+
+/* — Scratchpad chrome — */
+.scratchpad-toolbar {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--glass-border);
+  border-radius: 9999px;
+  padding: 6px 8px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.18);
 }
+.scratchpad-toolbar-group {
+  display: flex; align-items: center; gap: 2px;
+  background: rgba(255,255,255,0.02);
+  border-radius: 9999px;
+  padding: 2px;
+}
+.scratchpad-tab-strip {
+  background: linear-gradient(180deg, var(--bg-surface), rgba(0,0,0,0.06));
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  padding: 5px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.scratchpad-tab {
+  position: relative;
+  display: flex; align-items: center; gap: 6px;
+  height: 30px; min-width: 130px; max-width: 168px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  font-size: 12px; font-weight: 550; letter-spacing: 0.01em;
+  transition: all 0.18s ease;
+  border: 1px solid transparent;
+  white-space: nowrap; overflow: hidden;
+}
+.scratchpad-tab[data-active="true"] {
+  background: var(--bg-surface-solid);
+  border-color: var(--border-glow);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.18), 0 0 0 1px rgba(99,102,241,0.08);
+  color: var(--text);
+}
+.scratchpad-tab[data-active="false"] {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: transparent;
+}
+.scratchpad-tab[data-active="false"]:hover { background: var(--bg-hover); color: var(--text-dim); }
 
 /*
  * Spell underlines are painted from live Range#getClientRects() so they sit
@@ -383,6 +452,39 @@ body {
 .duplicate-alert .alert-icon { font-size: 16px; }
 .duplicate-alert .alert-dismiss { margin-left: auto; cursor: pointer; opacity: 0.6; }
 .duplicate-alert .alert-dismiss:hover { opacity: 1; }
+
+/* ── Unified app paper system — elegant, industry-level ── */
+.app-surface {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 1.1rem;
+  box-shadow: var(--shadow-card);
+}
+.app-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), transparent 140px), var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+}
+.app-card:hover { border-color: var(--border-hover); box-shadow: var(--shadow-card), 0 8px 24px rgba(0,0,0,0.16); }
+.app-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 0.75rem;
+  color: var(--text);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.app-input:focus { border-color: var(--border-glow); box-shadow: 0 0 0 3px var(--accent-bg); outline: none; }
+.app-pill {
+  border-radius: 9999px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: all 0.18s ease;
+}
+.app-tab-active { background: var(--bg-surface-solid); border-color: var(--border-glow); box-shadow: 0 4px 14px rgba(0,0,0,0.16); color: var(--text); }
+/* Typography refinement */
+h1, h2, h3 { letter-spacing: -0.02em; }
 
 /* ── Utility ── */
 .mono { font-family: var(--font-mono); }

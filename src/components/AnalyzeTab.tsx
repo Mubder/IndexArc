@@ -15,6 +15,7 @@ interface AnalyzeTabProps {
   setSelected: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   onSaveSelected: (parkIncomplete: boolean) => Promise<void>;
   onUpdateCandidate: (tempId: string, patch: Partial<AnalyzeCandidate>) => void;
+  onDiscardCandidate?: (tempId: string) => void;
   settings: Settings | null;
 }
 
@@ -29,13 +30,14 @@ export const AnalyzeTab: React.FC<AnalyzeTabProps> = ({
   setSelected,
   onSaveSelected,
   onUpdateCandidate,
+  onDiscardCandidate,
   settings,
 }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+      <div className="app-card p-5 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("tab_paste")}</h2>
           {providerUsed && (
@@ -47,8 +49,8 @@ export const AnalyzeTab: React.FC<AnalyzeTabProps> = ({
           onChange={(e) => setPaste(e.target.value)}
           rows={5}
           dir="auto"
-          className="w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors resize-none"
-          style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
+          className="app-input w-full px-3 py-2 text-sm resize-none"
+          style={{ fontFamily: "var(--font-mono)" }}
           placeholder={t("paste_placeholder")}
         />
         <button
@@ -96,6 +98,7 @@ export const AnalyzeTab: React.FC<AnalyzeTabProps> = ({
               selected={selected[c.temp_id]}
               onToggleSelect={(id, checked) => setSelected((s) => ({ ...s, [id]: checked }))}
               onUpdate={onUpdateCandidate}
+              onDiscard={onDiscardCandidate}
               settings={settings}
             />
           ))}

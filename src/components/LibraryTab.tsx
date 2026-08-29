@@ -210,7 +210,7 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
       </div>
 
       {showDuplicates && duplicates.length > 0 && (
-        <div className="rounded-xl p-4 space-y-2" style={{ background: "var(--amber-bg)", border: "1px solid rgba(251, 191, 36, 0.2)" }}>
+        <div className="app-card p-4 space-y-2" style={{ background: "var(--amber-bg)", border: "1px solid rgba(251, 191, 36, 0.2)" }}>
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--amber)" }}>
               <AlertTriangle className="w-4 h-4" />
@@ -313,8 +313,7 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
             onChange={(e) => setLibraryQuery(e.target.value)}
             placeholder={t("lib_search_placeholder")}
             dir="auto"
-            className="w-full rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none transition-colors"
-            style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
+            className="app-input w-full pl-9 pr-3 py-2 text-sm"
           />
         </div>
 

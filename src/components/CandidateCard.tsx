@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertCircle, CheckCircle } from "lucide-react";
+import { AlertCircle, CheckCircle, X } from "lucide-react";
 import { AnalyzeCandidate, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
 
@@ -10,6 +10,7 @@ interface CandidateCardProps {
   selected?: boolean;
   onToggleSelect?: (tempId: string, checked: boolean) => void;
   onUpdate: (tempId: string, patch: Partial<AnalyzeCandidate>) => void;
+  onDiscard?: (tempId: string) => void;
   settings: Settings | null;
   /** Optional source badge (used by folder-scan candidates). */
   sourceName?: string;
@@ -26,6 +27,7 @@ export const CandidateCard: React.FC<CandidateCardProps> = ({
   selected,
   onToggleSelect,
   onUpdate,
+  onDiscard,
   settings,
   sourceName,
   showFamilyChips = true,
@@ -52,6 +54,18 @@ export const CandidateCard: React.FC<CandidateCardProps> = ({
           />
         )}
         <span className="uppercase" style={{ color: "var(--text-dim)" }}>{c.family}</span>
+        {onDiscard && (
+          <button
+            type="button"
+            onClick={() => onDiscard(c.temp_id)}
+            className="ml-auto p-1.5 rounded-full hover:bg-[var(--danger-bg)] transition-colors border"
+            style={{ color: "var(--danger)", borderColor: "rgba(248,113,113,0.25)", background: "var(--bg-input)" }}
+            title="Discard — remove this candidate"
+            aria-label="Discard candidate"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
         <span style={{ color: "var(--text-muted)" }}>
           {t("confidence_label")} {Math.round(c.confidence * 100)}%
         </span>

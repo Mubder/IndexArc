@@ -11,6 +11,28 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            tiptap: [
+              "@tiptap/react",
+              "@tiptap/starter-kit",
+              "@tiptap/extension-highlight",
+              "@tiptap/extension-underline",
+              "@tiptap/extension-text-style",
+              "@tiptap/extension-color",
+              "@tiptap/extension-placeholder",
+              "@tiptap/extension-typography",
+              "@tiptap/extension-collaboration",
+            ],
+            yjs: ["yjs", "y-indexeddb", "y-prosemirror"],
+            vendor: ["react", "react-dom", "lucide-react", "motion"],
+          },
+        },
+      },
+      chunkSizeWarningLimit: 600,
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.

@@ -23,8 +23,8 @@ const TELEGRAM_BOT_TOKEN_RE = /^\d{8,12}:[A-Za-z0-9_-]{30,}$/;
 const GITHUB_TOKEN_RE = /^(ghp_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9_]{20,}$/;
 const AWS_KEY_RE = /^AKIA[0-9A-Z]{16}$/;
 const JWT_RE = /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
-/** Expanded high-entropy pattern: alphanumeric + common secret chars (dots, dashes, underscores, slashes) */
-const HIGH_ENTROPY_RE = /^[A-Za-z0-9+\/_\-=\.]{20,}$/;
+/** Expanded high-entropy pattern: allow any non-space for verbatim preservation (special chars @#% etc) */
+const HIGH_ENTROPY_RE = /^[^\s]{20,}$/;
 /** Google OAuth client IDs */
 const GOOGLE_CLIENT_ID_RE =
   /^\d{6,20}-[a-z0-9]+\.apps\.googleusercontent\.com$/i;
@@ -34,8 +34,12 @@ const GOOGLE_API_KEY_RE = /^AIza[0-9A-Za-z\-_]{20,}$/;
 const GOOGLE_OAUTH_SECRET_RE = /^GOCSPX-[A-Za-z0-9_-]{10,}$/;
 /** Google API keys (alternative prefix like AQ.) */
 const GOOGLE_API_KEY_ALT_RE = /^AQ\.[A-Za-z0-9_-]{20,}$/;
-/** Standalone URLs */
-const URL_RE = /^https?:\/\/[^\s]+$/i;
+/** Standalone URLs — include ftp for verbatim http/https/ftp preservation */
+const URL_RE = /^(?:https?|ftp):\/\/[^\s]+$/i;
+/** Strip trailing separators like " |" that users use to delimit pasted URLs — preserve verbatim core, not the delimiter */
+function stripTrailingDelim(s: string): string {
+  return s.replace(/\s*[|;]+\s*$/, "").trim();
+}
 
 /** Decorative section rules / pure punctuation — never extract as notes */
 const NOISE_LINE_RE = /^[\s=\-_*~#|>.·•]{3,}$/;
@@ -561,8 +565,18 @@ export function heuristicAnalyze(paste: string): AnalyzeCandidate[] {
   let envHits = 0;
   for (const line of lines) {
     const t = line.trim();
-    if (!t || t.startsWith("#") || t.startsWith("//") || isNoiseLine(t)) continue;
-    if (ENV_LINE_RE.test(t) || ENV_SPACED_RE.test(t)) envHits++;
+    if (!t || isNoiseLine(t)) continue;
+    const clean = stripTrailingDelim(t);
+    if (t.startsWith("#") || t.startsWith("//")) {
+      const after = clean.replace(/^(#|\/\/)\s*/, "");
+      if (!after || isNoiseLine(after)) continue;
+      if (URL_RE.test(after) || URL_RE.test(clean) || URL_RE.test(t) || looksHighEntropy(after) || classifyStandaloneSecret(after) || classifyStandaloneSecret(t) || classifyStandaloneSecret(clean)) {
+        continue;
+      }
+      continue;
+    }
+    if (URL_RE.test(clean) || URL_RE.test(t)) continue;
+    if (ENV_LINE_RE.test(t) || ENV_SPACED_RE.test(t) || ENV_LINE_RE.test(clean) || ENV_SPACED_RE.test(clean)) envHits++;
   }
 
   if (envHits >= 1 || lines.length > 1) {
@@ -570,17 +584,51 @@ export function heuristicAnalyze(paste: string): AnalyzeCandidate[] {
 
     for (const line of lines) {
       const t = line.trim();
-      if (!t || t.startsWith("#") || t.startsWith("//")) continue;
-      if (isNoiseLine(t)) {
-        matchedLines.add(t); // consume separators so they never become notes
+      if (!t) continue;
+      const clean = stripTrailingDelim(t);
+      if (t.startsWith("#") || t.startsWith("//")) {
+        const after = clean.replace(/^(#|\/\/)\s*/, "");
+        if (after && !isNoiseLine(after) && (URL_RE.test(after) || URL_RE.test(clean) || URL_RE.test(t) || looksHighEntropy(after) || classifyStandaloneSecret(after) || classifyStandaloneSecret(clean) || classifyStandaloneSecret(t))) {
+          // let it fall through
+        } else {
+          if (isNoiseLine(t)) matchedLines.add(t);
+          continue;
+        }
+      }
+      if (isNoiseLine(t) && isNoiseLine(clean)) {
+        matchedLines.add(t);
         continue;
       }
 
-      // command line inside block
-      if (isCommandLine(t)) {
-        pushCommand(candidates, t);
+      if (isCommandLine(t) || isCommandLine(clean)) {
+        pushCommand(candidates, clean || t);
         matchedLines.add(t);
         continue;
+      }
+
+      // Standalone URLs must be preserved verbatim — strip trailing " |" delimiter, keep full scheme
+      const urlCandidate = URL_RE.test(clean) ? clean : URL_RE.test(t) ? t : null;
+      if (urlCandidate) {
+        const secret = classifyStandaloneSecret(urlCandidate);
+        if (secret) {
+          candidates.push(
+            candidateBase({
+              value: urlCandidate,
+              type: secret.type,
+              name: "",
+              raw_fragment: t,
+              labels: [],
+              type_aliases: secret.aliases,
+              family: secret.family,
+              needs_type: secret.needs_type,
+              needs_name: secret.needs_name,
+              confidence: secret.confidence,
+              model_notes: secret.model_notes,
+            })
+          );
+          matchedLines.add(t);
+          continue;
+        }
       }
 
       const m = t.match(ENV_LINE_RE) || t.match(ENV_SPACED_RE);

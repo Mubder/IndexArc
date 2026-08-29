@@ -67,6 +67,11 @@ export interface Settings {
   local_openai_base_url?: string;
   local_openai_api_key?: string;
   local_openai_llm_model?: string;
+  local_openai_embed_model?: string;
+  llm_provider_override?: string;
+  embed_provider_override?: string;
+  bind_host?: string;
+  port?: number;
   ui_language: "en" | "ar";
   font_size_en: number;
   font_size_ar: number;

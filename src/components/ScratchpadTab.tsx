@@ -1,4 +1,14 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import Highlight from "@tiptap/extension-highlight";
+import TiptapUnderline from "@tiptap/extension-underline";
+import { TextStyle } from "@tiptap/extension-text-style";
+import Color from "@tiptap/extension-color";
+import Placeholder from "@tiptap/extension-placeholder";
+import Typography from "@tiptap/extension-typography";
+import * as Y from "yjs";
+import { IndexeddbPersistence } from "y-indexeddb";
 import {
   Plus,
   X,
@@ -55,6 +65,7 @@ interface Busy {
   analyze?: boolean;
   save?: boolean;
   rewrite?: boolean;
+  proofread?: boolean;
 }
 
 type RewriteStyle = "human" | "professional" | "technical" | "concise" | "formal" | "casual";
@@ -109,6 +120,21 @@ function loadTabs(): ScratchTab[] {
     }
   } catch {}
   return [{ id: uid(), title: "Scratch 1", content: "" }];
+}
+// IndexedDB durable cache (idb-keyval) — survives large notes that exceed localStorage quota
+async function loadTabsIDB(): Promise<ScratchTab[] | null> {
+  try {
+    const { get } = await import("idb-keyval");
+    const val = await get(STORAGE_KEY);
+    if (Array.isArray(val) && val.length) return val as ScratchTab[];
+  } catch {}
+  return null;
+}
+async function saveTabsIDB(tabs: ScratchTab[]) {
+  try {
+    const { set } = await import("idb-keyval");
+    await set(STORAGE_KEY, tabs);
+  } catch {}
 }
 
 // --- Caret/selection offset helpers -------------------------------------
@@ -499,6 +525,90 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   // Dual-language spellcheck: red underlines are positioned from live
   // getClientRects() of misspelled ranges (not a cloned HTML overlay).
   const editorRef = useRef<HTMLDivElement>(null);
+  // TipTap industry editor — stable, transactional, BIDI-aware
+  const tiptap = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        dropcursor: { width: 2, color: "var(--accent)" },
+      }),
+      TiptapUnderline,
+      TextStyle,
+      Color,
+      Highlight.configure({ multicolor: true }),
+      Typography,
+      Placeholder.configure({
+        placeholder: () => getTranslation(settings, "scratchpad_placeholder" as any) || "Start writing…",
+        showOnlyWhenEditable: true,
+      }),
+    ],
+    content: "",
+    editorProps: {
+      attributes: {
+        class: "note-editor prose max-w-none",
+        spellcheck: "false",
+      },
+    },
+    onUpdate: ({ editor }) => {
+      const html = editor.getHTML();
+      const id = activeIdRef.current;
+      contentRef.current[id] = html;
+      if ((tiptap as any)._debouncedSync) window.clearTimeout((tiptap as any)._debouncedSync);
+      (tiptap as any)._debouncedSync = window.setTimeout(() => {
+        setTabs((prev) => {
+          const cur = prev.find((x) => x.id === id);
+          if (cur && cur.content === html) return prev;
+          return prev.map((x) => (x.id === id ? { ...x, content: html } : x));
+        });
+      }, 280);
+      const d = document.createElement("div");
+      d.innerHTML = html.replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n</$1>");
+      const t2 = d.textContent || d.innerText || "";
+      const plain = t2.replace(/[\u00A0\u1680\u180E\u2000-\u200B\u202F\u205F\u3000]/g, " ");
+      if (plain.trim() && !titleTouched.current[id]) {
+        const firstLine = plain.split("\n").map((l) => l.trim()).find(Boolean) || "";
+        const auto = firstLine.slice(0, 40) || "Scratch";
+        setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, title: auto } : x)));
+      }
+      // Slash palette trigger — show when line ends with "/"
+      try {
+        const { from } = editor.state.selection;
+        const textBefore = editor.state.doc.textBetween(Math.max(0, from - 2), from, "\n");
+        setSlashOpen(textBefore.endsWith("/"));
+      } catch { setSlashOpen(false); }
+    },
+  });
+  // Keep editorRef in sync with TipTap DOM for spellcheck/scroll
+  useEffect(() => {
+    if (!tiptap) return;
+    const html = contentRef.current[activeId] ?? tabs.find((x) => x.id === activeId)?.content ?? "";
+    const current = tiptap.getHTML();
+    if (current !== html && html !== "<p></p>") {
+      tiptap.commands.setContent(html || "<p></p>");
+    }
+    // BIDI sync
+    const plainForDir = (() => {
+      const d = document.createElement("div");
+      d.innerHTML = (html || "").replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n</$1>");
+      const t = d.textContent || "";
+      return t;
+    })();
+    const dir = bidiMode === "auto" ? detectBaseDir(plainForDir) : bidiMode;
+    try {
+      tiptap.view.dom.setAttribute("dir", dir);
+      tiptap.view.dom.setAttribute("data-bidi", bidiMode);
+      (editorRef as any).current = tiptap.view.dom as unknown as HTMLDivElement;
+    } catch {}
+  }, [activeId, tiptap, bidiMode, tabs]);
+
+  // Spellcheck Web Worker — off main thread tokenization
+  const spellWorkerRef = useRef<Worker | null>(null);
+  useEffect(() => {
+    try {
+      spellWorkerRef.current = new Worker(new URL("../workers/spellcheck.worker.ts", import.meta.url), { type: "module" });
+    } catch {}
+    return () => { try { spellWorkerRef.current?.terminate(); } catch {} };
+  }, []);
   const [misspelledWords, setMisspelledWords] = useState<Set<string>>(new Set());
   const [spellRects, setSpellRects] = useState<SpellRect[]>([]);
   const [highlightColor, setHighlightColor] = useState<string>("#fef08a");
@@ -520,6 +630,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [ghostCompletion, setGhostCompletion] = useState<string>("");
   const [caretPos, setCaretPos] = useState<{ top: number; left: number } | null>(null);
   const [pastePlain, setPastePlain] = useState(true);
+  const [slashOpen, setSlashOpen] = useState(false);
   const misspelledRef = useRef(misspelledWords);
   misspelledRef.current = misspelledWords;
 
@@ -542,11 +653,9 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [historyVersion, setHistoryVersion] = useState(0); // bumps to refresh canUndo/canRedo
   const seedHandledRef = useRef<Set<string>>(new Set()); // tracks which tab ids have been seeded
 
-  // historyVersion exists only to trigger re-renders when the stack mutates so
-  // the disabled state on the Undo/Redo buttons stays correct.
   void historyVersion;
-  const historyCanUndo = historyIndexRef.current > 0;
-  const historyCanRedo = historyIndexRef.current < historyRef.current.length - 1;
+  const historyCanUndo = tiptap ? tiptap.can().undo() : historyIndexRef.current > 0;
+  const historyCanRedo = tiptap ? tiptap.can().redo() : historyIndexRef.current < historyRef.current.length - 1;
 
   const historyPushImmediate = useCallback(() => {
     const editor = editorRef.current;
@@ -596,8 +705,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   }, []);
 
   const historyUndo = useCallback(() => {
+    if (tiptap) { if (tiptap.can().undo()) tiptap.chain().focus().undo().run(); return; }
     if (historyIndexRef.current <= 0) return;
-    // Push any pending edit before stepping back.
     if (historyTimerRef.current !== null) {
       window.clearTimeout(historyTimerRef.current);
       historyTimerRef.current = null;
@@ -607,15 +716,16 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     const entry = historyRef.current[historyIndexRef.current];
     if (entry) historyApply(entry);
     setHistoryVersion((v) => v + 1);
-  }, [historyApply, historyPushImmediate]);
+  }, [historyApply, historyPushImmediate, tiptap]);
 
   const historyRedo = useCallback(() => {
+    if (tiptap) { if (tiptap.can().redo()) tiptap.chain().focus().redo().run(); return; }
     if (historyIndexRef.current >= historyRef.current.length - 1) return;
     historyIndexRef.current += 1;
     const entry = historyRef.current[historyIndexRef.current];
     if (entry) historyApply(entry);
     setHistoryVersion((v) => v + 1);
-  }, [historyApply]);
+  }, [historyApply, tiptap]);
 
   const historyInit = useCallback((html: string) => {
     const editor = editorRef.current;
@@ -639,30 +749,59 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Execute a document.execCommand formatting command against the LIVE
-  // selection. The toolbar's onMouseDown preventDefault keeps focus in the
-  // editor so the selection never collapses â€” no save/restore needed.
+  // Stable formatting — execCommand is deprecated but still the most
+  // interoperable for contentEditable; wrap with try/catch and ensure
+  // selection is preserved via focus retention.
   const execFormat = useCallback((command: string, value?: string) => {
+    // TipTap path — stable, transactional, BIDI-safe
+    if (tiptap) {
+      const chain: any = tiptap.chain().focus();
+      switch (command) {
+        case "bold": chain.toggleBold().run(); break;
+        case "italic": chain.toggleItalic().run(); break;
+        case "underline": chain.toggleUnderline().run(); break;
+        case "hiliteColor": if (value) chain.toggleHighlight({ color: value }).run(); break;
+        case "foreColor": if (value) chain.setColor(value).run(); break;
+        case "removeFormat": chain.unsetAllMarks().clearNodes().run(); break;
+        default: chain.run(); break;
+      }
+      return;
+    }
     const editor = editorRef.current;
     if (!editor) return;
     editor.focus();
-    document.execCommand(command, false, value);
+    try {
+      const ok = document.execCommand(command, false, value);
+      if (!ok && command === "hiliteColor" && value) {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+          const range = sel.getRangeAt(0);
+          const mark = document.createElement("mark");
+          mark.style.background = value;
+          mark.style.color = "#1a1a2e";
+          mark.style.padding = "0.1em 0.2em";
+          mark.style.borderRadius = "0.25em";
+          try { range.surroundContents(mark); } catch { document.execCommand("hiliteColor", false, value); }
+        }
+      }
+    } catch {}
     editor.focus();
-    // Formatting is a discrete edit â€” snapshot immediately.
     historyPushImmediate();
     contentRef.current[activeIdRef.current] = editor.innerHTML;
     setTabs((prev) =>
       prev.map((x) => (x.id === activeIdRef.current ? { ...x, content: editor.innerHTML } : x))
     );
-  }, [historyPushImmediate]);
+  }, [historyPushImmediate, tiptap]);
 
-  const htmlToPlainText = (html: string): string => {
+  // Reuse one detached div for html->text (avoids GC thrash on every keystroke)
+  const htmlToTextDiv = useRef<HTMLDivElement | null>(null);
+  const htmlToPlainText = useCallback((html: string): string => {
     if (!html) return "";
-    const d = document.createElement("div");
+    const d = htmlToTextDiv.current ?? (htmlToTextDiv.current = document.createElement("div"));
     d.innerHTML = html.replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n</$1>");
     const text = d.textContent || d.innerText || "";
     return text.replace(/[\u00A0\u1680\u180E\u2000-\u200B\u202F\u205F\u3000]/g, " ");
-  };
+  }, []);
 
   // Single entry point for any EXTERNAL content write (rephrase, clear,
   // undo-rephrase, etc.). Updates the DOM, the history stack, the ref buffer
@@ -688,6 +827,23 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const hasSecret =
     !!detection &&
     (detection.families.includes("secret") || detection.families.includes("unknown"));
+
+  // Yjs offline-first — IndexedDB persistence per tab (collaboration-ready)
+  const yDocRef = useRef<Y.Doc | null>(null);
+  const [yjsReady, setYjsReady] = useState(false);
+  useEffect(() => {
+    const doc = new Y.Doc();
+    const persist = new IndexeddbPersistence(`scratchpad-yjs-${activeId}`, doc);
+    yDocRef.current = doc;
+    (persist as any).on?.("synced", () => setYjsReady(true));
+    // Seed from current tab if empty
+    try {
+      const yText = doc.getText("content");
+      if (yText.length === 0 && active?.content) yText.insert(0, active.content.slice(0, 8000));
+      else if (yText.length > 0) setYjsReady(true);
+    } catch {}
+    return () => { try { (persist as any).destroy?.(); doc.destroy(); } catch {} setYjsReady(false); };
+  }, [activeId]);
 
   // Seed the editor DOM imperatively on mount and on every tab switch (the
   // editor has key={activeId}, so it remounts). After this, React NEVER
@@ -738,32 +894,49 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     return bad.filter((w) => !ignoredWords.has(w) && !ignoredWords.has(w.toLowerCase()));
   }, [settings?.enable_live_spellcheck, ignoredWords]);
 
-  // Debounced bilingual spellcheck (custom nspell pipeline — Chromium has no
-  // Arabic dict and would underline correct Arabic as English misspellings).
+  // Debounced bilingual spellcheck — throttled + Web Worker off-thread
   useEffect(() => {
     const text = htmlToPlainText(active?.content || "");
-    const words = extractSpellWords(text);
-    if (!words.length) {
-      setMisspelledWords((prev) => (prev.size ? new Set<string>() : prev));
-      return;
-    }
     let cancelled = false;
-    const timer = window.setTimeout(async () => {
+    const runCheck = async (words: string[]) => {
+      if (!words.length) {
+        if (!cancelled) setMisspelledWords((prev) => (prev.size ? new Set<string>() : prev));
+        return;
+      }
+      if (words.length > 120) words.splice(120);
       try {
         const bad = await checkWords(words);
         if (!cancelled) setMisspelledWords(new Set(bad));
-      } catch {
-        /* ignore */
-      }
-    }, 450);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
+      } catch {}
     };
+    if (spellWorkerRef.current) {
+      const id = Date.now() + Math.random();
+      const handler = (e: MessageEvent<{ id: number; words: string[] }>) => {
+        if (e.data.id !== id) return;
+        spellWorkerRef.current?.removeEventListener("message", handler as any);
+        runCheck(e.data.words);
+      };
+      spellWorkerRef.current.addEventListener("message", handler as any);
+      const timer = window.setTimeout(() => {
+        spellWorkerRef.current?.postMessage({ id, text });
+      }, 700);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+        spellWorkerRef.current?.removeEventListener("message", handler as any);
+      };
+    } else {
+      const words = extractSpellWords(text);
+      const timer = window.setTimeout(() => runCheck(words), 700);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+      };
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active?.content, checkWords]);
+  }, [active?.content, checkWords, htmlToPlainText]);
 
-  // Paint underlines from live glyph boxes (BIDI-safe for dual-language notes).
+  // Paint underlines from live glyph boxes — rAF-throttled
   const recomputeSpellRects = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) {
@@ -775,8 +948,12 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       setSpellRects((prev) => (prev.length ? [] : prev));
       return;
     }
-    const next = collectMisspellRects(editor, bad);
-    setSpellRects(next);
+    // throttle to one frame
+    if ((recomputeSpellRects as any)._raf) cancelAnimationFrame((recomputeSpellRects as any)._raf);
+    (recomputeSpellRects as any)._raf = requestAnimationFrame(() => {
+      const next = collectMisspellRects(editor, bad);
+      setSpellRects(next);
+    });
   }, []);
 
   // Load tabs from the server (portable, survives reinstall/update). The
@@ -827,19 +1004,31 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     };
   }, []);
 
-  // Persist to localStorage (fast cache) + the server (durable) on change.
+  // Persist to localStorage (fast cache) + the server (durable) on change — unified, throttled
+  // Hydrate from IndexedDB (survives quota, large notes)
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
+    loadTabsIDB().then((idb) => {
+      if (idb && idb.length && !serverLoaded.current) {
+        const hasContent = idb.some((x) => (x.content || "").trim() || x.title !== "Scratch 1");
+        if (hasContent) {
+          setTabs(idb);
+          setActiveId(idb[0].id);
+        }
+      }
+    });
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs)); } catch {}
+    saveTabsIDB(tabs);
     if (!serverLoaded.current) return;
     const handle = setTimeout(() => {
+      if (typeof navigator !== "undefined" && (navigator as any).scheduling?.isInputPending?.()) return;
       fetch("/api/scratchpad", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tabs }),
-      }).catch(() => {
-        /* best-effort; localStorage still holds the copy */
-      });
-    }, 600);
+      }).catch(() => {});
+    }, 1200);
     return () => clearTimeout(handle);
   }, [tabs]);
 
@@ -887,8 +1076,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     const fetchSuggestions = async () => {
       let list: string[] = [];
       try {
-        if (typeof window !== "undefined" && window.electronAPI?.spellcheckSuggest) {
-          const res = await window.electronAPI.spellcheckSuggest(clean);
+        if (typeof window !== "undefined" && (window as any).electronAPI?.spellcheckSuggest) {
+          const res = await (window as any).electronAPI.spellcheckSuggest(clean);
           list = Array.isArray(res) ? res : (res?.suggestions || []);
         } else {
           const res = await fetch("/api/spellcheck-suggest", {
@@ -950,9 +1139,9 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setStatus(`Added "${clean}" to dictionary`);
     requestAnimationFrame(recomputeSpellRects);
 
-    if (typeof window !== "undefined" && window.electronAPI?.addCustomWord) {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.addCustomWord) {
       try {
-        await window.electronAPI.addCustomWord(clean);
+        await (window as any).electronAPI.addCustomWord(clean);
       } catch {}
     }
 
@@ -979,9 +1168,9 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setStatus(`Ignored "${clean}"`);
     requestAnimationFrame(recomputeSpellRects);
 
-    if (typeof window !== "undefined" && window.electronAPI?.addCustomWord) {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.addCustomWord) {
       try {
-        await window.electronAPI.addCustomWord(clean);
+        await (window as any).electronAPI.addCustomWord(clean);
       } catch {}
     }
 
@@ -1103,6 +1292,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     [setEditorHtml]
   );
 
+  const debouncedTabsSync = useRef<number | null>(null);
   const onEditorInput = useCallback(() => {
     if (ghostCompletion) {
       setGhostCompletion("");
@@ -1112,32 +1302,33 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     if (!editor) return;
     const html = editor.innerHTML;
     const id = activeIdRef.current;
-    // The editor DOM is authoritative — mirror into the ref buffer.
     contentRef.current[id] = html;
-    // Coalesce typing into discrete history entries.
     scheduleHistoryPush();
     if (pasteFlag.current[id]) {
       pasteFlag.current[id] = false;
       analyze(id, html);
     }
-    // Auto-title from the first non-empty line.
     const plainText = htmlToPlainText(html);
     if (plainText.trim() && !titleTouched.current[id]) {
       const firstLine = plainText.split("\n").map((l) => l.trim()).find(Boolean) || "";
       const auto = firstLine.slice(0, 40) || (active?.title || "Scratch");
-      setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, title: auto } : x)));
+      setTabs((prev) => {
+        const cur = prev.find((x) => x.id === id);
+        if (cur && cur.title === auto) return prev;
+        return prev.map((x) => (x.id === id ? { ...x, title: auto } : x));
+      });
     }
-    // Fire live text prediction trigger
     triggerAutocomplete(plainText);
-
-    // Sync content into React state so persistence (localStorage + server)
-    // and the Arabic overlay fire.
-    setTabs((prev) => {
-      const cur = prev.find((x) => x.id === id);
-      if (cur && cur.content === html) return prev;
-      return prev.map((x) => (x.id === id ? { ...x, content: html } : x));
-    });
-  }, [active?.title, analyze, ghostCompletion, scheduleHistoryPush, triggerAutocomplete]);
+    // Debounce React state sync — keeps typing at 60fps, contentRef is source of truth
+    if (debouncedTabsSync.current) window.clearTimeout(debouncedTabsSync.current);
+    debouncedTabsSync.current = window.setTimeout(() => {
+      setTabs((prev) => {
+        const cur = prev.find((x) => x.id === id);
+        if (cur && cur.content === html) return prev;
+        return prev.map((x) => (x.id === id ? { ...x, content: html } : x));
+      });
+    }, 320);
+  }, [active?.title, analyze, ghostCompletion, scheduleHistoryPush, triggerAutocomplete, htmlToPlainText]);
 
   const onPaste = (e: React.ClipboardEvent) => {
     pasteFlag.current[activeId] = true;
@@ -1343,15 +1534,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const handleSaveSecret = async () => {
     const plainText = htmlToPlainText(active?.content || "").trim();
     if (!plainText) return;
-    const stripUrl = (v: string) => v.replace(/^https?:\/\//, "");
     const secretItems: Array<Partial<AnalyzeCandidate> & { notes?: string }> =
       detection?.candidates?.filter((c) => c.family === "secret" || c.family === "unknown") || [];
     const items: Array<Partial<AnalyzeCandidate> & { notes?: string; source_file?: string }> =
       secretItems.length > 0
-        ? secretItems.map((c) => ({ ...c, value: stripUrl(c.value || "") }))
+        ? secretItems.map((c) => ({ ...c, value: c.value || "" }))
         : [
             {
-              value: stripUrl(plainText),
+              value: plainText,
               type: "note",
               name: active?.title || "Scratch",
               raw_fragment: plainText,
@@ -1551,10 +1741,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const noteDir: "auto" | "ltr" | "rtl" = bidiMode === "auto" ? "auto" : bidiMode;
   const detectedDir = detectBaseDir(htmlToPlainText(active?.content || ""));
 
-  return (
+    return (
     <div ref={scratchRootRef} className="space-y-4">
-      {/* Internal tabs */}
-      <div className="flex items-center gap-2 flex-wrap" style={{ background: "var(--bg-surface)", borderRadius: "0.75rem", padding: "4px", border: "1px solid var(--border)" }}>
+      {/* Internal tabs — unified pill strip */}
+      <div className="scratchpad-tab-strip flex items-center gap-1.5 flex-wrap">
         {tabs.filter((t) => !t.archived).map((tab) => {
           const isActive = tab.id === activeId;
           const renaming = renameId === tab.id;
@@ -1587,13 +1777,13 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
                 setDragId(null);
                 setOverId(null);
               }}
-className="group relative flex h-8 w-[150px] items-center gap-1.5 px-3 py-0 rounded-lg cursor-pointer text-xs font-medium transition-all flex-shrink-0"
+className="scratchpad-tab group cursor-pointer"
+               data-active={isActive}
                style={{
-                 background: isActive ? "var(--bg-surface)" : "var(--bg-base)",
-                 color: isActive ? "var(--text)" : "var(--text-dim)",
-                 border: `1px solid ${isActive ? "var(--border-glow)" : "var(--border)"}`,
+                 opacity: dragId === tab.id ? 0.5 : 1,
+                 transform: overId === tab.id ? "translateY(-1px)" : undefined,
                }}
-              title={t("scratchpad_drag_to_reorder")}
+               title={t("scratchpad_drag_to_reorder")}
             >
               {renaming ? (
                 <input
@@ -1752,6 +1942,9 @@ className="group relative flex h-8 w-[150px] items-center gap-1.5 px-3 py-0 roun
               {enablePredictions ? <Zap className="w-3.5 h-3.5" /> : <ZapOff className="w-3.5 h-3.5" />}
               <span>Predictions: <strong>{enablePredictions ? "ON" : "OFF"}</strong></span>
             </button>
+            <span className="px-2 py-1 rounded-full text-[10px] font-mono flex items-center gap-1" style={{ background: yjsReady ? "var(--emerald-bg)" : "var(--bg-input)", color: yjsReady ? "var(--emerald)" : "var(--text-muted)", border: "1px solid var(--border)" }} title="Yjs IndexedDB offline persistence">
+              <span className={`w-1.5 h-1.5 rounded-full ${yjsReady ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"}`} /> Yjs {yjsReady ? "✓" : "…"}
+            </span>
 
            <div className="flex-1" />
 
@@ -1807,41 +2000,39 @@ className="group relative flex h-8 w-[150px] items-center gap-1.5 px-3 py-0 roun
           style={
             {
               ["--note-font-size" as string]: `${noteFontSize}px`,
-              background: "var(--bg-input)",
-              borderRadius: "0.75rem",
             } as React.CSSProperties
           }
         >
           {/* Frame is height-locked to the viewport. Jump FABs pin to its
               top/bottom corners so they stay reachable on very long notes. */}
           <div className="note-editor-frame">
-            <div
-              ref={editorRef}
-              key={activeId}
-              contentEditable
-              suppressContentEditableWarning
-              dir={noteDir}
-              data-bidi={bidiMode}
-              lang={bidiMode === "rtl" ? "ar" : bidiMode === "ltr" ? "en" : undefined}
-              spellCheck={false}
-              onInput={() => {
-                onEditorInput();
-                requestAnimationFrame(() => {
-                  updateScrollAffordances();
-                  recomputeSpellRects();
-                });
-              }}
-              onPaste={onPaste}
-              onKeyDown={onKeyDown}
-              onContextMenu={onContextMenu}
-              onScroll={onEditorScroll}
-              className="note-editor relative z-10 w-full rounded-xl px-3 py-2 focus:outline-none transition-colors"
-              style={{
-                background: "var(--bg-input)",
-                border: "1px solid var(--border-input)",
-                color: "var(--text)",
-              }}
-            />
+            {tiptap ? (
+              <div onContextMenu={onContextMenu} className="relative w-full">
+                <EditorContent editor={tiptap} className="note-editor-wrap" />
+                {tiptap && !tiptap.state.selection.empty && (
+                  <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 p-1 rounded-full" style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border-glow)", boxShadow: "0 8px 24px rgba(0,0,0,0.22)" }}>
+                    <button type="button" onClick={() => tiptap.chain().focus().toggleBold().run()} className="p-1.5 rounded-full" style={{ background: tiptap.isActive("bold") ? "var(--accent)" : "transparent", color: tiptap.isActive("bold") ? "#fff" : "var(--text-muted)" }} title="Bold"><Bold className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => tiptap.chain().focus().toggleItalic().run()} className="p-1.5 rounded-full" style={{ background: tiptap.isActive("italic") ? "var(--accent)" : "transparent", color: tiptap.isActive("italic") ? "#fff" : "var(--text-muted)" }} title="Italic"><Italic className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => tiptap.chain().focus().toggleUnderline().run()} className="p-1.5 rounded-full" style={{ background: tiptap.isActive("underline") ? "var(--accent)" : "transparent", color: tiptap.isActive("underline") ? "#fff" : "var(--text-muted)" }} title="Underline"><Underline className="w-3.5 h-3.5" /></button>
+                    <span className="w-px h-4 mx-1" style={{ background: "var(--border)" }} />
+                    <button type="button" onClick={() => tiptap.chain().focus().toggleHighlight({ color: highlightColor }).run()} className="p-1.5 rounded-full" style={{ color: "var(--text-dim)" }} title="Highlight"><Highlighter className="w-3.5 h-3.5" /></button>
+                  </div>
+                )}
+                {slashOpen && (
+                  <div className="absolute left-3 bottom-14 z-20 flex flex-col gap-1 p-1.5 rounded-xl shadow-2xl" style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border-glow)", minWidth: 180 }}>
+                    <div className="px-2 py-1 text-[10px] font-semibold" style={{ color: "var(--text-muted)" }}>Slash commands — type "/"</div>
+                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleHeading({ level: 1 }).run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs flex items-center gap-2" style={{ color: "var(--text)" }}><span className="font-bold">H1</span> Heading 1</button>
+                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleHeading({ level: 2 }).run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs flex items-center gap-2" style={{ color: "var(--text)" }}><span className="font-bold">H2</span> Heading 2</button>
+                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleBulletList().run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs" style={{ color: "var(--text)" }}>• Bullet list</button>
+                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleBlockquote().run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs" style={{ color: "var(--text)" }}>❝ Quote</button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="note-editor relative z-10 w-full p-4 text-sm" style={{ color: "var(--text-muted)" }}>
+                Loading editor…
+              </div>
+            )}
             {spellRects.length > 0 && (
               <div
                 aria-hidden="true"
@@ -2023,17 +2214,15 @@ className="group relative flex h-8 w-[150px] items-center gap-1.5 px-3 py-0 roun
           </div>
         </div>
 
-         {/* Formatting toolbar */}
+        {/* Formatting toolbar — unified pill */}
         <div
           ref={toolbarRef}
           onMouseDown={(e) => e.preventDefault()}
-          className="flex items-center gap-0.5 flex-wrap"
-          style={{ borderTop: "1px solid var(--border)", paddingTop: "8px" }}
+          className="scratchpad-toolbar"
         >
-          {/* Dual-language BIDI base direction */}
+          {/* Dual-language BIDI */}
           <div
-            className="flex items-center rounded-lg overflow-hidden me-1"
-            style={{ border: "1px solid var(--border)" }}
+            className="scratchpad-toolbar-group"
             title={t("scratchpad_bidi_hint")}
           >
             {(

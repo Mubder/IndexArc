@@ -155,6 +155,7 @@ export async function clarifyEntry(
     notes?: string;
     labels?: string[];
     family?: VaultEntry["family"];
+    value?: string;
   }
 ): Promise<VaultEntry | null> {
   const existing = store.getEntry(id);
@@ -185,7 +186,11 @@ export async function clarifyEntry(
     type.toLowerCase(),
   ]);
 
+  // Preserve value verbatim — whatever pasted is what is saved (including leading _ , http, special chars)
+  const verbatimValue = patch.value !== undefined ? String(patch.value) : existing.value;
+
   const updated = store.updateEntry(id, {
+    value: verbatimValue,
     type: type || existing.type,
     name: name || existing.name,
     notes: patch.notes ?? existing.notes,

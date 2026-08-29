@@ -17,6 +17,7 @@ interface HomeTabProps {
   setSelected: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   onSaveSelected: (parkIncomplete: boolean) => Promise<void>;
   onUpdateCandidate: (tempId: string, patch: Partial<AnalyzeCandidate>) => void;
+  onDiscardCandidate?: (tempId: string) => void;
   attention: VaultEntry[];
   entries: VaultEntry[];
   onOpenClarify: (entry: VaultEntry) => void;
@@ -36,6 +37,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   setSelected,
   onSaveSelected,
   onUpdateCandidate,
+  onDiscardCandidate,
   attention,
   entries,
   onOpenClarify,
@@ -51,7 +53,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", backdropFilter: "blur(10px)" }}>
+      <div className="app-card p-5 space-y-3" style={{ backdropFilter: "blur(10px)" }}>
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--text)" }}>
             <Plus className="w-4 h-4" style={{ color: "var(--cyan)" }} /> {t("quick_paste")}
@@ -65,8 +67,8 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           onChange={(e) => setPaste(e.target.value)}
           rows={4}
           placeholder={t("paste_placeholder")}
-          className="w-full rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors resize-none"
-          style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
+          className="app-input w-full px-3 py-2 text-sm resize-none"
+          style={{ fontFamily: "var(--font-mono)" }}
         />
         <div className="flex items-center gap-2">
           <button
@@ -92,7 +94,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       </div>
 
        {candidates.length > 0 && (
-         <div className="rounded-xl p-4 space-y-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+          <div className="app-card p-4 space-y-3">
            <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
               {t("candidates_title")} ({candidates.length})
@@ -125,14 +127,15 @@ export const HomeTab: React.FC<HomeTabProps> = ({
               selected={selected[c.temp_id]}
               onToggleSelect={(id, checked) => setSelected((s) => ({ ...s, [id]: checked }))}
               onUpdate={onUpdateCandidate}
+              onDiscard={onDiscardCandidate}
               settings={settings}
             />
           ))}
         </div>
       )}
 
-       {attention.length > 0 && (
-         <div className="rounded-xl p-4 space-y-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+        {attention.length > 0 && (
+          <div className="app-card p-4 space-y-3">
            <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--amber)" }}>
             <Inbox className="w-4 h-4" />
             {t("attention_title")} ({attention.length})
@@ -154,8 +157,8 @@ export const HomeTab: React.FC<HomeTabProps> = ({
         </div>
       )}
 
-       <div className="rounded-xl p-4 space-y-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
-         <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("recent_saved")}</h2>
+        <div className="app-card p-4 space-y-3">
+          <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("recent_saved")}</h2>
         <div className="space-y-2">
           {entries
             .filter((e) => e.status === "saved")

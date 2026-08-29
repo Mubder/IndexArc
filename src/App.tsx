@@ -32,9 +32,9 @@ import {
 import { readJson } from "./utils";
 import { getTranslation } from "./utils/i18n";
 
-// Subcomponents
+// Subcomponents — Scratchpad is TipTap-heavy, lazy-split to keep main bundle ~220kB
 import { HomeTab } from "./components/HomeTab";
-import { ScratchpadTab } from "./components/ScratchpadTab";
+const ScratchpadTab = React.lazy(() => import("./components/ScratchpadTab"));
 import { AnalyzeTab } from "./components/AnalyzeTab";
 import { FoldersTab } from "./components/FoldersTab";
 import { AskTab } from "./components/AskTab";
@@ -224,7 +224,7 @@ export default function App() {
     setSettings((prev) => {
       if (!prev) return prev;
       const current = prev.ui_language || "en";
-      const next = current === "en" ? "ar" : "en";
+      const next = (current === "en" ? "ar" : "en") as "ar" | "en";
       const updated = { ...prev, ui_language: next };
       // Persist immediately so the background poll doesn't revert the change
       settingsDirtyRef.current = true;
@@ -421,6 +421,15 @@ export default function App() {
         return next;
       })
     );
+  };
+
+  const discardCandidate = (tempId: string) => {
+    setCandidates((prev) => prev.filter((c) => c.temp_id !== tempId));
+    setSelected((prev) => {
+      const n = { ...prev };
+      delete n[tempId];
+      return n;
+    });
   };
 
   const handleSaveSelected = async (parkIncomplete: boolean) => {
@@ -801,35 +810,35 @@ return (
               Vault
               <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
             </div>
-            {nav.map((n) => (
+            {nav.map((n) => {
+              const isActive = tab === n.id;
+              return (
               <button
                 key={n.id}
                 type="button"
                 onClick={() => setTab(n.id)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all relative"
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm font-medium transition-all relative"
                 style={{
-                  color: tab === n.id ? "var(--accent-bright)" : "var(--text-dim)",
-                  background: tab === n.id ? "var(--bg-active)" : "transparent",
+                  borderRadius: "9999px",
+                  color: isActive ? "var(--text)" : "var(--text-dim)",
+                  background: isActive ? "var(--bg-surface-solid)" : "transparent",
+                  border: `1px solid ${isActive ? "var(--border-glow)" : "transparent"}`,
+                  boxShadow: isActive ? "0 4px 14px rgba(0,0,0,0.12)" : "none",
                 }}
               >
-                {tab === n.id && (
-                  <div
-                    className="absolute left-0 top-1/4 bottom-1/4 w-0.5 rounded-r"
-                    style={{ background: "var(--accent)", boxShadow: "0 0 6px var(--accent-glow)" }}
-                  />
-                )}
-                <span className="opacity-50">{n.icon}</span>
+                <span style={{ opacity: isActive ? 1 : 0.6 }}>{n.icon}</span>
                 <span className="flex-1 text-left truncate">{n.label}</span>
                 {n.badge ? (
                   <span
                     className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
-                    style={{ background: "var(--amber-bg)", color: "var(--amber)" }}
+                    style={{ background: isActive ? "var(--accent)" : "var(--amber-bg)", color: isActive ? "#fff" : "var(--amber)" }}
                   >
                     {n.badge}
                   </span>
                 ) : null}
               </button>
-            ))}
+              );
+            })}
 
             <div
               className="text-[11px] font-semibold uppercase tracking-wider px-3 pt-4 pb-2 flex items-center gap-2"
@@ -1116,6 +1125,7 @@ return (
                 setSelected={setSelected}
                 onSaveSelected={handleSaveSelected}
                 onUpdateCandidate={updateCandidate}
+                onDiscardCandidate={discardCandidate}
                 attention={attention}
                 entries={entries}
                 onOpenClarify={openClarify}
@@ -1136,12 +1146,15 @@ return (
                 setSelected={setSelected}
                 onSaveSelected={handleSaveSelected}
                 onUpdateCandidate={updateCandidate}
+                onDiscardCandidate={discardCandidate}
                 settings={settings}
               />
             )}
 
             {tab === "scratchpad" && (
-              <ScratchpadTab settings={settings} />
+              <React.Suspense fallback={<div className="p-6 text-sm" style={{color:"var(--text-muted)"}}>Loading scratchpad…</div>}>
+                <ScratchpadTab settings={settings} />
+              </React.Suspense>
             )}
 
             {tab === "folders" && (

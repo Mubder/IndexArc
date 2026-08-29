@@ -11,6 +11,8 @@ interface EntryCardProps {
   onOpenDetail?: (entry: VaultEntry) => void;
   settings: Settings | null;
   viewMode?: "list" | "grid";
+  score?: number;
+  reason?: string;
 }
 
 export const EntryCard: React.FC<EntryCardProps> = ({
@@ -20,6 +22,8 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   onOpenDetail,
   settings,
   viewMode = "list",
+  score,
+  reason,
 }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
