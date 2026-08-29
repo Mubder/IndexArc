@@ -524,6 +524,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   // Dual-language spellcheck: red underlines are positioned from live
   // getClientRects() of misspelled ranges (not a cloned HTML overlay).
   const editorRef = useRef<HTMLDivElement>(null);
+  // Refs to spell/scroll helpers (declared later) so the scroll listener can
+  // call the latest version without creating a TDZ crash in a deps array.
+  const updateScrollAffordancesRef = useRef<() => void>(() => {});
+  const recomputeSpellRectsRef = useRef<() => void>(() => {});
   // TipTap industry editor — stable, transactional, BIDI-aware
   const tiptap = useEditor({
     extensions: [
@@ -864,12 +868,17 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     (dom.style as any).webkitUserSelect = "text";
     dom.style.cursor = "text";
     const onScroll = () => {
-      updateScrollAffordances();
-      recomputeSpellRects();
+      // These are declared later in the component; call through refs to avoid
+      // stale closures without creating a TDZ crash in the deps array.
+      (onScroll as any)._up?.();
+      (onScroll as any)._rec?.();
     };
+    (onScroll as any)._up = updateScrollAffordancesRef.current;
+    (onScroll as any)._rec = recomputeSpellRectsRef.current;
     dom.addEventListener("scroll", onScroll);
     return () => dom.removeEventListener("scroll", onScroll);
-  }, [tiptap, updateScrollAffordances, recomputeSpellRects]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tiptap]);
 
   // Seed the editor DOM imperatively on mount and on every tab switch (the
   // editor has key={activeId}, so it remounts). After this, React NEVER
@@ -981,6 +990,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       setSpellRects(next);
     });
   }, []);
+  recomputeSpellRectsRef.current = recomputeSpellRects;
 
   // Load tabs from the server (portable, survives reinstall/update). The
   // server copy is authoritative when it has content; localStorage is a cache.
@@ -1714,6 +1724,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setCanScrollUp(overflow && top > 2);
     setCanScrollDown(overflow && top < maxScroll - 2);
   }, []);
+  updateScrollAffordancesRef.current = updateScrollAffordances;
 
   const scrollEditor = useCallback(
     (direction: "top" | "bottom") => {
