@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { HelpCircle, KeyRound, LayoutGrid, List, RefreshCw, Search, StickyNote, Terminal, Inbox, Copy, AlertTriangle } from "lucide-react";
+import { HelpCircle, KeyRound, LayoutGrid, List, RefreshCw, Search, StickyNote, Terminal, Inbox, Copy, AlertTriangle, Eye, EyeOff, Maximize2, Check, Edit3, Trash2 } from "lucide-react";
 import { LibraryFilter, VaultEntry, Settings } from "../types";
 import { EntryCard } from "./EntryCard";
 import { NoteDetailModal } from "./NoteDetailModal";
@@ -338,35 +338,74 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
               background: viewMode === "list" ? "var(--bg-surface)" : "transparent",
               color: viewMode === "list" ? "var(--accent-bright)" : "var(--text-muted)",
             }}
-            title="List View"
+            title="Table List View"
           >
             <List className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      <div className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 gap-3" : "space-y-2"}>
-        {libraryFiltered.map((e) => (
-          <EntryCard
-            key={e.id}
-            entry={e}
-            onOpenClarify={onOpenClarify}
-            onDeleteEntry={onDeleteEntry}
-            onOpenDetail={(entry) => setActiveDetailEntry(entry)}
-            viewMode={viewMode}
-            settings={settings}
-          />
-        ))}
-        {!entries.length && (
-          <p className="text-sm italic col-span-full" style={{ color: "var(--text-muted)" }}>{t("lib_empty")}</p>
-        )}
-        {!!entries.length && !libraryFiltered.length && (
-          <p className="text-sm italic col-span-full" style={{ color: "var(--text-muted)" }}>
-            {t("lib_no_match")}
-            {libraryQuery.trim() ? ` "${libraryQuery.trim()}"` : ""}.
+      {viewMode === "grid" ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {libraryFiltered.map((e) => (
+            <EntryCard
+              key={e.id}
+              entry={e}
+              onOpenClarify={onOpenClarify}
+              onDeleteEntry={onDeleteEntry}
+              onOpenDetail={(entry) => setActiveDetailEntry(entry)}
+              viewMode="grid"
+              settings={settings}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="app-table-container">
+          <table className="app-table">
+            <thead>
+              <tr>
+                <th>Entry</th>
+                <th>Category</th>
+                <th>Content / Value</th>
+                <th className="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {libraryFiltered.map((e) => (
+                <LibraryTableRow
+                  key={e.id}
+                  entry={e}
+                  onOpenClarify={onOpenClarify}
+                  onDeleteEntry={onDeleteEntry}
+                  onOpenDetail={(entry) => setActiveDetailEntry(entry)}
+                  settings={settings}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!entries.length && (
+        <div className="app-card p-10 flex flex-col items-center justify-center text-center space-y-3">
+          <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}>
+            <KeyRound className="w-6 h-6" />
+          </div>
+          <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("lib_empty") || "Vault is Empty"}</h3>
+          <p className="text-xs max-w-sm" style={{ color: "var(--text-muted)" }}>
+            Paste tokens, API keys, or notes in the Scratchpad or Home tab to automatically detect and secure them.
           </p>
-        )}
-      </div>
+        </div>
+      )}
+
+      {!!entries.length && !libraryFiltered.length && (
+        <div className="app-card p-8 flex flex-col items-center justify-center text-center space-y-2">
+          <Search className="w-8 h-8 opacity-40" style={{ color: "var(--text-muted)" }} />
+          <p className="text-sm font-medium" style={{ color: "var(--text-dim)" }}>
+            {t("lib_no_match") || "No entries found"} {libraryQuery.trim() ? `for "${libraryQuery.trim()}"` : ""}
+          </p>
+        </div>
+      )}
 
       <NoteDetailModal
         entry={activeDetailEntry}
@@ -376,5 +415,146 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
         settings={settings}
       />
     </div>
+  );
+};
+
+const LibraryTableRow: React.FC<{
+  entry: VaultEntry;
+  onOpenClarify: (entry: VaultEntry) => void;
+  onDeleteEntry: (id: string) => Promise<void>;
+  onOpenDetail?: (entry: VaultEntry) => void;
+  settings: Settings | null;
+}> = ({ entry, onOpenClarify, onDeleteEntry, onOpenDetail, settings }) => {
+  const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
+  const [revealed, setRevealed] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const isScratchpad = entry.source_file === "scratchpad";
+  const isNote = entry.family === "note";
+  const isSecret = entry.family === "secret";
+  const isCmd = entry.family === "command";
+  const noteBody = entry.notes && entry.notes.trim() ? entry.notes : entry.value;
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(isNote ? noteBody : entry.value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <tr
+      onClick={() => isNote && onOpenDetail?.(entry)}
+      className="app-table-row group"
+    >
+      <td className="w-1/4">
+        <div className="flex items-center gap-2 min-w-0">
+          <div
+            className="p-1.5 rounded-lg shrink-0"
+            style={{
+              background: isNote ? "var(--accent-bg)" : isSecret ? "var(--amber-bg)" : isCmd ? "rgba(34, 211, 238, 0.1)" : "var(--bg-input)",
+              color: isNote ? "var(--accent-bright)" : isSecret ? "var(--amber)" : isCmd ? "var(--cyan)" : "var(--text-muted)",
+            }}
+          >
+            {isNote && <StickyNote className="w-3.5 h-3.5" />}
+            {isSecret && <KeyRound className="w-3.5 h-3.5" />}
+            {isCmd && <Terminal className="w-3.5 h-3.5" />}
+            {!isNote && !isSecret && !isCmd && <HelpCircle className="w-3.5 h-3.5" />}
+          </div>
+          <div className="min-w-0">
+            <div className="font-semibold text-xs truncate" style={{ color: "var(--text)" }}>{entry.name}</div>
+            <div className="text-[10px] uppercase font-mono" style={{ color: "var(--text-muted)" }}>{entry.type}</div>
+          </div>
+        </div>
+      </td>
+      <td className="w-1/6">
+        <span
+          className="text-[10px] px-2 py-0.5 rounded-full font-medium"
+          style={{
+            background: isNote ? "var(--accent-bg)" : isSecret ? "var(--amber-bg)" : isCmd ? "rgba(34, 211, 238, 0.1)" : "var(--bg-input)",
+            color: isNote ? "var(--accent-bright)" : isSecret ? "var(--amber)" : isCmd ? "var(--cyan)" : "var(--text-muted)",
+          }}
+        >
+          {entry.family}
+        </span>
+      </td>
+      <td className="w-1/2">
+        {isNote ? (
+          <div className="text-xs truncate max-w-md" style={{ color: "var(--text-dim)" }}>
+            {noteBody.slice(0, 100)}
+          </div>
+        ) : isSecret && !revealed ? (
+          <div
+            className="text-xs font-mono tracking-widest cursor-pointer select-none"
+            onClick={(e) => { e.stopPropagation(); setRevealed(true); }}
+            style={{ color: "var(--text-muted)" }}
+            title="Click to reveal"
+          >
+            ••••••••••••••••••••••••
+          </div>
+        ) : (
+          <div className="text-xs font-mono truncate max-w-md" style={{ color: isSecret ? "var(--amber)" : isCmd ? "var(--cyan)" : "var(--emerald)" }}>
+            {entry.value.slice(0, 80)}
+          </div>
+        )}
+      </td>
+      <td className="w-24 text-right">
+        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+          {isSecret && (
+            <button
+              type="button"
+              onClick={() => setRevealed(!revealed)}
+              className="p-1 rounded hover:bg-[var(--bg-hover)]"
+              style={{ color: revealed ? "var(--amber)" : "var(--text-muted)" }}
+              title={revealed ? "Hide" : "Reveal"}
+            >
+              {revealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            </button>
+          )}
+          {isNote && onOpenDetail && (
+            <button
+              type="button"
+              onClick={() => onOpenDetail(entry)}
+              className="p-1 rounded hover:bg-[var(--bg-hover)]"
+              style={{ color: "var(--accent-bright)" }}
+              title="Open Full Note"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="p-1 rounded hover:bg-[var(--bg-hover)]"
+            style={{ color: copied ? "var(--emerald)" : "var(--text-muted)" }}
+            title={copied ? "Copied" : "Copy"}
+          >
+            {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+          {!isScratchpad && (
+            <button
+              type="button"
+              onClick={() => onOpenClarify(entry)}
+              className="p-1 rounded hover:bg-[var(--bg-hover)]"
+              style={{ color: "var(--cyan)" }}
+              title={t("identify")}
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {!isScratchpad && (
+            <button
+              type="button"
+              onClick={() => onDeleteEntry(entry.id)}
+              className="p-1 rounded hover:bg-[var(--bg-hover)]"
+              style={{ color: "var(--danger)" }}
+              title={t("hide")}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
   );
 };

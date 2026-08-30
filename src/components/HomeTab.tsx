@@ -93,6 +93,21 @@ export const HomeTab: React.FC<HomeTabProps> = ({
         </div>
       </div>
 
+      {analyzing && (
+        <div className="app-card p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 animate-spin text-accent-bright" />
+            <span className="text-xs font-semibold" style={{ color: "var(--accent-bright)" }}>
+              {t("analyzing") || "Analyzing text with heuristics & AI..."}
+            </span>
+          </div>
+          <div className="space-y-2">
+            <div className="skeleton h-12 w-full rounded-xl" />
+            <div className="skeleton h-12 w-full rounded-xl" />
+          </div>
+        </div>
+      )}
+
        {candidates.length > 0 && (
           <div className="app-card p-4 space-y-3">
            <div className="flex flex-wrap items-center justify-between gap-2">

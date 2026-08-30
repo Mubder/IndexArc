@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Highlight from "@tiptap/extension-highlight";
@@ -35,49 +35,78 @@ import {
   ArrowDown,
   AlignLeft,
   AlignRight,
+  AlignJustify,
   Languages,
   BookPlus,
   EyeOff,
   Zap,
   ZapOff,
+  History,
+  Clock,
+  RotateCcw,
 } from "lucide-react";
-import { AnalyzeCandidate, Settings } from "../types";
+import {
+  VaultEntry,
+  Settings,
+  RewriteStyle,
+  Detection,
+  AnalyzeCandidate,
+  Busy,
+  ScratchTab,
+  NoteBidiMode,
+} from "../types";
 import { getTranslation } from "../utils/i18n";
+import { isArabicText } from "../utils";
 
-type NoteBidiMode = "auto" | "ltr" | "rtl";
-
-interface ScratchTab {
+export interface NoteRevision {
   id: string;
+  tabId: string;
+  timestamp: number;
   title: string;
   content: string;
-  archived?: boolean;
-  archivedAt?: number;
+  charCount: number;
+  wordCount: number;
+  reason?: string;
 }
 
-interface Detection {
-  families: string[];
-  candidates: AnalyzeCandidate[];
-  provider: string;
+const STORAGE_KEY = "indexarc_scratchpad_tabs";
+const REVISIONS_KEY_PREFIX = "indexarc_note_revisions_";
+
+export async function getNoteRevisions(tabId: string): Promise<NoteRevision[]> {
+  try {
+    const { get } = await import("idb-keyval");
+    const val = await get(`${REVISIONS_KEY_PREFIX}${tabId}`);
+    if (Array.isArray(val)) return val;
+  } catch {}
+  try {
+    const raw = localStorage.getItem(`${REVISIONS_KEY_PREFIX}${tabId}`);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [];
 }
 
-interface Busy {
-  analyze?: boolean;
-  save?: boolean;
-  rewrite?: boolean;
-  proofread?: boolean;
+export async function saveNoteRevision(rev: NoteRevision, maxKeep = 30): Promise<void> {
+  try {
+    const existing = await getNoteRevisions(rev.tabId);
+    if (existing.length > 0 && existing[0].content === rev.content) return;
+    const updated = [rev, ...existing.filter((x) => x.content !== rev.content)].slice(0, maxKeep);
+    try {
+      const { set } = await import("idb-keyval");
+      await set(`${REVISIONS_KEY_PREFIX}${rev.tabId}`, updated);
+    } catch {}
+    try {
+      localStorage.setItem(`${REVISIONS_KEY_PREFIX}${rev.tabId}`, JSON.stringify(updated.slice(0, 10)));
+    } catch {}
+  } catch {}
 }
-
-type RewriteStyle = "human" | "professional" | "technical" | "concise" | "formal" | "casual";
-
-const STORAGE_KEY = "indexarc-scratchpad";
-const REWRITE_STYLES: RewriteStyle[] = ["human", "professional", "technical", "concise", "formal", "casual"];
-const REWRITE_STYLE_KEYS: Record<RewriteStyle, string> = {
-  human: "rewrite_style_human",
+const REWRITE_STYLES: RewriteStyle[] = ["professional", "casual", "human", "technical", "concise", "formal"];
+const REWRITE_STYLE_KEYS: Record<RewriteStyle, Parameters<typeof getTranslation>[1]> = {
   professional: "rewrite_style_professional",
+  casual: "rewrite_style_casual",
+  human: "rewrite_style_human",
   technical: "rewrite_style_technical",
   concise: "rewrite_style_concise",
   formal: "rewrite_style_formal",
-  casual: "rewrite_style_casual",
 };
 
 const HIGHLIGHT_COLORS = [
@@ -98,6 +127,80 @@ const TEXT_COLORS = [
   { hex: "#c084fc", key: "text_color_purple" },
 ];
 
+export function ensureHtmlParagraphs(content: string): string {
+  if (!content) return "<p></p>";
+  // If it already has block-level HTML tags (<p>, <div>, <h1>-<h6>, <ul>, <ol>, <li>, <blockquote>, <pre>), preserve structure
+  if (/<(p|div|h[1-6]|ul|ol|li|blockquote|pre|table)\b/i.test(content)) {
+    return content.replace(/<br\s*\/?>/gi, "</p><p>");
+  }
+  // Plain text with newlines (\r\n or \n) -> convert to <p> tags
+  const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const html = lines
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return "<p></p>";
+      const escaped = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return `<p>${escaped}</p>`;
+    })
+    .join("");
+  return html || "<p></p>";
+}
+
+export function smartFormatParagraphs(content: string): string {
+  if (!content || !content.trim()) return "<p></p>";
+
+  // 1. Convert block closers and <br> tags to newlines
+  let text = content
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr|blockquote|article|section)>/gi, "\n\n")
+    .replace(/<[^>]+>/g, ""); // Strip remaining HTML tags
+
+  // 2. Decode HTML entities
+  text = text
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+  // 3. Normalize line breaks and spaces
+  text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  // 4. Intelligently insert breaks for combined single-block text:
+  // (a) Split on bullet characters and numbered list items (e.g., " 1. ", " 2) ", " - ", " • ")
+  text = text
+    .replace(/(\s+)(\d+[\.\)]\s+)/g, "\n\n$2")
+    .replace(/(\s+)(\(\d+\)\s+)/g, "\n\n$2")
+    .replace(/(\s+)([-*•–—]\s+)/g, "\n\n$2");
+
+  // (b) Split on header/field colons (e.g. " Note: ", " Title: ", " ملاحظة: ")
+  text = text
+    .replace(/(\s+)([A-Za-z\u0600-\u06FF\s]{2,25}:(?:\s+))/g, "\n\n$2");
+
+  // (c) Split after sentence terminators (. ! ? ؟ ؛ ;) followed by space
+  text = text
+    .replace(/([\.\!\?؟؛](\s+))/g, "$1\n\n");
+
+  // 5. Build clean HTML <p> tags from the resulting lines
+  const paragraphs = text
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  if (paragraphs.length === 0) return "<p></p>";
+
+  return paragraphs
+    .map((p) => {
+      const escaped = p
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      return `<p>${escaped}</p>`;
+    })
+    .join("");
+}
+
 function uid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `t_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -112,23 +215,26 @@ function loadTabs(): ScratchTab[] {
         return parsed.map((x: any) => ({
           id: x.id || uid(),
           title: x.title || "Scratch",
-          content: x.content || "",
+          content: ensureHtmlParagraphs(x.content || ""),
           archived: !!x.archived,
         }));
       }
     }
   } catch {}
-  return [{ id: uid(), title: "Scratch 1", content: "" }];
+  return [{ id: uid(), title: "Scratch 1", content: "<p></p>" }];
 }
 // IndexedDB durable cache (idb-keyval) — survives large notes that exceed localStorage quota
 async function loadTabsIDB(): Promise<ScratchTab[] | null> {
   try {
     const { get } = await import("idb-keyval");
     const val = await get(STORAGE_KEY);
-    if (Array.isArray(val) && val.length) return val as ScratchTab[];
+    if (Array.isArray(val) && val.length) {
+      return (val as ScratchTab[]).map((t) => ({ ...t, content: ensureHtmlParagraphs(t.content || "") }));
+    }
   } catch {}
   return null;
 }
+
 async function saveTabsIDB(tabs: ScratchTab[]) {
   try {
     const { set } = await import("idb-keyval");
@@ -476,10 +582,94 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [renameValue, setRenameValue] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [bidiMode, setBidiMode] = useState<NoteBidiMode>("auto");
-  // Long-note jump controls: shown whenever the editor content overflows.
   const [noteOverflows, setNoteOverflows] = useState(false);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [misspelledWords, setMisspelledWords] = useState<Set<string>>(new Set());
+  const [spellRects, setSpellRects] = useState<SpellRect[]>([]);
+  const [highlightColor, setHighlightColor] = useState<string>("#fef08a");
+  const [textColor, setTextColor] = useState<string>("#ffffff");
+  const [showHighlightPicker, setShowHighlightPicker] = useState(false);
+  const [showTextColorPicker, setShowTextColorPicker] = useState(false);
+  const [ignoredWords, setIgnoredWords] = useState<Set<string>>(new Set());
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    word: string;
+    range: Range | null;
+    suggestions: string[];
+    loading: boolean;
+  } | null>(null);
+  const [enablePredictions, setEnablePredictions] = useState<boolean>(() => {
+    return localStorage.getItem("indexarc_enable_ghost") !== "false";
+  });
+  const [ghostCompletion, setGhostCompletion] = useState<string>("");
+  const [caretPos, setCaretPos] = useState<{ top: number; left: number } | null>(null);
+  const [pastePlain, setPastePlain] = useState(true);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+  const [rephraseUndo, setRephraseUndo] = useState<Record<string, string[]>>({});
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const [yjsReady, setYjsReady] = useState(false);
+  const [showRevisions, setShowRevisions] = useState(false);
+  const [revisionsList, setRevisionsList] = useState<NoteRevision[]>([]);
+  const [selectedRevision, setSelectedRevision] = useState<NoteRevision | null>(null);
+  const [clearedAlert, setClearedAlert] = useState<{ tabId: string; content: string; timestamp: number } | null>(null);
+
+  const shellRef = useRef<HTMLDivElement>(null);
+  const scratchRootRef = useRef<HTMLDivElement>(null);
+  const titleTouched = useRef<Record<string, boolean>>({});
+  const pasteFlag = useRef<Record<string, boolean>>({});
+  const serverLoaded = useRef(false);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<Record<string, string>>({});
+  const activeIdRef = useRef<string>(activeId);
+  activeIdRef.current = activeId;
+  const editorRef = useRef<HTMLDivElement>(null);
+  const lastActiveTabId = useRef<string>("");
+  const lastNonEmptyContentRef = useRef<Record<string, string>>({});
+  const lastSnapshotTimeRef = useRef<Record<string, number>>({});
+  const updateScrollAffordancesRef = useRef<() => void>(() => {});
+  const recomputeSpellRectsRef = useRef<() => void>(() => {});
+  const spellWorkerRef = useRef<Worker | null>(null);
+  const misspelledRef = useRef(misspelledWords);
+  misspelledRef.current = misspelledWords;
+  const yDocRef = useRef<Y.Doc | null>(null);
+  const htmlToTextDiv = useRef<HTMLDivElement | null>(null);
+  const autocompleteTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const debouncedTabsSync = useRef<number | null>(null);
+
+  const recordSnapshot = useCallback(
+    async (tabId: string, content: string, reason?: string) => {
+      if (!content || content === "<p></p>") return;
+      const plain = content.replace(/<[^>]+>/g, "").trim();
+      if (!plain) return;
+      const curTab = tabs.find((x) => x.id === tabId);
+      const title = curTab?.title || "Note";
+      const charCount = plain.length;
+      const wordCount = plain.split(/\s+/).filter(Boolean).length;
+      await saveNoteRevision({
+        id: uid(),
+        tabId,
+        timestamp: Date.now(),
+        title,
+        content,
+        charCount,
+        wordCount,
+        reason,
+      });
+    },
+    [tabs]
+  );
+
+  const handleOpenRevisions = useCallback(async () => {
+    const list = await getNoteRevisions(activeId);
+    setRevisionsList(list);
+    setSelectedRevision(list.length > 0 ? list[0] : null);
+    setShowRevisions(true);
+  }, [activeId]);
+
   // Listen for "Reopen in Scratchpad" event from Library or Command Palette
   useEffect(() => {
     const handleReopenEvent = () => {
@@ -490,7 +680,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         const parsed = JSON.parse(raw);
         if (parsed && parsed.title && parsed.html) {
           const newId = `note-${Date.now()}`;
-          const newTab = { id: newId, title: parsed.title, content: parsed.html, archived: false };
+          const newTab = { id: newId, title: parsed.title, content: ensureHtmlParagraphs(parsed.html), archived: false };
           setTabs((prev) => [...prev, newTab]);
           setActiveId(newId);
         }
@@ -500,14 +690,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     handleReopenEvent();
     return () => window.removeEventListener("indexarc-reopen-note", handleReopenEvent);
   }, []);
-  const shellRef = useRef<HTMLDivElement>(null);
-  const scratchRootRef = useRef<HTMLDivElement>(null);
-  // Per-tab undo stack for rephrase: each entry is a previous version of the
-  // content, so the user can step back through their edits.
-  const [rephraseUndo, setRephraseUndo] = useState<Record<string, string[]>>({});
-  const titleTouched = useRef<Record<string, boolean>>({});
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
 
   const reorderTab = useCallback((fromId: string, toId: string) => {
     if (fromId === toId) return;
@@ -522,29 +704,13 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     });
   }, []);
 
-  const pasteFlag = useRef<Record<string, boolean>>({});
-  const serverLoaded = useRef(false);
-  const toolbarRef = useRef<HTMLDivElement>(null);
-  // Live content buffer keyed by tab id. The editor DOM is authoritative
-  // while editing; this ref mirrors it for persistence without triggering a
-  // React re-render (which would destroy the selection / undo stack).
-  const contentRef = useRef<Record<string, string>>({});
-  const activeIdRef = useRef<string>(activeId);
-  activeIdRef.current = activeId;
-
-  // Dual-language spellcheck: red underlines are positioned from live
-  // getClientRects() of misspelled ranges (not a cloned HTML overlay).
-  const editorRef = useRef<HTMLDivElement>(null);
-  // Refs to spell/scroll helpers (declared later) so the scroll listener can
-  // call the latest version without creating a TDZ crash in a deps array.
-  const updateScrollAffordancesRef = useRef<() => void>(() => {});
-  const recomputeSpellRectsRef = useRef<() => void>(() => {});
   // TipTap industry editor — stable, transactional, BIDI-aware
   const tiptap = useEditor({
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
         dropcursor: { width: 2, color: "var(--accent)" },
+        undoRedo: false, // Disabled — custom history stack (historyRef) handles per-tab undo/redo
       }),
       TiptapUnderline,
       TextStyle,
@@ -567,6 +733,30 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       const html = safeGetHTML(editor);
       const id = activeIdRef.current;
       contentRef.current[id] = html;
+
+      const plainText = html.replace(/<[^>]+>/g, "").trim();
+      const prevNonEmpty = lastNonEmptyContentRef.current[id] || "";
+      const prevTextLength = prevNonEmpty.replace(/<[^>]+>/g, "").trim().length;
+
+      if (plainText.length > 0) {
+        lastNonEmptyContentRef.current[id] = html;
+        setClearedAlert(null);
+        // Periodic auto snapshot (every 25 seconds of active typing)
+        const now = Date.now();
+        const lastSnap = lastSnapshotTimeRef.current[id] || 0;
+        if (now - lastSnap > 25000) {
+          lastSnapshotTimeRef.current[id] = now;
+          recordSnapshot(id, html, "Auto snapshot");
+        }
+      } else if (prevTextLength > 30 && plainText.length === 0) {
+        // Accidental clear / empty Ctrl+Z detected!
+        setClearedAlert({
+          tabId: id,
+          content: prevNonEmpty,
+          timestamp: Date.now(),
+        });
+      }
+
       if ((tiptap as any)._debouncedSync) window.clearTimeout((tiptap as any)._debouncedSync);
       (tiptap as any)._debouncedSync = window.setTimeout(() => {
         setTabs((prev) => {
@@ -592,16 +782,29 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       } catch { setSlashOpen(false); }
     },
   });
+
   // Keep editorRef in sync with TipTap DOM for spellcheck/scroll
   useEffect(() => {
     if (!tiptap || tiptap.isDestroyed) return;
-    const html = contentRef.current[activeId] ?? tabs.find((x) => x.id === activeId)?.content ?? "";
+    const rawContent = contentRef.current[activeId] ?? tabs.find((x) => x.id === activeId)?.content ?? "";
+    const html = ensureHtmlParagraphs(rawContent);
     const current = safeGetHTML(tiptap);
-    try {
-      if (current !== html && html !== "<p></p>") {
-        tiptap.commands.setContent(html || "<p></p>");
+    const isTabSwitch = lastActiveTabId.current !== activeId;
+
+    if (isTabSwitch) {
+      lastActiveTabId.current = activeId;
+      // Tab switched: Set content so Ctrl+Z is strictly scoped to this note
+      // Note: clearHistory() was removed — TipTap v3 UndoRedo extension no longer exposes it,
+      // and the custom history stack (historyRef) already handles per-tab undo scoping.
+      tiptap.commands.setContent(html || "<p></p>", { emitUpdate: false });
+      if (html && html !== "<p></p>") {
+        lastNonEmptyContentRef.current[activeId] = html;
+        recordSnapshot(activeId, html, "Opened snapshot");
       }
-    } catch {}
+    } else if (current !== html && html !== "<p></p>") {
+      tiptap.commands.setContent(html || "<p></p>");
+      lastNonEmptyContentRef.current[activeId] = html;
+    }
     // BIDI sync
     const plainForDir = (() => {
       const d = document.createElement("div");
@@ -617,40 +820,15 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         (editorRef as any).current = tiptap.view.dom as unknown as HTMLDivElement;
       }
     } catch {}
-  }, [activeId, tiptap, bidiMode, tabs]);
+  }, [activeId, tiptap, bidiMode, tabs, recordSnapshot]);
 
   // Spellcheck Web Worker — off main thread tokenization
-  const spellWorkerRef = useRef<Worker | null>(null);
   useEffect(() => {
     try {
       spellWorkerRef.current = new Worker(new URL("../workers/spellcheck.worker.ts", import.meta.url), { type: "module" });
     } catch {}
     return () => { try { spellWorkerRef.current?.terminate(); } catch {} };
   }, []);
-  const [misspelledWords, setMisspelledWords] = useState<Set<string>>(new Set());
-  const [spellRects, setSpellRects] = useState<SpellRect[]>([]);
-  const [highlightColor, setHighlightColor] = useState<string>("#fef08a");
-  const [textColor, setTextColor] = useState<string>("#ffffff");
-  const [showHighlightPicker, setShowHighlightPicker] = useState(false);
-  const [showTextColorPicker, setShowTextColorPicker] = useState(false);
-  const [ignoredWords, setIgnoredWords] = useState<Set<string>>(new Set());
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    word: string;
-    range: Range | null;
-    suggestions: string[];
-    loading: boolean;
-  } | null>(null);
-  const [enablePredictions, setEnablePredictions] = useState<boolean>(() => {
-    return localStorage.getItem("indexarc_enable_ghost") !== "false";
-  });
-  const [ghostCompletion, setGhostCompletion] = useState<string>("");
-  const [caretPos, setCaretPos] = useState<{ top: number; left: number } | null>(null);
-  const [pastePlain, setPastePlain] = useState(true);
-  const [slashOpen, setSlashOpen] = useState(false);
-  const misspelledRef = useRef(misspelledWords);
-  misspelledRef.current = misspelledWords;
 
   // One size for dual-language notes: larger of EN/AR settings so neither
   // script is cramped, without per-script scaling that desyncs the overlay.
@@ -668,7 +846,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const historyRef = useRef<HistoryEntry[]>([]);
   const historyIndexRef = useRef<number>(-1);
   const historyTimerRef = useRef<number | null>(null);
-  const [historyVersion, setHistoryVersion] = useState(0); // bumps to refresh canUndo/canRedo
   const seedHandledRef = useRef<Set<string>>(new Set()); // tracks which tab ids have been seeded
 
   void historyVersion;
@@ -812,7 +989,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   }, [historyPushImmediate, tiptap]);
 
   // Reuse one detached div for html->text (avoids GC thrash on every keystroke)
-  const htmlToTextDiv = useRef<HTMLDivElement | null>(null);
   const htmlToPlainText = useCallback((html: string): string => {
     if (!html) return "";
     const d = htmlToTextDiv.current ?? (htmlToTextDiv.current = document.createElement("div"));
@@ -825,17 +1001,20 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   // undo-rephrase, etc.). Updates the DOM, the history stack, the ref buffer
   // and React state in one consistent step — no scattered innerHTML writes.
   const setEditorHtml = useCallback(
-    (html: string) => {
-      const editor = editorRef.current;
-      if (!editor) return;
-      editor.innerHTML = html;
+    (rawContent: string) => {
+      const html = ensureHtmlParagraphs(rawContent);
       contentRef.current[activeIdRef.current] = html;
       setTabs((prev) =>
         prev.map((x) => (x.id === activeIdRef.current ? { ...x, content: html } : x))
       );
+      if (tiptap && !tiptap.isDestroyed) {
+        try {
+          tiptap.commands.setContent(html);
+        } catch {}
+      }
       historyInit(html);
     },
-    [historyInit]
+    [tiptap, historyInit]
   );
 
   const fallbackTab: ScratchTab = { id: activeId || "default", title: "Scratch", content: "" };
@@ -847,8 +1026,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     (detection.families.includes("secret") || detection.families.includes("unknown"));
 
   // Yjs offline-first — IndexedDB persistence per tab (collaboration-ready) — dynamic import safe
-  const yDocRef = useRef<Y.Doc | null>(null);
-  const [yjsReady, setYjsReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
     let doc: Y.Doc | null = null;
@@ -1246,8 +1423,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     });
   };
 
-  const autocompleteTimerRef = useRef<NodeJS.Timeout | null>(null);
-
   const updateCaretPos = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -1343,7 +1518,52 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     [setEditorHtml]
   );
 
-  const debouncedTabsSync = useRef<number | null>(null);
+  const handleSmartSplitParagraphs = useCallback(() => {
+    if (!tiptap || tiptap.isDestroyed) return;
+    const currentHtml = safeGetHTML(tiptap);
+    recordSnapshot(activeId, currentHtml, "Before Format");
+    const restored = smartFormatParagraphs(currentHtml);
+    if (restored && restored !== "<p></p>") {
+      contentRef.current[activeId] = restored;
+      lastNonEmptyContentRef.current[activeId] = restored;
+      setTabs((prev) =>
+        prev.map((x) => (x.id === activeId ? { ...x, content: restored } : x))
+      );
+      try {
+        tiptap.commands.setContent(restored, { emitUpdate: true });
+        tiptap.chain().focus().run();
+      } catch {}
+      historyInit(restored);
+      setStatusMsg("Restored multiline paragraph formatting!");
+      setTimeout(() => setStatusMsg(""), 3000);
+    }
+  }, [tiptap, activeId, historyInit, recordSnapshot]);
+
+  const handleRestoreRevision = useCallback(
+    (rev: NoteRevision) => {
+      if (!tiptap || tiptap.isDestroyed) return;
+      const html = ensureHtmlParagraphs(rev.content);
+      tiptap.chain().setContent(html, { emitUpdate: true }).run();
+      contentRef.current[activeId] = html;
+      lastNonEmptyContentRef.current[activeId] = html;
+      setTabs((prev) => prev.map((x) => (x.id === activeId ? { ...x, content: html } : x)));
+      setStatus(getTranslation(settings, "scratchpad_history_restored" as any) || "Version restored!");
+      setShowRevisions(false);
+      setClearedAlert(null);
+    },
+    [activeId, settings, setStatus, tiptap]
+  );
+
+  const handleRestoreCleared = useCallback(() => {
+    if (!clearedAlert || !tiptap || tiptap.isDestroyed) return;
+    const html = ensureHtmlParagraphs(clearedAlert.content);
+    tiptap.chain().setContent(html, { emitUpdate: true }).run();
+    contentRef.current[clearedAlert.tabId] = html;
+    lastNonEmptyContentRef.current[clearedAlert.tabId] = html;
+    setTabs((prev) => prev.map((x) => (x.id === clearedAlert.tabId ? { ...x, content: html } : x)));
+    setClearedAlert(null);
+    setStatus("Note content restored!");
+  }, [clearedAlert, setStatus, tiptap]);
   const onEditorInput = useCallback(() => {
     if (ghostCompletion) {
       setGhostCompletion("");
@@ -1640,6 +1860,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     const original = active?.content || "";
     const text = htmlToPlainText(original).trim();
     if (!text) return;
+    recordSnapshot(activeId, original, "Before AI Rewrite");
     setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], rewrite: true } }));
     setStatus(t("scratchpad_rewriting"));
     try {
@@ -1674,6 +1895,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     const original = active?.content || "";
     const text = htmlToPlainText(original).trim();
     if (!text) return;
+    recordSnapshot(activeId, original, "Before Proofread");
     setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], proofread: true } }));
     setStatus(t("scratchpad_proofreading" as any) || "Proofreading...");
     try {
@@ -1792,6 +2014,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   // Effective dir attribute for the editor + overlay.
   const noteDir: "auto" | "ltr" | "rtl" = bidiMode === "auto" ? "auto" : bidiMode;
   const detectedDir = detectBaseDir(htmlToPlainText(active?.content || ""));
+  const activePlainText = useMemo(() => htmlToPlainText(active?.content || ""), [active?.content]);
+  const activeCharCount = activePlainText.length;
+  const activeWordCount = useMemo(() => activePlainText.trim().split(/\s+/).filter(Boolean).length, [activePlainText]);
+  const activeReadingTime = Math.max(1, Math.ceil(activeWordCount / 200));
 
     return (
     <div ref={scratchRootRef} className="space-y-4">
@@ -1953,16 +2179,17 @@ className="scratchpad-tab group cursor-pointer"
           </button>
 
            <button
-             type="button"
-            onClick={() => {
-              if (window.confirm("Are you sure you want to clear this note's content?")) {
-                setContent(activeId, "");
-              }
-            }}
-             className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
-             style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
-           >
-            <Trash2 className="w-3.5 h-3.5" />
+              type="button"
+              onClick={() => {
+                if (window.confirm("Are you sure you want to clear this note's content?")) {
+                  recordSnapshot(activeId, active?.content || "", "Before Clear");
+                  setContent(activeId, "");
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
+              style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
               {t("scratchpad_clear")}
             </button>
 
@@ -1979,6 +2206,29 @@ className="scratchpad-tab group cursor-pointer"
                 {t("scratchpad_proofread")}
               </button>
             )}
+
+            <button
+              type="button"
+              onClick={handleSmartSplitParagraphs}
+              disabled={!(active?.content || "").trim()}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              style={{ background: "rgba(56, 189, 248, 0.1)", color: "#38bdf8", border: "1px solid rgba(56, 189, 248, 0.3)" }}
+              title="Restore multi-line paragraphs & auto-format structure"
+            >
+              <AlignJustify className="w-3.5 h-3.5" />
+              <span>Format Paragraphs</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenRevisions}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+              style={{ background: "rgba(245, 158, 11, 0.12)", color: "#fbbf24", border: "1px solid rgba(245, 158, 11, 0.3)" }}
+              title={t("scratchpad_history_title")}
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>{t("scratchpad_history")}</span>
+            </button>
 
             <button
               type="button"
@@ -2018,12 +2268,23 @@ className="scratchpad-tab group cursor-pointer"
             <select
               value={style}
               onChange={(e) => setStyle(e.target.value as RewriteStyle)}
-              className="rounded-lg px-2 py-1.5 text-xs focus:outline-none"
-              style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
+              className="rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none cursor-pointer"
+              style={{
+                background: "var(--bg-input, #18181b)",
+                border: "1px solid var(--border, #3f3f46)",
+                color: "var(--text, #ffffff)",
+              }}
             >
               {REWRITE_STYLES.map((s) => (
-                <option key={s} value={s}>
-                  {t(REWRITE_STYLE_KEYS[s] as Parameters<typeof getTranslation>[1])}
+                <option
+                  key={s}
+                  value={s}
+                  style={{
+                    backgroundColor: "#18181b",
+                    color: "#ffffff",
+                  }}
+                >
+                  {t(REWRITE_STYLE_KEYS[s] as Parameters<typeof getTranslation>[1]) || s}
                 </option>
               ))}
             </select>
@@ -2271,6 +2532,37 @@ className="scratchpad-tab group cursor-pointer"
                 </button>
               </>
             )}
+          </div>
+
+          {/* Pro Status Bar */}
+          <div className="editor-status-bar select-none">
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1">
+                <strong className="text-white tabular-nums">{activeWordCount}</strong>
+                <span className="opacity-75">{settings?.ui_language === "ar" ? "كلمة" : "words"}</span>
+              </span>
+              <span className="opacity-30">•</span>
+              <span className="flex items-center gap-1">
+                <strong className="text-white tabular-nums">{activeCharCount}</strong>
+                <span className="opacity-75">{settings?.ui_language === "ar" ? "حرف" : "chars"}</span>
+              </span>
+              <span className="opacity-30">•</span>
+              <span className="flex items-center gap-1">
+                <span>~</span>
+                <strong className="text-white tabular-nums">{activeReadingTime}</strong>
+                <span className="opacity-75">{settings?.ui_language === "ar" ? "دقيقة قراءة" : "min read"}</span>
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1.5" title="Yjs IndexedDB offline persistence">
+                <span className={`w-1.5 h-1.5 rounded-full ${yjsReady ? "bg-emerald-400" : "bg-amber-400"}`} />
+                <span>Yjs {yjsReady ? "Synced" : "Offline"}</span>
+              </span>
+              <span className="opacity-30">•</span>
+              <span className="uppercase text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded" style={{ background: "var(--accent-bg)", color: "var(--accent-bright)" }}>
+                {bidiMode === "auto" ? `AUTO (${detectedDir.toUpperCase()})` : bidiMode.toUpperCase()}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -2616,6 +2908,205 @@ className="scratchpad-tab group cursor-pointer"
                 ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Revision History Modal */}
+      {showRevisions && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+          onClick={() => setShowRevisions(false)}
+        >
+          <div
+            className="w-full max-w-2xl max-h-[85vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl"
+            style={{
+              background: "#121214",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div
+              className="px-5 py-4 flex items-center justify-between border-b"
+              style={{ borderColor: "rgba(255,255,255,0.08)", background: "#18181b" }}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">
+                    {t("scratchpad_history_title")}
+                  </h3>
+                  <p className="text-xs text-neutral-400">
+                    {active?.title || "Note"} &bull; {revisionsList.length} {revisionsList.length === 1 ? "version" : "versions"} saved
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRevisions(false)}
+                className="p-1.5 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 flex overflow-hidden min-h-[340px]">
+              {/* Revision list sidebar */}
+              <div
+                className="w-64 border-r overflow-y-auto flex flex-col p-2 gap-1.5"
+                style={{ borderColor: "rgba(255,255,255,0.08)", background: "#141416" }}
+              >
+                {revisionsList.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-neutral-500">
+                    {t("scratchpad_history_empty")}
+                  </div>
+                ) : (
+                  revisionsList.map((rev, idx) => {
+                    const isSelected = selectedRevision?.id === rev.id;
+                    const dateStr = new Date(rev.timestamp).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    });
+                    const dateFull = new Date(rev.timestamp).toLocaleDateString([], {
+                      month: "short",
+                      day: "numeric",
+                    });
+                    return (
+                      <button
+                        key={rev.id}
+                        type="button"
+                        onClick={() => setSelectedRevision(rev)}
+                        className={`text-left p-2.5 rounded-xl text-xs transition-all flex flex-col gap-1 cursor-pointer ${
+                          isSelected
+                            ? "bg-amber-500/15 border border-amber-500/40 text-white shadow-sm"
+                            : "hover:bg-white/5 border border-transparent text-neutral-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-amber-300">
+                            {idx === 0 ? "Latest Snapshot" : `Version ${revisionsList.length - idx}`}
+                          </span>
+                          <span className="text-[10px] text-neutral-400">{dateStr}</span>
+                        </div>
+                        <div className="text-[10px] text-neutral-400 flex items-center justify-between">
+                          <span>{dateFull}</span>
+                          <span>{rev.charCount} chars</span>
+                        </div>
+                        {rev.reason && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-neutral-400 self-start font-mono">
+                            {rev.reason}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Revision content preview */}
+              <div className="flex-1 flex flex-col overflow-hidden bg-[#0e0e10]">
+                {selectedRevision ? (
+                  <>
+                    <div
+                      className="px-4 py-2 text-xs border-b flex items-center justify-between"
+                      style={{ borderColor: "rgba(255,255,255,0.08)" }}
+                    >
+                      <span className="text-neutral-400">
+                        Preview: <strong className="text-white">{selectedRevision.charCount} characters</strong>
+                      </span>
+                      <span className="text-[11px] text-neutral-500">
+                        {new Date(selectedRevision.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex-1 p-4 overflow-y-auto font-sans text-xs text-neutral-200 leading-relaxed select-text">
+                      <div
+                        dangerouslySetInnerHTML={{
+                          __html: selectedRevision.content || "<em>Empty</em>",
+                        }}
+                        className="prose prose-invert max-w-none text-xs"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center text-xs text-neutral-500">
+                    Select a version to preview
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div
+              className="px-5 py-3 border-t flex items-center justify-between"
+              style={{ borderColor: "rgba(255,255,255,0.08)", background: "#18181b" }}
+            >
+              <span className="text-xs text-neutral-400">
+                Auto-saved snapshots protect your work from accidental undos or wipes.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRevisions(false)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-neutral-300 hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+                {selectedRevision && (
+                  <button
+                    type="button"
+                    onClick={() => handleRestoreRevision(selectedRevision)}
+                    className="px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+                    style={{
+                      background: "#f59e0b",
+                      color: "#000000",
+                    }}
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    {t("scratchpad_history_restore")}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Accidental Clear / Undo Alert Toast */}
+      {clearedAlert && (
+        <div
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl animate-bounce"
+          style={{
+            background: "#27272a",
+            border: "1px solid #ef4444",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+          }}
+        >
+          <div className="p-2 rounded-lg bg-red-500/15 text-red-400">
+            <RotateCcw className="w-4 h-4" />
+          </div>
+          <div className="text-xs">
+            <div className="font-bold text-white">{t("scratchpad_content_cleared")}</div>
+            <div className="text-[11px] text-neutral-400">Accidental Ctrl+Z or clear detected.</div>
+          </div>
+          <button
+            type="button"
+            onClick={handleRestoreCleared}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-500 hover:bg-red-400 text-white transition-colors cursor-pointer"
+          >
+            {t("scratchpad_restore_undo")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setClearedAlert(null)}
+            className="p-1 text-neutral-400 hover:text-white cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
     </div>

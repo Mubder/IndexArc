@@ -284,6 +284,13 @@ export interface TranslationDict {
   paste_plain_off: string;
   scratchpad_undo: string;
   scratchpad_redo: string;
+  scratchpad_history: string;
+  scratchpad_history_title: string;
+  scratchpad_history_empty: string;
+  scratchpad_history_restore: string;
+  scratchpad_history_restored: string;
+  scratchpad_content_cleared: string;
+  scratchpad_restore_undo: string;
   highlight_yellow: string;
   highlight_green: string;
   highlight_blue: string;
@@ -608,6 +615,13 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     paste_plain_off: "Paste as plain text (OFF — keep formatting)",
     scratchpad_undo: "Undo",
     scratchpad_redo: "Redo",
+    scratchpad_history: "Version History",
+    scratchpad_history_title: "Note Revision History",
+    scratchpad_history_empty: "No saved revisions for this note yet. Snapshots are recorded automatically as you write.",
+    scratchpad_history_restore: "Restore this version",
+    scratchpad_history_restored: "Version restored successfully!",
+    scratchpad_content_cleared: "Note content was cleared.",
+    scratchpad_restore_undo: "Undo / Restore",
     highlight_yellow: "Yellow",
     highlight_green: "Green",
     highlight_blue: "Blue",
@@ -930,6 +944,13 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     paste_plain_off: "اللصق كنص عادي (معطل — إبقاء التنسيق)",
     scratchpad_undo: "تراجع",
     scratchpad_redo: "إعادة",
+    scratchpad_history: "سجل النسخ",
+    scratchpad_history_title: "سجل تعديلات الملاحظة",
+    scratchpad_history_empty: "لا توجد نسخ سابقة مسجلة لهذه الملاحظة بعد. يتم حفظ النسخ تلقائياً أثناء الكتابة.",
+    scratchpad_history_restore: "استعادة هذه النسخة",
+    scratchpad_history_restored: "تمت استعادة النسخة بنجاح!",
+    scratchpad_content_cleared: "تم مسح محتوى الملاحظة.",
+    scratchpad_restore_undo: "تراجع / استعادة",
     highlight_yellow: "أصفر",
     highlight_green: "أخضر",
     highlight_blue: "أزرق",

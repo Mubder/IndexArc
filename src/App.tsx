@@ -39,6 +39,7 @@ import { AnalyzeTab } from "./components/AnalyzeTab";
 import { FoldersTab } from "./components/FoldersTab";
 import { AskTab } from "./components/AskTab";
 import { LibraryTab } from "./components/LibraryTab";
+import { useSSE } from "./hooks/useSSE";
 import { SettingsTab } from "./components/SettingsTab";
 import { LockScreen } from "./components/LockScreen";
 import { SetupChecker } from "./components/SetupChecker";
@@ -48,6 +49,7 @@ import { FsBrowserModal } from "./components/FsBrowserModal";
 import { ClarifyModal } from "./components/ClarifyModal";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { CommandPaletteModal } from "./components/CommandPaletteModal";
+import Starfield from "./components/Starfield";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => {
@@ -375,9 +377,17 @@ export default function App() {
 
   useEffect(() => {
     fetchAll();
-    const t = setInterval(fetchAll, 5000);
+    // SSE replaces polling — fetchAll is triggered by server-sent events
+    const t = setInterval(fetchAll, 30000); // Fallback poll every 30s (SSE is primary)
     return () => clearInterval(t);
   }, [fetchAll]);
+
+  // SSE: refetch data when server state changes
+  useSSE(useCallback((msg) => {
+    if (msg.event === "vault-changed" || msg.event === "entries-changed" || msg.event === "folders-changed" || msg.event === "settings-changed") {
+      fetchAll();
+    }
+  }, [fetchAll]));
 
   const handleAnalyze = async () => {
     if (!paste.trim()) return;
@@ -764,13 +774,7 @@ return (
       }}
     >
       {/* Animated Background */}
-      <div className="bg-canvas">
-        <div className="bg-grid" />
-        <div className="bg-glow" />
-        <div className="bg-orb bg-orb-1" />
-        <div className="bg-orb bg-orb-2" />
-        <div className="bg-orb bg-orb-3" />
-      </div>
+      <Starfield />
       <div className="scanline" />
 
       {/* Mobile sidebar overlay */}
@@ -817,17 +821,17 @@ return (
                 key={n.id}
                 type="button"
                 onClick={() => setTab(n.id)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm font-medium transition-all relative"
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm font-medium transition-all relative group"
                 style={{
                   borderRadius: "9999px",
-                  color: isActive ? "var(--text)" : "var(--text-dim)",
-                  background: isActive ? "var(--bg-surface-solid)" : "var(--bg-surface)",
-                  border: `1px solid ${isActive ? "var(--border-glow)" : "var(--border)"}`,
-                  boxShadow: isActive ? "0 4px 14px rgba(0,0,0,0.12)" : "none",
+                  color: isActive ? "var(--tab-active-color)" : "var(--tab-inactive-color)",
+                  background: isActive ? "var(--tab-active-bg)" : "var(--tab-inactive-bg)",
+                  border: `1px solid ${isActive ? "var(--tab-active-border)" : "var(--tab-inactive-border)"}`,
+                  boxShadow: isActive ? "var(--tab-active-shadow)" : "none",
                 }}
               >
-                <span style={{ opacity: isActive ? 1 : 0.6 }}>{n.icon}</span>
-                <span className="flex-1 text-left truncate" style={{ minWidth: "15ch" }}>{n.label}</span>
+                <span style={{ color: isActive ? "var(--accent-bright)" : "inherit", opacity: isActive ? 1 : 0.75 }}>{n.icon}</span>
+                <span className="flex-1 text-left truncate font-medium">{n.label}</span>
                 {n.badge ? (
                   <span
                     className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
@@ -879,7 +883,7 @@ return (
                   title={`Open ${s.lbl} in Library`}
                 >
                   <div
-                    className="text-lg font-bold"
+                    className="text-lg font-bold tabular-nums"
                     style={{
                       background: "linear-gradient(135deg, var(--accent-bright), var(--cyan))",
                       WebkitBackgroundClip: "text",
@@ -888,7 +892,7 @@ return (
                   >
                     {s.val}
                   </div>
-                  <div className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+                  <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: "var(--text-muted)" }}>
                     {s.lbl}
                   </div>
                 </button>

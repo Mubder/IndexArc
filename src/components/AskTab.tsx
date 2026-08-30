@@ -132,6 +132,21 @@ export const AskTab: React.FC<AskTabProps> = ({
             </button>
           </form>
 
+          {asking && (
+            <div className="space-y-3">
+              <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 animate-spin" style={{ color: "var(--accent-bright)" }} />
+                  <span className="text-xs font-semibold" style={{ color: "var(--accent-bright)" }}>Synthesizing answer...</span>
+                </div>
+                <div className="skeleton h-4 w-5/6 rounded" />
+                <div className="skeleton h-4 w-3/4 rounded" />
+              </div>
+              <div className="skeleton h-16 w-full rounded-xl" />
+              <div className="skeleton h-16 w-full rounded-xl" />
+            </div>
+          )}
+
           {answer && (
             <div className="rounded-2xl p-5 shadow-xl space-y-3 relative overflow-hidden" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
               <div className="absolute top-0 right-0 p-4 opacity-[0.03] pointer-events-none">
@@ -165,7 +180,7 @@ export const AskTab: React.FC<AskTabProps> = ({
                 settings={settings}
               />
             ))}
-            {!askResults.length && !answer && (
+            {!asking && !askResults.length && !answer && (
               <p className="text-sm italic" style={{ color: "var(--text-muted)" }}>{t("no_ask_results") || "No results yet. Try searching for a token, key, or command."}</p>
             )}
           </div>

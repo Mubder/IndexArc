@@ -387,7 +387,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 {!status?.ollama_models?.some(
                   (m) =>
                     m === settings.ollama_llm_model ||
-                    m.startsWith(settings.ollama_llm_model.split(":")[0])
+                    m.startsWith((settings.ollama_llm_model || "").split(":")[0])
                 ) && (
                   <option value={settings.ollama_llm_model}>
                     {settings.ollama_llm_model}
@@ -418,7 +418,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 {!status?.ollama_models?.some(
                   (m) =>
                     m === settings.ollama_embed_model ||
-                    m.startsWith(settings.ollama_embed_model.split(":")[0])
+                    m.startsWith((settings.ollama_embed_model || "").split(":")[0])
                 ) && (
                   <option value={settings.ollama_embed_model}>
                     {settings.ollama_embed_model}

@@ -43,8 +43,20 @@ function readJson<T>(filePath: string, fallback: T): T {
 
 export class VaultStore {
   private encryptionKey: Buffer | null = null;
+  private _settingsCache: AppSettings | null = null;
+  private _entriesCache: VaultEntry[] | null = null;
+  private _foldersCache: WatchedFolder[] | null = null;
+  private _scratchpadCache: any[] | null = null;
 
   constructor(private paths: PortablePaths) {}
+
+  /** Invalidate all in-memory caches (call after any write) */
+  clearCache() {
+    this._settingsCache = null;
+    this._entriesCache = null;
+    this._foldersCache = null;
+    this._scratchpadCache = null;
+  }
 
   // --- Encryption Support ---
   isEncryptionEnabled(): boolean {
@@ -131,6 +143,7 @@ export class VaultStore {
 
   // --- Settings ---
   getSettings(): AppSettings {
+    if (this._settingsCache) return this._settingsCache;
     const raw = readJson<Partial<AppSettings>>(this.paths.settingsFile, {});
     // Prefer env keys if settings keys are empty
     const settings: AppSettings = { ...DEFAULT_SETTINGS, ...raw };
@@ -149,17 +162,20 @@ export class VaultStore {
     if (!settings.anthropic_api_key && process.env.ANTHROPIC_API_KEY) {
       settings.anthropic_api_key = process.env.ANTHROPIC_API_KEY;
     }
+    this._settingsCache = settings;
     return settings;
   }
 
   saveSettings(partial: Partial<AppSettings>): AppSettings {
     const next = { ...this.getSettings(), ...partial };
     atomicWrite(this.paths.settingsFile, JSON.stringify(next, null, 2));
+    this._settingsCache = null;
     return next;
   }
 
   // --- Vault ---
   private readVault(): VaultFile {
+    if (this._entriesCache) return { version: 1, entries: this._entriesCache };
     const raw = readJson<any>(this.paths.vaultFile, { version: 1, entries: [] });
     if (raw.encrypted) {
       if (!this.encryptionKey) {
@@ -167,15 +183,19 @@ export class VaultStore {
       }
       try {
         const decrypted = decryptString(raw.ciphertext, this.encryptionKey, raw.iv, raw.authTag);
-        return JSON.parse(decrypted) as VaultFile;
+        const vault = JSON.parse(decrypted) as VaultFile;
+        this._entriesCache = vault.entries;
+        return vault;
       } catch (e: any) {
         throw new Error("Failed to decrypt vault: incorrect key or corrupted file");
       }
     }
+    this._entriesCache = (raw as VaultFile).entries;
     return raw as VaultFile;
   }
 
   private writeVault(vault: VaultFile) {
+    this._entriesCache = null;
     const rawDisk = readJson<any>(this.paths.vaultFile, null);
     const isDiskEncrypted = rawDisk && rawDisk.encrypted;
 
@@ -358,7 +378,10 @@ export class VaultStore {
 
   // --- Scratchpad tabs (portable, survives reinstall/update) ---
   getScratchpad(): any[] {
-    return readJson<{ tabs: any[] }>(this.paths.scratchpadFile, { tabs: [] }).tabs;
+    if (this._scratchpadCache) return this._scratchpadCache;
+    const tabs = readJson<{ tabs: any[] }>(this.paths.scratchpadFile, { tabs: [] }).tabs;
+    this._scratchpadCache = tabs;
+    return tabs;
   }
 
   saveScratchpad(tabs: any[], opts: { force?: boolean } = {}): any[] {
@@ -385,6 +408,7 @@ export class VaultStore {
       }
     } catch {}
 
+    this._scratchpadCache = null;
     atomicWrite(
       this.paths.scratchpadFile,
       JSON.stringify({ version: 1, tabs: safe }, null, 2)
@@ -496,12 +520,16 @@ export class VaultStore {
 
   // --- Watched folders (portable) ---
   listWatchedFolders(): WatchedFolder[] {
-    return readJson<{ folders: WatchedFolder[] }>(this.paths.watchedFoldersFile, {
+    if (this._foldersCache) return this._foldersCache;
+    const folders = readJson<{ folders: WatchedFolder[] }>(this.paths.watchedFoldersFile, {
       folders: [],
     }).folders;
+    this._foldersCache = folders;
+    return folders;
   }
 
   saveWatchedFolders(folders: WatchedFolder[]) {
+    this._foldersCache = null;
     atomicWrite(
       this.paths.watchedFoldersFile,
       JSON.stringify({ version: 1, folders }, null, 2)

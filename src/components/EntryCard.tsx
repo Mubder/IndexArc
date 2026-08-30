@@ -1,5 +1,5 @@
-import React from "react";
-import { Trash2, Edit3, Copy, Maximize2, FileText, KeyRound, Terminal, Compass } from "lucide-react";
+import React, { useState } from "react";
+import { Trash2, Edit3, Copy, Check, Maximize2, FileText, KeyRound, Terminal, Compass, Eye, EyeOff } from "lucide-react";
 import { VaultEntry, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
 import { isArabicText } from "../utils";
@@ -26,6 +26,8 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   reason,
 }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
+  const [revealed, setRevealed] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const isScratchpad = entry.source_file === "scratchpad";
   const isNote = entry.family === "note";
@@ -39,6 +41,13 @@ export const EntryCard: React.FC<EntryCardProps> = ({
 
   const charCount = noteBody.length;
   const wordCount = noteBody.trim().split(/\s+/).filter(Boolean).length;
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(isNote ? noteBody : entry.value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
 
   return (
     <div
@@ -114,6 +123,18 @@ export const EntryCard: React.FC<EntryCardProps> = ({
           className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
           onClick={(e) => e.stopPropagation()}
         >
+          {isSecret && (
+            <button
+              type="button"
+              onClick={() => setRevealed(!revealed)}
+              className="p-1.5 rounded-lg transition-all"
+              style={{ color: revealed ? "var(--amber)" : "var(--text-muted)", background: "var(--bg-input)" }}
+              title={revealed ? "Hide Value" : "Reveal Value"}
+            >
+              {revealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            </button>
+          )}
+
           {isNote && onOpenDetail && (
             <button
               type="button"
@@ -128,12 +149,12 @@ export const EntryCard: React.FC<EntryCardProps> = ({
 
           <button
             type="button"
-            onClick={() => navigator.clipboard?.writeText(isNote ? noteBody : entry.value)}
+            onClick={handleCopy}
             className="p-1.5 rounded-lg transition-all"
-            style={{ color: "var(--text-muted)", background: "var(--bg-input)" }}
-            title={t("copy")}
+            style={{ color: copied ? "var(--emerald)" : "var(--text-muted)", background: "var(--bg-input)" }}
+            title={copied ? "Copied!" : t("copy")}
           >
-            <Copy className="w-3.5 h-3.5" />
+            {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
 
           {!isScratchpad && (
@@ -175,12 +196,21 @@ export const EntryCard: React.FC<EntryCardProps> = ({
           >
             {noteBody.length > 220 ? noteBody.slice(0, 220) + "..." : noteBody}
           </div>
+        ) : isSecret && !revealed ? (
+          <div
+            className="text-[11px] font-mono tracking-widest cursor-pointer select-none py-0.5"
+            onClick={(e) => { e.stopPropagation(); setRevealed(true); }}
+            style={{ color: "var(--text-muted)" }}
+            title="Click to reveal"
+          >
+            ••••••••••••••••••••••••
+          </div>
         ) : (
           <div
             className={`text-[11px] truncate max-w-md ${isArVal ? "font-arabic ar-text" : ""}`}
             dir={isArVal ? "rtl" : "auto"}
             lang={isArVal ? "ar" : undefined}
-            style={{ color: "var(--emerald)", fontFamily: isArVal ? "var(--font-arabic)" : "var(--font-mono)" }}
+            style={{ color: isSecret ? "var(--amber)" : isCmd ? "var(--cyan)" : "var(--emerald)", fontFamily: isArVal ? "var(--font-arabic)" : "var(--font-mono)" }}
           >
             {entry.value.slice(0, 80)}
             {entry.value.length > 80 ? "…" : ""}

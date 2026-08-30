@@ -18,6 +18,7 @@ backups/
 .DS_Store
 Thumbs.db
 *.log
+*.tgz
 .vs/
 .zcode/
 /.zed

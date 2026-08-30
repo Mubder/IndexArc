@@ -14,10 +14,6 @@ import { heuristicAnalyze } from "../ai/heuristics.js";
 import { analyzePaste } from "../ai/providers.js";
 import { addLog } from "../logs.js";
 import * as mammoth from "mammoth";
-import pdfParse from "pdf-parse/lib/pdf-parse.js";
-import * as XLSX from "xlsx";
-
-const XLSXmod: any = (XLSX as any).default ?? XLSX;
 
 const IGNORE_DIRS = new Set([
   "node_modules",
@@ -217,7 +213,8 @@ async function extractText(
       if (stat.size > MAX_DOC_BYTES)
         return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
       const buf = fs.readFileSync(filePath);
-      const data = await pdfParse(buf);
+      const { PDFParse } = await import("pdf-parse");
+      const data = await PDFParse(buf);
       const text = ((data && data.text) || "").trim();
       return text ? { ok: true, text } : { ok: false, reason: "No extractable text" };
     } catch (e: any) {
@@ -232,12 +229,22 @@ async function extractText(
       if (stat.size === 0) return { ok: false, reason: "Empty file" };
       if (stat.size > MAX_DOC_BYTES)
         return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
-      const wb = XLSXmod.readFile(filePath);
+      const ExcelJS = (await import("exceljs")).default;
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(filePath);
       const parts: string[] = [];
-      for (const name of wb.SheetNames) {
-        parts.push(`## Sheet: ${name}`);
-        parts.push(XLSXmod.utils.sheet_to_csv(wb.Sheets[name]));
-      }
+      workbook.eachSheet((sheet, sheetId) => {
+        parts.push(`## Sheet: ${sheet.name}`);
+        const rows: string[] = [];
+        sheet.eachRow({ includeEmpty: false }, (row) => {
+          const vals: string[] = [];
+          row.eachCell({ includeEmpty: true }, (cell) => {
+            vals.push(String(cell.value ?? ""));
+          });
+          rows.push(vals.join(","));
+        });
+        parts.push(rows.join("\n"));
+      });
       const text = parts.join("\n").trim();
       return text ? { ok: true, text } : { ok: false, reason: "No extractable text" };
     } catch (e: any) {

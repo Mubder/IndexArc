@@ -1,5 +1,7 @@
 import path from "path";
 import fs from "fs";
+import { execSync } from "child_process";
+import os from "os";
 
 /**
  * Portable single-folder root.
@@ -10,7 +12,6 @@ function loadPersistedRoot(): string | null {
   // Mirror electron-main: restore the vault root saved on a previous run so a
   // standalone/updated launch never orphans user data.
   try {
-    const { execSync } = require("child_process");
     const out = execSync(`reg query "HKCU\\Software\\IndexArc" /v Root`, {
       windowsHide: true,
       encoding: "utf8",
@@ -23,8 +24,8 @@ function loadPersistedRoot(): string | null {
     }
   } catch {}
   try {
-    const base = process.env.APPDATA || require("os").homedir();
-    const marker = require("path").join(base, "IndexArc", "vault-root.json");
+    const base = process.env.APPDATA || os.homedir();
+    const marker = path.join(base, "IndexArc", "vault-root.json");
     if (fs.existsSync(marker)) {
       const parsed = JSON.parse(fs.readFileSync(marker, "utf8"));
       if (parsed && parsed.root && fs.existsSync(parsed.root)) return parsed.root;

@@ -415,7 +415,11 @@ ipcMain.handle("install-ollama", async () => {
 
 ipcMain.handle("open-external", async (_e, url) => {
   try {
-    shell.openExternal(url);
+    if (typeof url !== "string") return false;
+    const parsed = new URL(url);
+    const allowedSchemes = ["http:", "https:", "mailto:"];
+    if (!allowedSchemes.includes(parsed.protocol)) return false;
+    await shell.openExternal(url);
     return true;
   } catch {
     return false;

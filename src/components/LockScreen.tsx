@@ -59,9 +59,14 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
           boxShadow: "0 0 40px rgba(0,0,0,0.3)",
         }}
       >
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-mono mb-4" style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span>AES-256 GCM ENCRYPTED</span>
+        </div>
+
         <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 animate-pulse-glow"
-          style={{ background: "var(--accent-bg)", border: "1px solid var(--border-glow)", color: "var(--accent-bright)" }}
+          className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+          style={{ background: "var(--accent-bg)", border: "1px solid var(--border-glow)", color: "var(--accent-bright)", boxShadow: "0 0 24px var(--accent-glow)" }}
         >
           <Lock className="w-8 h-8" />
         </div>
@@ -69,7 +74,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
         <h2 className="text-xl font-bold tracking-tight mb-2 text-center" style={{ color: "var(--text)" }}>
           {t("sec_locked_title")}
         </h2>
-        <p className="text-sm text-center mb-8 max-w-xs leading-relaxed" style={{ color: "var(--text-dim)" }}>
+        <p className="text-sm text-center mb-6 max-w-xs leading-relaxed" style={{ color: "var(--text-dim)" }}>
           {t("sec_locked_subtitle")}
         </p>
 
@@ -85,12 +90,20 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
               placeholder={t("sec_password_placeholder")}
               disabled={loading}
               autoFocus
-              className="w-full rounded-xl px-4 py-3 text-sm transition-colors"
+              className="w-full rounded-xl px-4 py-3 text-sm transition-all focus:outline-none"
               style={{
                 background: "var(--bg-input)",
                 border: "1px solid var(--border-input)",
                 color: "var(--text)",
                 fontFamily: "var(--font-mono)",
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = "var(--border-glow)";
+                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(37, 99, 235, 0.15)";
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = "var(--border-input)";
+                e.currentTarget.style.boxShadow = "none";
               }}
             />
           </div>
@@ -108,8 +121,8 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
           <button
             type="submit"
             disabled={loading || !password}
-            className="w-full disabled:opacity-40 font-medium text-sm py-3 rounded-xl transition-all flex items-center justify-center gap-2"
-            style={{ background: "var(--accent)", color: "white" }}
+            className="w-full disabled:opacity-40 font-semibold text-sm py-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer text-white"
+            style={{ background: "linear-gradient(135deg, var(--accent), #1d4ed8)", boxShadow: "0 0 20px var(--accent-glow)" }}
           >
             {loading ? (
               <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

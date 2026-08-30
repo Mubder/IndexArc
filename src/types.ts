@@ -154,3 +154,26 @@ export interface DuplicateCheck {
   existing_entry?: VaultEntry;
   match_type: "exact_value" | "similar_name" | "same_source";
 }
+
+export interface ScratchTab {
+  id: string;
+  title: string;
+  content: string;
+  archived?: boolean;
+  archivedAt?: number;
+}
+
+export interface Detection {
+  families: string[];
+  candidates: AnalyzeCandidate[];
+  provider: string;
+}
+
+export interface Busy {
+  analyze?: boolean;
+  save?: boolean;
+  rewrite?: boolean;
+  proofread?: boolean;
+}
+
+export type NoteBidiMode = "auto" | "ltr" | "rtl";
