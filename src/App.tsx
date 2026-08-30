@@ -821,7 +821,7 @@ return (
                 style={{
                   borderRadius: "9999px",
                   color: isActive ? "var(--text)" : "var(--text-dim)",
-                  background: isActive ? "var(--bg-surface-solid)" : "transparent",
+                  background: isActive ? "var(--bg-surface-solid)" : "var(--bg-surface)",
                   border: `1px solid ${isActive ? "var(--border-glow)" : "var(--border)"}`,
                   boxShadow: isActive ? "0 4px 14px rgba(0,0,0,0.12)" : "none",
                 }}
