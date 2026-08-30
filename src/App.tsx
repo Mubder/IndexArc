@@ -822,12 +822,12 @@ return (
                   borderRadius: "9999px",
                   color: isActive ? "var(--text)" : "var(--text-dim)",
                   background: isActive ? "var(--bg-surface-solid)" : "transparent",
-                  border: `1px solid ${isActive ? "var(--border-glow)" : "transparent"}`,
+                  border: `1px solid ${isActive ? "var(--border-glow)" : "var(--border)"}`,
                   boxShadow: isActive ? "0 4px 14px rgba(0,0,0,0.12)" : "none",
                 }}
               >
                 <span style={{ opacity: isActive ? 1 : 0.6 }}>{n.icon}</span>
-                <span className="flex-1 text-left truncate">{n.label}</span>
+                <span className="flex-1 text-left truncate" style={{ minWidth: "15ch" }}>{n.label}</span>
                 {n.badge ? (
                   <span
                     className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
