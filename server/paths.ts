@@ -92,6 +92,7 @@ export function ensurePortableLayout(root: string = getAppRoot()) {
     watchedFoldersFile: path.join(root, "data", "watched_folders.json"),
     scanSessionsFile: path.join(root, "data", "scan_sessions.json"),
     scratchpadFile: path.join(root, "data", "scratchpad.json"),
+    scratchpadArchiveFile: path.join(root, "data", "scratchpad_archive.json"),
   };
 }
 

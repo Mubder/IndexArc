@@ -47,6 +47,7 @@ export class VaultStore {
   private _entriesCache: VaultEntry[] | null = null;
   private _foldersCache: WatchedFolder[] | null = null;
   private _scratchpadCache: any[] | null = null;
+  private _scratchpadArchiveCache: any[] | null = null;
 
   constructor(private paths: PortablePaths) {}
 
@@ -56,6 +57,7 @@ export class VaultStore {
     this._entriesCache = null;
     this._foldersCache = null;
     this._scratchpadCache = null;
+    this._scratchpadArchiveCache = null;
   }
 
   // --- Encryption Support ---
@@ -379,13 +381,37 @@ export class VaultStore {
   // --- Scratchpad tabs (portable, survives reinstall/update) ---
   getScratchpad(): any[] {
     if (this._scratchpadCache) return this._scratchpadCache;
-    const tabs = readJson<{ tabs: any[] }>(this.paths.scratchpadFile, { tabs: [] }).tabs;
-    this._scratchpadCache = tabs;
-    return tabs;
+    const raw = readJson<{ tabs: any[] }>(this.paths.scratchpadFile, { tabs: [] }).tabs;
+    const all = Array.isArray(raw) ? raw : [];
+
+    // MIGRATION / PURGE: If scratchpad.json has archived tabs, migrate them
+    // immediately to scratchpad_archive.json so scratchpad.json stays lightweight.
+    const hasArchived = all.some((t: any) => !!t.archived);
+    if (hasArchived) {
+      const active = all.filter((t: any) => !t.archived);
+      const toArchive = all.filter((t: any) => !!t.archived);
+      
+      const existingArchive = this.getScratchpadArchive();
+      const existingIds = new Set(existingArchive.map((x: any) => x.id));
+      const mergedArchive = [
+        ...toArchive.map((t: any) => ({ ...t, archived: true, archivedAt: t.archivedAt || Date.now() })),
+        ...existingArchive.filter((x: any) => !existingIds.has(x.id)),
+      ];
+      this.saveScratchpadArchive(mergedArchive);
+      this.saveScratchpad(active, { force: true });
+      this._scratchpadCache = active;
+      return active;
+    }
+
+    const active = all.filter((t: any) => !t.archived);
+    this._scratchpadCache = active;
+    return active;
   }
 
   saveScratchpad(tabs: any[], opts: { force?: boolean } = {}): any[] {
-    const safe = Array.isArray(tabs) ? tabs : [];
+    const incoming = Array.isArray(tabs) ? tabs : [];
+    // Ensure only unarchived tabs live in the active store
+    const safe = incoming.filter((t: any) => !t.archived);
 
     // DATA-LOSS GUARD: never let an empty/partial save silently wipe existing
     // tabs. If the incoming set is empty but a non-empty file already exists,
@@ -408,12 +434,106 @@ export class VaultStore {
       }
     } catch {}
 
-    this._scratchpadCache = null;
+    this._scratchpadCache = safe;
     atomicWrite(
       this.paths.scratchpadFile,
       JSON.stringify({ version: 1, tabs: safe }, null, 2)
     );
     return safe;
+  }
+
+  // --- Scratchpad Archive (Passive Cold Storage) ---
+  getScratchpadArchive(): any[] {
+    if (this._scratchpadArchiveCache) return this._scratchpadArchiveCache;
+    const raw = readJson<{ tabs: any[] }>(this.paths.scratchpadArchiveFile, { tabs: [] }).tabs;
+    const tabs = Array.isArray(raw) ? raw : [];
+    this._scratchpadArchiveCache = tabs;
+    return tabs;
+  }
+
+  saveScratchpadArchive(tabs: any[]): any[] {
+    const safe = Array.isArray(tabs) ? tabs : [];
+    try {
+      if (fs.existsSync(this.paths.scratchpadArchiveFile)) {
+        const prev = fs.readFileSync(this.paths.scratchpadArchiveFile);
+        if (prev.length > 0) {
+          fs.writeFileSync(this.paths.scratchpadArchiveFile + ".prev", prev);
+        }
+      }
+    } catch {}
+
+    this._scratchpadArchiveCache = safe;
+    atomicWrite(
+      this.paths.scratchpadArchiveFile,
+      JSON.stringify({ version: 1, tabs: safe }, null, 2)
+    );
+    return safe;
+  }
+
+  archiveScratchpadTab(tabId: string, tabFallback?: any): { success: boolean; activeTabs: any[]; archivedCount: number } {
+    const active = this.getScratchpad();
+    const targetIdx = active.findIndex((t: any) => t.id === tabId);
+    let target = targetIdx !== -1 ? active[targetIdx] : tabFallback;
+
+    if (!target) {
+      return {
+        success: false,
+        activeTabs: active,
+        archivedCount: this.getScratchpadArchive().length,
+      };
+    }
+
+    const newActive = active.filter((t: any) => t.id !== tabId);
+    this.saveScratchpad(newActive, { force: true });
+
+    const archive = this.getScratchpadArchive();
+    const archivedItem = { ...target, archived: true, archivedAt: Date.now() };
+    const newArchive = [archivedItem, ...archive.filter((t: any) => t.id !== tabId)];
+    this.saveScratchpadArchive(newArchive);
+
+    return {
+      success: true,
+      activeTabs: newActive,
+      archivedCount: newArchive.length,
+    };
+  }
+
+  restoreScratchpadTab(tabId: string): { success: boolean; restoredTab?: any; activeTabs: any[]; archivedCount: number } {
+    const archive = this.getScratchpadArchive();
+    const target = archive.find((t: any) => t.id === tabId);
+    if (!target) {
+      return {
+        success: false,
+        activeTabs: this.getScratchpad(),
+        archivedCount: archive.length,
+      };
+    }
+
+    const newArchive = archive.filter((t: any) => t.id !== tabId);
+    this.saveScratchpadArchive(newArchive);
+
+    const active = this.getScratchpad();
+    const restored = { ...target, archived: false };
+    delete restored.archivedAt;
+    const newActive = [...active, restored];
+    this.saveScratchpad(newActive, { force: true });
+
+    return {
+      success: true,
+      restoredTab: restored,
+      activeTabs: newActive,
+      archivedCount: newArchive.length,
+    };
+  }
+
+  deleteArchivedScratchpadTab(tabId: string): { success: boolean; archivedCount: number } {
+    const archive = this.getScratchpadArchive();
+    const newArchive = archive.filter((t: any) => t.id !== tabId);
+    this.saveScratchpadArchive(newArchive);
+    return {
+      success: true,
+      archivedCount: newArchive.length,
+    };
   }
 
   /**

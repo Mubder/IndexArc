@@ -42,6 +42,37 @@ export function miscRoutes(ctx: RouteContext) {
     res.json({ tabs: store.saveScratchpad(tabs, { force }) });
   });
 
+  r.get("/scratchpad/archive", (_req, res) => {
+    const archive = store.getScratchpadArchive();
+    res.json({ tabs: archive, count: archive.length });
+  });
+
+  r.get("/scratchpad/archive/count", (_req, res) => {
+    res.json({ count: store.getScratchpadArchive().length });
+  });
+
+  r.post("/scratchpad/archive-tab", (req, res) => {
+    const tabId = String(req.body?.tabId || "").trim();
+    const tabFallback = req.body?.tab;
+    if (!tabId) return res.status(400).json({ ok: false, error: "tabId required" });
+    const result = store.archiveScratchpadTab(tabId, tabFallback);
+    res.json({ ok: result.success, ...result });
+  });
+
+  r.post("/scratchpad/restore-tab", (req, res) => {
+    const tabId = String(req.body?.tabId || "").trim();
+    if (!tabId) return res.status(400).json({ ok: false, error: "tabId required" });
+    const result = store.restoreScratchpadTab(tabId);
+    res.json({ ok: result.success, ...result });
+  });
+
+  r.post("/scratchpad/delete-archived", (req, res) => {
+    const tabId = String(req.body?.tabId || "").trim();
+    if (!tabId) return res.status(400).json({ ok: false, error: "tabId required" });
+    const result = store.deleteArchivedScratchpadTab(tabId);
+    res.json({ ok: result.success, ...result });
+  });
+
   r.get("/snippets", (_req, res) => {
     res.json(
       store.listEntries().map((e) => ({

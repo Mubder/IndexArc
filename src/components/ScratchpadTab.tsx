@@ -212,12 +212,14 @@ function loadTabs(): ScratchTab[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length) {
-        return parsed.map((x: any) => ({
-          id: x.id || uid(),
-          title: x.title || "Scratch",
-          content: ensureHtmlParagraphs(x.content || ""),
-          archived: !!x.archived,
-        }));
+        return parsed
+          .filter((x: any) => !x.archived)
+          .map((x: any) => ({
+            id: x.id || uid(),
+            title: x.title || "Scratch",
+            content: ensureHtmlParagraphs(x.content || ""),
+            archived: false,
+          }));
       }
     }
   } catch {}
@@ -229,7 +231,9 @@ async function loadTabsIDB(): Promise<ScratchTab[] | null> {
     const { get } = await import("idb-keyval");
     const val = await get(STORAGE_KEY);
     if (Array.isArray(val) && val.length) {
-      return (val as ScratchTab[]).map((t) => ({ ...t, content: ensureHtmlParagraphs(t.content || "") }));
+      return (val as ScratchTab[])
+        .filter((t) => !t.archived)
+        .map((t) => ({ ...t, content: ensureHtmlParagraphs(t.content || ""), archived: false }));
     }
   } catch {}
   return null;
@@ -581,6 +585,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [archivedCount, setArchivedCount] = useState<number>(0);
+  const [archivedTabs, setArchivedTabs] = useState<ScratchTab[] | null>(null);
+  const [loadingArchived, setLoadingArchived] = useState(false);
+  const [previewArchivedTab, setPreviewArchivedTab] = useState<ScratchTab | null>(null);
   const [bidiMode, setBidiMode] = useState<NoteBidiMode>("auto");
   const [noteOverflows, setNoteOverflows] = useState(false);
   const [canScrollUp, setCanScrollUp] = useState(false);
@@ -1195,23 +1203,23 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         const data = await res.json();
         const serverTabs: ScratchTab[] = Array.isArray(data.tabs)
           ? data.tabs
-              .filter((x: any) => x && typeof x === "object")
+              .filter((x: any) => x && typeof x === "object" && !x.archived)
               .map((x: any) => ({
                 id: x.id || uid(),
                 title: x.title || "Scratch",
                 content: x.content || "",
-                archived: !!x.archived,
+                archived: false,
               }))
           : [];
         if (cancelled) return;
         if (serverTabs.length) {
-          // Server has the durable copy â€” it wins over the localStorage cache.
+          // Server has the durable copy — it wins over the localStorage cache.
           setTabs(serverTabs);
           setActiveId(serverTabs[0].id);
         } else {
           // First run on this vault: migrate existing localStorage tabs up so
           // they become durable and survive future reinstalls.
-          const local = initial.current;
+          const local = initial.current.filter((x) => !x.archived);
           const hasContent = local.some((x) => x.content.trim() || x.title !== "Scratch 1");
           if (hasContent) {
             fetch("/api/scratchpad", {
@@ -1222,11 +1230,20 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           }
         }
       } catch {
-        /* offline / locked â€” keep localStorage tabs */
+        /* offline / locked — keep localStorage tabs */
       } finally {
         if (!cancelled) serverLoaded.current = true;
       }
     })();
+
+    // Fetch archive count from cold storage
+    fetch("/api/scratchpad/archive/count")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && typeof d.count === "number") setArchivedCount(d.count);
+      })
+      .catch(() => {});
+
     return () => {
       cancelled = true;
     };
@@ -1684,28 +1701,104 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setActiveId(id);
   };
 
-  // Archive soft-hides a tab (content preserved) instead of deleting it.
-  const archiveTab = (id: string) => {
+  // Toggle archive section with lazy on-demand fetch
+  const toggleShowArchived = useCallback(() => {
+    setShowArchived((prev) => {
+      const next = !prev;
+      if (next && archivedTabs === null) {
+        setLoadingArchived(true);
+        fetch("/api/scratchpad/archive")
+          .then((r) => r.json())
+          .then((d) => {
+            if (Array.isArray(d.tabs)) {
+              setArchivedTabs(d.tabs);
+              setArchivedCount(d.tabs.length);
+            }
+          })
+          .catch(() => {})
+          .finally(() => setLoadingArchived(false));
+      }
+      return next;
+    });
+  }, [archivedTabs]);
+
+  // Archive soft-hides a tab into cold storage
+  const archiveTab = async (id: string) => {
     const target = tabs.find((x) => x.id === id);
     if (!window.confirm(`Are you sure you want to archive note "${target?.title || "Scratch"}"?`)) return;
-    setTabs((prev) => {
-      const archived = prev.map((x) => (x.id === id ? { ...x, archived: true, archivedAt: Date.now() } : x));
-      const remaining = archived.filter((x) => !x.archived);
-      if (id === activeId) {
-        if (remaining.length) {
-          setActiveId(remaining[0].id);
-        } else {
-          const fresh = { id: uid(), title: "Scratch 1", content: "" };
-          setTabs((cur) => [...cur, fresh]);
-          setActiveId(fresh.id);
-        }
-      }
-      return archived;
-    });
+
+    // Optimistic UI update
+    const remaining = tabs.filter((x) => x.id !== id);
+    if (remaining.length === 0) {
+      const fresh = { id: uid(), title: "Scratch 1", content: "", archived: false };
+      setTabs([fresh]);
+      setActiveId(fresh.id);
+    } else {
+      setTabs(remaining);
+      if (id === activeId) setActiveId(remaining[0].id);
+    }
+    setArchivedCount((c) => c + 1);
+    if (archivedTabs !== null && target) {
+      setArchivedTabs((prev) => [{ ...target, archived: true, archivedAt: Date.now() }, ...(prev || [])]);
+    }
+
+    try {
+      await fetch("/api/scratchpad/archive-tab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tabId: id, tab: target }),
+      });
+    } catch {}
   };
 
-  const restoreTab = (id: string) => {
-    setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, archived: false } : x)));
+  const restoreTab = async (id: string) => {
+    let target = archivedTabs?.find((x) => x.id === id);
+    if (archivedTabs !== null) {
+      setArchivedTabs((prev) => (prev ? prev.filter((x) => x.id !== id) : null));
+    }
+    setArchivedCount((c) => Math.max(0, c - 1));
+
+    try {
+      const res = await fetch("/api/scratchpad/restore-tab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tabId: id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.restoredTab) {
+          target = data.restoredTab;
+        }
+      }
+    } catch {}
+
+    if (target) {
+      const restored = { ...target, archived: false };
+      setTabs((prev) => [...prev, restored]);
+      setActiveId(target.id);
+    }
+    if (previewArchivedTab?.id === id) {
+      setPreviewArchivedTab(null);
+    }
+  };
+
+  const deleteArchivedTab = async (id: string, title?: string) => {
+    if (!window.confirm(`Are you sure you want to permanently delete "${title || "Untitled"}"?`)) return;
+    if (archivedTabs !== null) {
+      setArchivedTabs((prev) => (prev ? prev.filter((x) => x.id !== id) : null));
+    }
+    setArchivedCount((c) => Math.max(0, c - 1));
+    if (previewArchivedTab?.id === id) {
+      setPreviewArchivedTab(null);
+    }
+
+    try {
+      await fetch("/api/scratchpad/delete-archived", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tabId: id }),
+      });
+    } catch {}
   };
 
   const closeTab = (id: string, skipConfirm: boolean = false) => {
@@ -2842,72 +2935,192 @@ className="scratchpad-tab group cursor-pointer"
         )}
       </div>
 
-      {/* Archived tabs */}
-      {tabs.some((x) => x.archived) && (
+      {/* Archived tabs — Cold Reference Archive */}
+      {(archivedCount > 0 || (archivedTabs && archivedTabs.length > 0)) && (
         <div
           className="rounded-2xl overflow-hidden"
           style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
         >
           <button
             type="button"
-            onClick={() => setShowArchived((s) => !s)}
+            onClick={toggleShowArchived}
             className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold"
             style={{ color: "var(--text-dim)" }}
           >
             <span className="flex items-center gap-2">
-              <Archive className="w-3.5 h-3.5" />
-              {t("scratchpad_archived")} ({tabs.filter((x) => x.archived).length})
+              <Archive className="w-3.5 h-3.5 text-amber-400/80" />
+              <span>{t("scratchpad_archived")} ({archivedCount})</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 font-mono text-zinc-400">Cold Storage</span>
             </span>
-            <span>{showArchived ? "â–¾" : "â–¸"}</span>
+            <span className="text-zinc-500">{showArchived ? "▾" : "▸"}</span>
           </button>
           {showArchived && (
             <div className="px-4 pb-3 flex flex-col gap-1.5">
-              {tabs
-                .filter((x) => x.archived)
-                .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0))
-                .map((tab) => (
-                  <div
-                    key={tab.id}
-                    className="flex items-center gap-2 py-1.5 px-2 rounded-lg"
-                    style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}
+              {loadingArchived && (
+                <div className="py-4 flex items-center justify-center gap-2 text-xs text-zinc-400">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Loading archive...</span>
+                </div>
+              )}
+              {!loadingArchived && archivedTabs && archivedTabs.length === 0 && (
+                <div className="py-2 text-center text-xs text-zinc-500">No archived notes</div>
+              )}
+              {!loadingArchived && archivedTabs && archivedTabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  className="flex items-center gap-2 py-1.5 px-2.5 rounded-lg group transition-colors"
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}
+                >
+                  <span
+                    className="flex-1 truncate text-xs cursor-pointer hover:underline"
+                    style={{ color: "var(--text-muted)" }}
+                    onClick={() => setPreviewArchivedTab(tab)}
+                    title="Click to preview (read-only)"
                   >
-                    <span
-                      className="flex-1 truncate text-xs cursor-pointer"
-                      style={{ color: "var(--text-muted)" }}
-                      onClick={() => {
-                        restoreTab(tab.id);
-                        setActiveId(tab.id);
-                      }}
-                      title={t("scratchpad_restore")}
-                    >
-                      {tab.title || "Untitled"}
+                    {tab.title || "Untitled"}
+                  </span>
+                  {tab.archivedAt && (
+                    <span className="text-[10px] text-zinc-500 hidden sm:inline">
+                      {new Date(tab.archivedAt).toLocaleDateString()}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => restoreTab(tab.id)}
-                      className="opacity-70 hover:opacity-100 transition-opacity"
-                      aria-label={t("scratchpad_restore")}
-                      title={t("scratchpad_restore")}
-                    >
-                      <ArchiveRestore className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (window.confirm(`Are you sure you want to permanently delete "${tab.title || "Untitled"}"?`)) {
-                          closeTab(tab.id, true);
-                        }
-                      }}
-                      className="opacity-70 hover:opacity-100 transition-opacity text-red-400 hover:text-red-300"
-                      aria-label={t("scratchpad_delete")}
-                      title={t("scratchpad_delete")}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPreviewArchivedTab(tab)}
+                    className="opacity-70 hover:opacity-100 transition-opacity text-xs px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-zinc-300"
+                    title="View note"
+                  >
+                    View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => restoreTab(tab.id)}
+                    className="opacity-70 hover:opacity-100 transition-opacity text-emerald-400 hover:text-emerald-300 p-1"
+                    aria-label={t("scratchpad_restore")}
+                    title={t("scratchpad_restore")}
+                  >
+                    <ArchiveRestore className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteArchivedTab(tab.id, tab.title)}
+                    className="opacity-70 hover:opacity-100 transition-opacity text-red-400 hover:text-red-300 p-1"
+                    aria-label={t("scratchpad_delete")}
+                    title={t("scratchpad_delete")}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Archived Note Preview Modal (Passive Reference Viewer) */}
+      {previewArchivedTab && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+          onClick={() => setPreviewArchivedTab(null)}
+        >
+          <div
+            className="w-full max-w-2xl max-h-[85vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl"
+            style={{
+              background: "#121214",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div
+              className="flex items-center justify-between px-5 py-3.5 border-b"
+              style={{ borderColor: "rgba(255,255,255,0.08)" }}
+            >
+              <div className="flex items-center gap-2.5">
+                <Archive className="w-4 h-4 text-amber-400" />
+                <h3 className="text-sm font-semibold text-zinc-100 truncate max-w-md">
+                  {previewArchivedTab.title || "Archived Note"}
+                </h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
+                  Reference Only
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewArchivedTab(null)}
+                className="p-1 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-white/5 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Note Meta */}
+            <div
+              className="px-5 py-2 border-b flex items-center justify-between text-[11px] text-zinc-400"
+              style={{ borderColor: "rgba(255,255,255,0.05)", background: "rgba(255,255,255,0.02)" }}
+            >
+              <div className="flex items-center gap-3">
+                {previewArchivedTab.archivedAt && (
+                  <span>Archived on {new Date(previewArchivedTab.archivedAt).toLocaleString()}</span>
+                )}
+                <span>•</span>
+                <span>{htmlToPlainText(previewArchivedTab.content || "").length} characters</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(htmlToPlainText(previewArchivedTab.content || ""));
+                    setStatus("Copied to clipboard");
+                  }}
+                  className="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-zinc-300 transition-colors flex items-center gap-1.5"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>Copy</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Read-Only Content Body */}
+            <div
+              className="flex-1 overflow-y-auto p-5 text-sm leading-relaxed select-text"
+              style={{ color: "#d4d4d8" }}
+              dangerouslySetInnerHTML={{ __html: previewArchivedTab.content || "<p class='text-zinc-500'>Empty note</p>" }}
+            />
+
+            {/* Footer Actions */}
+            <div
+              className="flex items-center justify-between px-5 py-3 border-t"
+              style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(0,0,0,0.3)" }}
+            >
+              <button
+                type="button"
+                onClick={() => deleteArchivedTab(previewArchivedTab.id, previewArchivedTab.title)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Permanently</span>
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPreviewArchivedTab(null)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-white/5 transition-colors"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => restoreTab(previewArchivedTab.id)}
+                  className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 transition-colors flex items-center gap-1.5 shadow-sm"
+                >
+                  <ArchiveRestore className="w-3.5 h-3.5" />
+                  <span>Restore to Active Notes</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
