@@ -3084,7 +3084,7 @@ className="scratchpad-tab group cursor-pointer"
 
             {/* Read-Only Content Body */}
             <div
-              className="flex-1 overflow-y-auto p-5 text-sm leading-relaxed select-text"
+              className="flex-1 overflow-y-auto p-5 text-sm leading-[1.6] select-text"
               style={{ color: "#d4d4d8" }}
               dangerouslySetInnerHTML={{ __html: previewArchivedTab.content || "<p class='text-zinc-500'>Empty note</p>" }}
             />
@@ -3236,7 +3236,7 @@ className="scratchpad-tab group cursor-pointer"
                         {new Date(selectedRevision.timestamp).toLocaleString()}
                       </span>
                     </div>
-                    <div className="flex-1 p-4 overflow-y-auto font-sans text-xs text-neutral-200 leading-relaxed select-text">
+                    <div className="flex-1 p-4 overflow-y-auto font-sans text-xs text-neutral-200 leading-[1.6] select-text">
                       <div
                         dangerouslySetInnerHTML={{
                           __html: selectedRevision.content || "<em>Empty</em>",

@@ -15,6 +15,8 @@ Everything lives in **one folder** (USB-safe), with optional AES-256-GCM encrypt
 | [Architecture & Data Model](./ARCHITECTURE.md) | Engineers | Process model, portable-root resolution, encryption, vault/vectors file formats, backups, AI provider abstraction, data-safety design |
 | [API Reference](./API_REFERENCE.md) | Integrators | Every `/api/*` endpoint: method, path, request, response, and vault-lock behavior |
 | [Build & Release](./BUILD_AND_RELEASE.md) | Maintainers / ops | Producing signed Windows/macOS/Linux builds, NSIS installer, code signing, data-safety on update/reinstall |
+| [Audit Report](./AUDIT_REPORT.md) | Maintainers | 2026-09 deep audit: security findings (CRITICAL→LOW), correctness bugs, fix order |
+| [Scratchpad & Protection Plan](./SCRATCHPAD_AND_PROTECTION_PLAN.md) | Maintainers | Scratchpad refactor design, Pin/Protect/Lock note-protection spec, industry-grade roadmap |
 
 Root-level docs that still apply:
 
