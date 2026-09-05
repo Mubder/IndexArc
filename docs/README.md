@@ -17,6 +17,7 @@ Everything lives in **one folder** (USB-safe), with optional AES-256-GCM encrypt
 | [Build & Release](./BUILD_AND_RELEASE.md) | Maintainers / ops | Producing signed Windows/macOS/Linux builds, NSIS installer, code signing, data-safety on update/reinstall |
 | [Audit Report](./AUDIT_REPORT.md) | Maintainers | 2026-09 deep audit: security findings (CRITICAL→LOW), correctness bugs, fix order |
 | [Scratchpad & Protection Plan](./SCRATCHPAD_AND_PROTECTION_PLAN.md) | Maintainers | Scratchpad refactor design, Pin/Protect/Lock note-protection spec, industry-grade roadmap |
+| [Execution Plan](./EXECUTION_PLAN.md) | Maintainers | **Authoritative build order** — merges audit + design + peer review + hosted-mode analysis into 5 phases with acceptance criteria |
 
 Root-level docs that still apply:
 

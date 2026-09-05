@@ -77,6 +77,15 @@ export interface Settings {
   font_size_ar: number;
   enable_live_spellcheck?: boolean;
   enable_ai_proofreader?: boolean;
+  // Write-only key fields: GET /api/settings never returns key material — it
+  // returns these booleans instead. Key inputs in the UI keep drafts locally
+  // and only send non-empty values.
+  gemini_api_key_configured?: boolean;
+  openai_api_key_configured?: boolean;
+  groq_api_key_configured?: boolean;
+  openrouter_api_key_configured?: boolean;
+  anthropic_api_key_configured?: boolean;
+  local_openai_api_key_configured?: boolean;
 }
 
 export type Tab = "home" | "scratchpad" | "analyze" | "folders" | "library" | "ask" | "settings";

@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   installOllama: () => ipcRenderer.invoke("install-ollama"),
   startOllama: () => ipcRenderer.invoke("start-ollama"),
   openExternal: (url) => ipcRenderer.invoke("open-external", url),
+  getApiToken: () => ipcRenderer.invoke("get-api-token"),
   spellcheckWords: (words) => ipcRenderer.invoke("spellcheck-words", words),
   spellcheckSuggest: (word) => ipcRenderer.invoke("spellcheck-suggest", word),
   addCustomWord: (word) => ipcRenderer.invoke("add-custom-word", word),

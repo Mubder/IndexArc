@@ -426,6 +426,12 @@ ipcMain.handle("open-external", async (_e, url) => {
   }
 });
 
+// The embedded vault server exports its pairing token via process.env
+// (server/auth.ts). The renderer fetches it once through this bridge and
+// presents it as the X-IndexArc-Token header on every /api call — a plain
+// web page can never obtain it, which is what blocks rebinding/CSRF.
+ipcMain.handle("get-api-token", () => process.env.INDEXARC_API_TOKEN || null);
+
 // Check a batch of words (English and/or Arabic, mixed-language notes are
 // the whole point) and return the ones that are misspelled.
 ipcMain.handle("spellcheck-words", async (_e, words) => {

@@ -6,6 +6,7 @@ import { ensurePortableLayout } from "./server/paths.js";
 import { VaultStore } from "./server/store.js";
 import { addLog } from "./server/logs.js";
 import { FolderWatcherManager } from "./server/services/folderWatcher.js";
+import { apiAuthMiddleware } from "./server/auth.js";
 import { vaultRoutes, checkVaultUnlocked } from "./server/routes/vault.js";
 import { entriesRoutes } from "./server/routes/entries.js";
 import { foldersRoutes, fsRoutes } from "./server/routes/folders.js";
@@ -33,7 +34,12 @@ app.use((_req, res, next) => {
 });
 
 app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: true }));
+
+// --- API authentication (pairing token + Host allowlist) ---
+// Blocks DNS-rebinding and cross-site/CSRF access to every /api route.
+// See server/auth.ts. Exemptions: /api/ping, /api/auth/bootstrap,
+// /api/events with a one-time ticket.
+app.use("/api", apiAuthMiddleware);
 
 // Serve the app logo as the favicon to avoid 404s on /favicon.ico
 app.get("/favicon.ico", (_req, res) => {
@@ -47,7 +53,7 @@ const ctx: RouteContext = { store, watchers, paths, spellcheck: createSpellcheck
 app.use("/api/vault", vaultRoutes(ctx));
 
 // --- Protected routes (require unlocked vault) ---
-const protectedPaths = ["/api/entries", "/api/analyze", "/api/folders", "/api/ask", "/api/snippets", "/api/scratchpad"];
+const protectedPaths = ["/api/entries", "/api/analyze", "/api/folders", "/api/ask", "/api/snippets", "/api/scratchpad", "/api/fs"];
 for (const p of protectedPaths) {
   app.use(p, checkVaultUnlocked(ctx));
 }

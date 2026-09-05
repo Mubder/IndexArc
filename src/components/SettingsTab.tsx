@@ -14,6 +14,45 @@ interface SettingsTabProps {
   logs: { time: string; type: string; message: string }[];
 }
 
+// API keys are write-only (the server never returns stored key material), so
+// this input keeps a local draft and only sends a value on blur. Leaving it
+// empty keeps the stored key. "✓ saved" shows a key exists server-side.
+const KeyInput: React.FC<{
+  field: string;
+  configured?: boolean;
+  placeholder?: string;
+  onCommit: (patch: Partial<Settings>) => void;
+}> = ({ field, configured, placeholder, onCommit }) => {
+  const [draft, setDraft] = React.useState("");
+  return (
+    <input
+      type="password"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        const v = draft.trim();
+        if (v) {
+          onCommit({ [field]: v } as Partial<Settings>);
+          setDraft("");
+        }
+      }}
+      className="w-full rounded-lg px-2 py-1.5 text-sm"
+      style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
+      placeholder={configured ? "••••••••   (saved — type to replace)" : placeholder || ""}
+    />
+  );
+};
+
+const SavedBadge: React.FC<{ ok?: boolean }> = ({ ok }) =>
+  ok ? (
+    <span
+      className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+      style={{ color: "var(--accent-bright)", background: "var(--accent-bg)", border: "1px solid var(--border-glow)" }}
+    >
+      ✓ saved
+    </span>
+  ) : null;
+
 export const SettingsTab: React.FC<SettingsTabProps> = ({
   settings,
   onPatchSettings,
@@ -458,20 +497,20 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           <h3 className="text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5" style={{ color: "var(--accent-bright)" }}>
             <Sparkles className="w-3.5 h-3.5" /> {t("cloud_api_title")}
           </h3>
-          {!settings.gemini_api_key && settings.ai_provider === "api" && (
+          {!settings.gemini_api_key_configured && settings.ai_provider === "api" && (
             <p className="text-[11px] px-2 py-1.5 rounded-lg" style={{ color: "var(--amber)", background: "var(--amber-bg)", border: "1px solid rgba(251, 191, 36, 0.2)" }}>
               {t("api_key_desc")}
             </p>
           )}
           <label className="block text-xs space-y-1">
-            <span style={{ color: "var(--text-dim)" }}>{t("gemini_api_key_label")}</span>
-            <input
-              type="password"
-              value={settings.gemini_api_key}
-              onChange={(e) => onPatchSettings({ gemini_api_key: e.target.value })}
-              className="w-full rounded-lg px-2 py-1.5 text-sm"
-              style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
+            <span className="flex items-center gap-1.5" style={{ color: "var(--text-dim)" }}>
+              {t("gemini_api_key_label")} <SavedBadge ok={settings.gemini_api_key_configured} />
+            </span>
+            <KeyInput
+              field="gemini_api_key"
+              configured={settings.gemini_api_key_configured}
               placeholder="AIza…"
+              onCommit={onPatchSettings}
             />
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -525,14 +564,14 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             <Sparkles className="w-3.5 h-3.5" /> OpenAI API
           </h3>
           <label className="block text-xs space-y-1">
-            <span style={{ color: "var(--text-dim)" }}>OpenAI API key</span>
-            <input
-              type="password"
-              value={settings.openai_api_key || ""}
-              onChange={(e) => onPatchSettings({ openai_api_key: e.target.value })}
-              className="w-full rounded-lg px-2 py-1.5 text-sm"
-              style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
+            <span className="flex items-center gap-1.5" style={{ color: "var(--text-dim)" }}>
+              OpenAI API key <SavedBadge ok={settings.openai_api_key_configured} />
+            </span>
+            <KeyInput
+              field="openai_api_key"
+              configured={settings.openai_api_key_configured}
               placeholder="sk-..."
+              onCommit={onPatchSettings}
             />
           </label>
           <label className="block text-xs space-y-1">
@@ -555,14 +594,14 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             <Sparkles className="w-3.5 h-3.5" /> Groq API
           </h3>
           <label className="block text-xs space-y-1">
-            <span style={{ color: "var(--text-dim)" }}>Groq API key</span>
-            <input
-              type="password"
-              value={settings.groq_api_key || ""}
-              onChange={(e) => onPatchSettings({ groq_api_key: e.target.value })}
-              className="w-full rounded-lg px-2 py-1.5 text-sm"
-              style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
+            <span className="flex items-center gap-1.5" style={{ color: "var(--text-dim)" }}>
+              Groq API key <SavedBadge ok={settings.groq_api_key_configured} />
+            </span>
+            <KeyInput
+              field="groq_api_key"
+              configured={settings.groq_api_key_configured}
               placeholder="gsk_..."
+              onCommit={onPatchSettings}
             />
           </label>
           <label className="block text-xs space-y-1">
@@ -585,14 +624,14 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             <Sparkles className="w-3.5 h-3.5" /> OpenRouter API
           </h3>
           <label className="block text-xs space-y-1">
-            <span style={{ color: "var(--text-dim)" }}>OpenRouter API key</span>
-            <input
-              type="password"
-              value={settings.openrouter_api_key || ""}
-              onChange={(e) => onPatchSettings({ openrouter_api_key: e.target.value })}
-              className="w-full rounded-lg px-2 py-1.5 text-sm"
-              style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
+            <span className="flex items-center gap-1.5" style={{ color: "var(--text-dim)" }}>
+              OpenRouter API key <SavedBadge ok={settings.openrouter_api_key_configured} />
+            </span>
+            <KeyInput
+              field="openrouter_api_key"
+              configured={settings.openrouter_api_key_configured}
               placeholder="sk-or-v1-..."
+              onCommit={onPatchSettings}
             />
           </label>
           <label className="block text-xs space-y-1">
@@ -615,14 +654,14 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             <Sparkles className="w-3.5 h-3.5" /> Anthropic Claude API
           </h3>
           <label className="block text-xs space-y-1">
-            <span style={{ color: "var(--text-dim)" }}>Anthropic API key</span>
-            <input
-              type="password"
-              value={settings.anthropic_api_key || ""}
-              onChange={(e) => onPatchSettings({ anthropic_api_key: e.target.value })}
-              className="w-full rounded-lg px-2 py-1.5 text-sm"
-              style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
+            <span className="flex items-center gap-1.5" style={{ color: "var(--text-dim)" }}>
+              Anthropic API key <SavedBadge ok={settings.anthropic_api_key_configured} />
+            </span>
+            <KeyInput
+              field="anthropic_api_key"
+              configured={settings.anthropic_api_key_configured}
               placeholder="sk-ant-..."
+              onCommit={onPatchSettings}
             />
           </label>
           <label className="block text-xs space-y-1">
@@ -656,13 +695,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             />
           </label>
           <label className="block text-xs space-y-1">
-            <span style={{ color: "var(--text-dim)" }}>API Key (optional)</span>
-            <input
-              type="password"
-              value={settings.local_openai_api_key || ""}
-              onChange={(e) => onPatchSettings({ local_openai_api_key: e.target.value })}
-              className="w-full rounded-lg px-2 py-1.5 text-sm"
-              style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
+            <span className="flex items-center gap-1.5" style={{ color: "var(--text-dim)" }}>
+              API Key (optional) <SavedBadge ok={settings.local_openai_api_key_configured} />
+            </span>
+            <KeyInput
+              field="local_openai_api_key"
+              configured={settings.local_openai_api_key_configured}
+              onCommit={onPatchSettings}
             />
           </label>
           <label className="block text-xs space-y-1">

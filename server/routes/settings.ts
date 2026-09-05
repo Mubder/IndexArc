@@ -3,6 +3,27 @@ import { addLog, getLogs } from "../logs.js";
 import { sendSSE } from "./sse.js";
 import type { RouteContext } from "./types.js";
 
+// API keys are write-only: they are accepted by POST and never returned.
+// GET responses carry `*_api_key_configured` booleans instead.
+const KEY_FIELDS = [
+  "gemini_api_key",
+  "openai_api_key",
+  "groq_api_key",
+  "openrouter_api_key",
+  "anthropic_api_key",
+  "local_openai_api_key",
+] as const;
+
+function maskSettings(s: object): Record<string, unknown> {
+  const src = s as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...src };
+  for (const k of KEY_FIELDS) {
+    out[`${k}_configured`] = Boolean(src[k]);
+    out[k] = "";
+  }
+  return out;
+}
+
 export function settingsRoutes(ctx: RouteContext) {
   const r = Router();
   const { store } = ctx;
@@ -10,11 +31,7 @@ export function settingsRoutes(ctx: RouteContext) {
   r.get("/logs", (_req, res) => res.json(getLogs()));
 
   r.get("/settings", (_req, res) => {
-    const s = store.getSettings();
-    res.json({
-      ...s,
-      gemini_api_key: s.gemini_api_key,
-    });
+    res.json(maskSettings(store.getSettings()));
   });
 
   r.post("/settings", (req, res) => {
@@ -49,7 +66,12 @@ export function settingsRoutes(ctx: RouteContext) {
     ];
     const patch: Record<string, unknown> = {};
     for (const k of allowed) {
-      if (body[k] !== undefined) patch[k] = body[k];
+      if (body[k] === undefined) continue;
+      // Key fields are write-only and sticky: an empty string means "keep the
+      // stored key" so masked responses round-tripping through the client can
+      // never wipe a saved key.
+      if ((KEY_FIELDS as readonly string[]).includes(k) && String(body[k]).trim() === "") continue;
+      patch[k] = body[k];
     }
     if (
       patch.ai_provider &&
@@ -69,7 +91,7 @@ export function settingsRoutes(ctx: RouteContext) {
     const next = store.saveSettings(patch as Partial<ReturnType<typeof store.getSettings>>);
     addLog("SETTINGS", `Updated AI provider mode: ${next.ai_provider}`);
     sendSSE("settings-changed", { ai_provider: next.ai_provider });
-    res.json(next);
+    res.json(maskSettings(next));
   });
 
   return r;
