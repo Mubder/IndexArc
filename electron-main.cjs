@@ -617,7 +617,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: false,
+      sandbox: true,
       spellcheck: true,
       preload: path.join(__dirname, "preload.cjs"),
     },

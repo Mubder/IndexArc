@@ -16,6 +16,7 @@ import {
 import { VaultEntry, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
 import { isArabicText } from "../utils";
+import { sanitizeNoteHtml } from "../sanitize";
 
 interface NoteDetailModalProps {
   entry: VaultEntry | null;
@@ -53,7 +54,7 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
 
   if (!isOpen || !entry) return null;
 
-  const richHtml = entry.raw_fragment && entry.raw_fragment.includes("<") ? entry.raw_fragment : null;
+  const richHtml = entry.raw_fragment && entry.raw_fragment.includes("<") ? sanitizeNoteHtml(entry.raw_fragment) : null;
   const plainText = entry.notes && entry.notes.trim() ? entry.notes : entry.value;
   const isArTitle = isArabicText(entry.name);
   const isArBody = isArabicText(plainText);

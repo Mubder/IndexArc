@@ -56,6 +56,7 @@ import {
   NoteBidiMode,
 } from "../types";
 import { getTranslation } from "../utils/i18n";
+import { sanitizeNoteHtml, textToNoteHtml } from "../sanitize";
 import { isArabicText } from "../utils";
 
 export interface NoteRevision {
@@ -1968,7 +1969,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           ...prev,
           [activeId]: [...(prev[activeId] || []), original],
         }));
-        const newHtml = data.rewritten.replace(/\n/g, "<br>");
+        const newHtml = textToNoteHtml(data.rewritten);
         // setContent routes through setEditorHtml for the active tab, which
         // updates DOM + history + state together â€” no direct innerHTML write.
         setContent(activeId, newHtml);
@@ -2003,7 +2004,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           ...prev,
           [activeId]: [...(prev[activeId] || []), original],
         }));
-        const newHtml = data.corrected.replace(/\n/g, "<br>");
+        const newHtml = textToNoteHtml(data.corrected);
         setContent(activeId, newHtml);
         setStatus(t("scratchpad_proofread_ok" as any) || "Proofread complete");
         analyze(activeId, data.corrected);
@@ -3086,7 +3087,7 @@ className="scratchpad-tab group cursor-pointer"
             <div
               className="flex-1 overflow-y-auto p-5 text-sm leading-[1.6] select-text"
               style={{ color: "#d4d4d8" }}
-              dangerouslySetInnerHTML={{ __html: previewArchivedTab.content || "<p class='text-zinc-500'>Empty note</p>" }}
+              dangerouslySetInnerHTML={{ __html: sanitizeNoteHtml(previewArchivedTab.content) || "<p class='text-zinc-500'>Empty note</p>" }}
             />
 
             {/* Footer Actions */}
@@ -3239,7 +3240,7 @@ className="scratchpad-tab group cursor-pointer"
                     <div className="flex-1 p-4 overflow-y-auto font-sans text-xs text-neutral-200 leading-[1.6] select-text">
                       <div
                         dangerouslySetInnerHTML={{
-                          __html: selectedRevision.content || "<em>Empty</em>",
+                          __html: sanitizeNoteHtml(selectedRevision.content) || "<em>Empty</em>",
                         }}
                         className="prose prose-invert max-w-none text-xs"
                       />
