@@ -1,58 +1,84 @@
 import type { ScratchTab } from "./types";
 
-// Module-level scratchpad save queue.
+// Module-level scratchpad save queue — per-tab content saves (PR-12).
 //
 // Lives OUTSIDE React on purpose: ScratchpadTab unmounts on every tab switch,
 // and the old component-scoped debounce cancelled its pending fetch in the
 // effect cleanup — losing the last ~1.2s of edits. This queue survives
-// unmount, always keeps only the latest snapshot (last-writer-wins), and
-// flushes after a short quiet period. Failed posts are re-queued and retried;
-// 409 conflicts are handed to the registered handler instead of retrying.
+// unmount, keeps only the latest snapshot, and flushes after a quiet period.
+//
+// Each changed tab is saved individually via
+// POST /api/scratchpad/tabs/:id/content with the base rev it was edited from;
+// a 409 (changed elsewhere) is handed to the conflict handler instead of
+// retrying. Structural changes (rename/delete/reorder) are immediate calls
+// from the component, not queued.
 
 const DEBOUNCE_MS = 800;
 const RETRY_MS = 5000;
 
-interface PendingSave {
-  tabs: ScratchTab[];
-  force: boolean;
-}
-
-let pending: PendingSave | null = null;
+let pending: ScratchTab[] | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
-// Serialize posts so an in-flight save and a queued save can't land out of order.
+// Serialize posts so saves can't land out of order.
 let chain: Promise<void> = Promise.resolve();
-let conflictHandler: ((serverTabs: ScratchTab[] | null) => void) | null = null;
+// Mirror of the server's tab state (incl. server-managed revs).
+let lastSynced: ScratchTab[] = [];
+let conflictHandler: ((serverTab: any) => void) | null = null;
 
-export function setScratchpadConflictHandler(
-  fn: ((serverTabs: ScratchTab[] | null) => void) | null
-): void {
+export function setScratchpadConflictHandler(fn: ((serverTab: any) => void) | null): void {
   conflictHandler = fn;
 }
 
-async function post(save: PendingSave): Promise<void> {
-  const base_revs: Record<string, number> = {};
-  for (const t of save.tabs) {
-    if (t && typeof (t as any).rev === "number") base_revs[t.id] = (t as any).rev;
-  }
-  const res = await fetch("/api/scratchpad", {
+export function setSyncedScratchpadTabs(tabs: ScratchTab[]): void {
+  lastSynced = (tabs || []).map((t) => ({ ...t }));
+}
+
+export function getSyncedScratchpadTabs(): ScratchTab[] {
+  return lastSynced.map((t) => ({ ...t }));
+}
+
+async function postTabContent(t: ScratchTab, baseRev?: number, force?: boolean): Promise<boolean> {
+  const res = await fetch(`/api/scratchpad/tabs/${encodeURIComponent(t.id)}/content`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tabs: save.tabs, base_revs, force: save.force || undefined }),
+    body: JSON.stringify({
+      content: t.content,
+      base_rev: baseRev,
+      force: force || undefined,
+    }),
   });
   if (res.status === 409) {
-    // The server wins the argument about durability — surface the choice.
     const data = await res.json().catch(() => null);
-    conflictHandler?.(Array.isArray(data?.server_tabs) ? data.server_tabs : null);
-    return;
+    conflictHandler?.(data?.server_tab ?? null);
+    return false;
   }
-  if (!res.ok) throw new Error(`scratchpad save failed: ${res.status}`);
+  if (!res.ok) throw new Error(`scratchpad tab save failed: ${res.status}`);
+  return true;
+}
+
+function mergeSynced(tabs: ScratchTab[]): void {
+  const byId = new Map(lastSynced.map((t) => [t.id, t]));
+  for (const t of tabs) byId.set(t.id, { ...t });
+  lastSynced = [...byId.values()];
 }
 
 function doFlush(): void {
   const save = pending;
+  console.log("[q] doFlush save:", JSON.stringify(save));
   pending = null;
   chain = chain
-    .then(() => post(save as PendingSave))
+    .then(async () => {
+      if (!save) return;
+      const changed = save.filter((t) => {
+        const s = lastSynced.find((x) => x.id === t.id);
+        return !s || s.content !== t.content;
+      });
+      for (const t of changed) {
+        const s = lastSynced.find((x) => x.id === t.id);
+        const ok = await postTabContent(t, s?.rev);
+        if (!ok) return; // conflict surfaced to the handler; stop this flush
+      }
+      mergeSynced(save);
+    })
     .catch(() => {
       pending = save; // try again later (network/server hiccup)
       if (timer === null) timer = setTimeout(fire, RETRY_MS);
@@ -64,10 +90,22 @@ function fire(): void {
   if (pending) doFlush();
 }
 
-/** Record the latest tab state; a flush happens after the quiet period. */
-export function enqueueScratchpadSave(tabs: ScratchTab[], opts?: { force?: boolean }): void {
-  pending = { tabs, force: !!opts?.force || !!(pending && pending.force) };
+/** Record the latest tab state; changed tabs are saved after the quiet period. */
+export function enqueueScratchpadSave(tabs: ScratchTab[]): void {
+  pending = tabs;
   if (timer === null) timer = setTimeout(fire, DEBOUNCE_MS);
+}
+
+/** Save one tab's content immediately, overriding any conflict (user choice). */
+export function forceSaveScratchpadTab(tab: ScratchTab): Promise<void> {
+  chain = chain
+    .then(async () => {
+      if (await postTabContent(tab, undefined, true)) {
+        mergeSynced([tab]);
+      }
+    })
+    .catch(() => {});
+  return chain;
 }
 
 /**
@@ -90,5 +128,6 @@ export function __resetScratchpadSaveQueueForTests(): void {
   timer = null;
   pending = null;
   chain = Promise.resolve();
+  lastSynced = [];
   conflictHandler = null;
 }

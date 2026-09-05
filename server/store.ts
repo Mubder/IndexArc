@@ -661,6 +661,52 @@ export class VaultStore {
     return enriched;
   }
 
+  // --- Granular scratchpad operations (PR-12) ---
+  // Content/meta/delete/order are per-tab so one stale client can never
+  // clobber unrelated notes (the whole-array POST is a compat path only).
+
+  /** Update one tab's content. baseRev mismatch (and differing content) → conflict. */
+  updateScratchpadTabContent(id: string, content: string, baseRev?: number): { ok: boolean; conflict?: boolean; tab?: any } {
+    const active = this.getScratchpad();
+    const tab = active.find((t: any) => t.id === id);
+    if (!tab) {
+      // Upsert: a brand-new tab created by a client (client-generated id).
+      const created = { id, title: "Scratch", content, archived: false };
+      const saved = this.saveScratchpad([...active, created], { force: true });
+      return { ok: true, tab: saved.find((t: any) => t.id === id) };
+    }
+    if (Number.isFinite(baseRev as number) && (Number(tab.rev) || 1) > Number(baseRev) && tab.content !== content) {
+      return { ok: false, conflict: true, tab };
+    }
+    const updated = active.map((t: any) => (t.id === id ? { ...t, content } : t));
+    const saved = this.saveScratchpad(updated, { force: true });
+    return { ok: true, tab: saved.find((t: any) => t.id === id) };
+  }
+
+  renameScratchpadTab(id: string, title: string): any | null {
+    const active = this.getScratchpad();
+    if (!active.some((t: any) => t.id === id)) return null;
+    const saved = this.saveScratchpad(active.map((t: any) => (t.id === id ? { ...t, title } : t)), { force: true });
+    return saved.find((t: any) => t.id === id) || null;
+  }
+
+  deleteScratchpadTab(id: string): boolean {
+    const active = this.getScratchpad();
+    if (!active.some((t: any) => t.id === id)) return false;
+    this.saveScratchpad(active.filter((t: any) => t.id !== id), { force: true });
+    this.clearNoteRevisions(id);
+    return true;
+  }
+
+  /** Reorder active tabs to match ids (unknown ids ignored, missing ids kept at the end). */
+  reorderScratchpad(ids: string[]): any[] {
+    const active = this.getScratchpad();
+    const byId = new Map<any, any>(active.map((t: any) => [t.id, t]));
+    const ordered = (Array.isArray(ids) ? ids : []).map((id: string) => byId.get(id)).filter(Boolean);
+    const rest = active.filter((t: any) => !(ids || []).includes(t.id));
+    return this.saveScratchpad([...ordered, ...rest], { force: true });
+  }
+
   /**
    * Optimistic-concurrency check: given the client's tabs and the revs it
    * based its edits on, list tabs that were changed server-side since.

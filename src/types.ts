@@ -172,6 +172,10 @@ export interface ScratchTab {
   content: string;
   archived?: boolean;
   archivedAt?: number;
+  /** Server-managed optimistic-concurrency token (increments on change). */
+  rev?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Detection {

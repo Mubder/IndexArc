@@ -56,7 +56,7 @@ import {
 } from "../types";
 import { getTranslation } from "../utils/i18n";
 import { sanitizeNoteHtml, textToNoteHtml } from "../sanitize";
-import { enqueueScratchpadSave, drainScratchpadSaves, setScratchpadConflictHandler } from "../scratchpadSaveQueue";
+import { enqueueScratchpadSave, drainScratchpadSaves, setScratchpadConflictHandler, setSyncedScratchpadTabs, forceSaveScratchpadTab } from "../scratchpadSaveQueue";
 import { takeHandoffNote, REOPEN_NOTE_EVENT } from "../noteHandoff";
 import { isArabicText } from "../utils";
 
@@ -602,9 +602,9 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [revisionsList, setRevisionsList] = useState<NoteRevision[]>([]);
   const [selectedRevision, setSelectedRevision] = useState<NoteRevision | null>(null);
   const [clearedAlert, setClearedAlert] = useState<{ tabId: string; content: string; timestamp: number } | null>(null);
-  // 409 conflict banner state: the server's current tabs, offered to the user
-  // when an autosave would have overwritten newer changes.
-  const [conflictServerTabs, setConflictServerTabs] = useState<ScratchTab[] | null>(null);
+  // 409 conflict banner state: the server's current version of the tab whose
+  // save conflicted, offered to the user when an autosave raced another window.
+  const [conflictTab, setConflictTab] = useState<any>(null);
 
   const shellRef = useRef<HTMLDivElement>(null);
   const scratchRootRef = useRef<HTMLDivElement>(null);
@@ -682,6 +682,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       const next = [...prev];
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
+      // Persist the order explicitly (ids only) and resync the save queue's mirror.
+      fetch("/api/scratchpad/order", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: next.filter((x) => !x.archived).map((x) => x.id) }),
+      })
+        .then(() => setSyncedScratchpadTabs(next))
+        .catch(() => {});
       return next;
     });
   }, []);
@@ -1151,6 +1159,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               }))
           : [];
         if (cancelled) return;
+        // Prime the save queue's mirror so it knows each tab's server rev.
+        setSyncedScratchpadTabs(serverTabs);
         if (serverTabs.length) {
           // Server has the durable copy — it wins over the localStorage cache.
           setTabs(serverTabs);
@@ -1201,22 +1211,23 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   // Surface save conflicts from the queue (server 409) as a user choice.
   useEffect(() => {
-    setScratchpadConflictHandler((serverTabs) => setConflictServerTabs(serverTabs));
+    setScratchpadConflictHandler((serverTab) => setConflictTab(serverTab));
     return () => setScratchpadConflictHandler(null);
   }, []);
 
   const resolveConflict = useCallback((keepMine: boolean) => {
+    if (!conflictTab) return;
     if (keepMine) {
-      enqueueScratchpadSave(tabs, { force: true });
-    } else if (conflictServerTabs) {
-      const serverTabs: ScratchTab[] = conflictServerTabs
-        .filter((x: any) => x && !x.archived)
-        .map((x: any) => ({ id: x.id || uid(), title: x.title || "Scratch", content: x.content || "", archived: false }));
-      setTabs(serverTabs);
-      setActiveId((cur) => (serverTabs.some((x) => x.id === cur) ? cur : serverTabs[0]?.id || cur));
+      const mine = tabs.find((x) => x.id === conflictTab.id);
+      if (mine) forceSaveScratchpadTab(mine);
+    } else {
+      // Adopt the server version.
+      setTabs((prev) => prev.map((x) => (x.id === conflictTab.id ? { ...x, content: conflictTab.content, rev: conflictTab.rev } : x)));
+      setSyncedScratchpadTabs(tabs.map((x) => (x.id === conflictTab.id ? { ...conflictTab, title: x.title } : x)));
+      if (activeId === conflictTab.id) setContent(conflictTab.id, conflictTab.content);
     }
-    setConflictServerTabs(null);
-  }, [tabs, conflictServerTabs]);
+    setConflictTab(null);
+  }, [conflictTab, tabs, activeId]);
 
   const setStatus = useCallback((msg: string) => {
     setStatusMsg(msg);
@@ -1759,6 +1770,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       if (id === activeId) setActiveId(next[0].id);
       return next;
     });
+    // Explicit delete endpoint — whole-array saves can no longer remove tabs.
+    fetch(`/api/scratchpad/tabs/${encodeURIComponent(id)}`, { method: "DELETE" })
+      .then(() => setSyncedScratchpadTabs(tabs.filter((x) => x.id !== id)))
+      .catch(() => {});
     delete titleTouched.current[id];
     setDetections((d) => {
       const n = { ...d };
@@ -1777,6 +1792,11 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     if (name) {
       titleTouched.current[id] = true;
       setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, title: name } : x)));
+      fetch(`/api/scratchpad/tabs/${encodeURIComponent(id)}/meta`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: name }),
+      }).catch(() => {});
     }
     setRenameId(null);
     setRenameValue("");
@@ -2055,9 +2075,9 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
     return (
     <div ref={scratchRootRef} className="space-y-4">
-      {conflictServerTabs && (
+      {conflictTab && (
         <div className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm" style={{ background: "var(--amber-bg, rgba(251,191,36,0.08))", border: "1px solid rgba(251,191,36,0.35)", color: "var(--text)" }}>
-          <span>{t("scratchpad_conflict_msg" as any) || "These notes were changed in another window. Whose version should win?"}</span>
+          <span>{t("scratchpad_conflict_msg" as any) || "This note was changed in another window. Whose version should win?"}</span>
           <span className="flex items-center gap-2 shrink-0">
             <button onClick={() => resolveConflict(false)} className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}>
               {t("scratchpad_conflict_load" as any) || "Load saved version"}

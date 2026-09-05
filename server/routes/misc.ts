@@ -66,6 +66,41 @@ export function miscRoutes(ctx: RouteContext) {
     res.json({ revisions });
   });
 
+  // --- Granular scratchpad endpoints (preferred over whole-array saves) ---
+  r.post("/scratchpad/tabs/:id/content", (req, res) => {
+    const content = String(req.body?.content ?? "");
+    const baseRev = req.body?.base_rev === undefined ? undefined : Number(req.body.base_rev);
+    const result = store.updateScratchpadTabContent(req.params.id, content, baseRev);
+    if (!result.ok) {
+      return res.status(409).json({
+        error: "Tab was changed elsewhere since it was loaded",
+        server_tab: result.tab,
+      });
+    }
+    res.json({ tab: result.tab });
+  });
+
+  r.post("/scratchpad/tabs/:id/meta", (req, res) => {
+    const title = req.body?.title === undefined ? undefined : String(req.body.title);
+    if (title !== undefined) {
+      const tab = store.renameScratchpadTab(req.params.id, title);
+      if (!tab) return res.status(404).json({ error: "Tab not found" });
+      return res.json({ tab });
+    }
+    res.status(400).json({ error: "Nothing to update" });
+  });
+
+  r.delete("/scratchpad/tabs/:id", (req, res) => {
+    const ok = store.deleteScratchpadTab(req.params.id);
+    if (!ok) return res.status(404).json({ error: "Tab not found" });
+    res.json({ success: true });
+  });
+
+  r.put("/scratchpad/order", (req, res) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((x: unknown) => String(x)) : [];
+    res.json({ tabs: store.reorderScratchpad(ids) });
+  });
+
   r.post("/scratchpad", (req, res) => {
     const tabs = Array.isArray(req.body?.tabs) ? req.body.tabs : [];
     const force = req.body?.force === true;
