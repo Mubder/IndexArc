@@ -560,6 +560,29 @@ export class VaultStore {
     return enriched;
   }
 
+  /**
+   * Optimistic-concurrency check: given the client's tabs and the revs it
+   * based its edits on, list tabs that were changed server-side since.
+   * Used by POST /api/scratchpad to answer 409 before any write happens.
+   */
+  findScratchpadConflicts(tabs: any[], baseRevs: Record<string, number> | undefined): { id: string; base_rev: number; server_rev: number }[] {
+    const conflicts: { id: string; base_rev: number; server_rev: number }[] = [];
+    if (!baseRevs || typeof baseRevs !== "object") return conflicts;
+    const serverTabs = this.getScratchpad();
+    for (const t of tabs || []) {
+      if (!t || typeof t !== "object" || !t.id) continue;
+      const server = serverTabs.find((x: any) => x.id === t.id);
+      if (!server) continue; // brand-new tab, nothing to conflict with
+      const base = Number(baseRevs[t.id]);
+      if (!Number.isFinite(base)) continue; // client doesn't track this tab
+      const serverRev = Number(server.rev) || 1;
+      if (serverRev > base && server.content !== t.content) {
+        conflicts.push({ id: t.id, base_rev: base, server_rev: serverRev });
+      }
+    }
+    return conflicts;
+  }
+
   // --- Note revisions (server-side history — the client keeps no durable copy) ---
   getNoteRevisions(tabId: string): any[] {
     const raw = this.readProtectedJson<{ revisions: Record<string, any[]> }>(this.paths.noteRevisionsFile, {

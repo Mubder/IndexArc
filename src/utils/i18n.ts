@@ -252,6 +252,9 @@ export interface TranslationDict {
   scratchpad_rephrase_undone: string;
   scratchpad_rewriting: string;
   scratchpad_rephrased: string;
+  scratchpad_conflict_msg: string;
+  scratchpad_conflict_load: string;
+  scratchpad_conflict_keep: string;
   scratchpad_rewrite_err: string;
   scratchpad_proofread: string;
   scratchpad_proofreading: string;
@@ -583,6 +586,9 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_rephrase_undone: "Reverted to previous text",
     scratchpad_rewriting: "Rephrasing…",
     scratchpad_rephrased: "Rephrased",
+    scratchpad_conflict_msg: "These notes were changed in another window. Whose version should win?",
+    scratchpad_conflict_load: "Load saved version",
+    scratchpad_conflict_keep: "Keep mine",
     scratchpad_rewrite_err: "Rewrite failed",
     scratchpad_proofread: "Proofread",
     scratchpad_proofreading: "Proofreading...",
@@ -912,6 +918,9 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_rephrase_undone: "تم الرجوع إلى النص السابق",
     scratchpad_rewriting: "جاري إعادة الصياغة…",
     scratchpad_rephrased: "تمت إعادة الصياغة",
+    scratchpad_conflict_msg: "تم تعديل هذه الملاحظات في نافذة أخرى. أي إصدار تريد الاحتفاظ به؟",
+    scratchpad_conflict_load: "تحميل النسخة المحفوظة",
+    scratchpad_conflict_keep: "الاحتفاظ بنسختي",
     scratchpad_rewrite_err: "فشلت إعادة الصياغة",
     scratchpad_proofread: "تدقيق لغوي",
     scratchpad_proofreading: "جاري التدقيق...",

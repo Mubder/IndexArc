@@ -65,6 +65,19 @@ export function miscRoutes(ctx: RouteContext) {
   r.post("/scratchpad", (req, res) => {
     const tabs = Array.isArray(req.body?.tabs) ? req.body.tabs : [];
     const force = req.body?.force === true;
+    const baseRevs = req.body?.base_revs;
+    // Optimistic concurrency: reject saves that would silently overwrite a
+    // tab another window (or a stale client) already changed.
+    if (!force) {
+      const conflicts = store.findScratchpadConflicts(tabs, baseRevs);
+      if (conflicts.length) {
+        return res.status(409).json({
+          error: "Notes were changed elsewhere since they were loaded",
+          conflicts,
+          server_tabs: store.getScratchpad(),
+        });
+      }
+    }
     res.json({ tabs: store.saveScratchpad(tabs, { force }) });
   });
 
