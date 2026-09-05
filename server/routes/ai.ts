@@ -38,9 +38,20 @@ export function aiRoutes(ctx: RouteContext) {
     });
   });
 
+  // AI-content gate: if the request names a protected note, refuse to send
+  // its content to any AI provider.
+  const protectedAiGuard = (tabId: unknown): boolean => {
+    if (typeof tabId !== "string" || !tabId) return false;
+    const tab = store.getScratchpad().find((t: any) => t.id === tabId);
+    return !!(tab && tab.protected);
+  };
+
   r.post("/proofread", async (req, res) => {
     const text = String(req.body?.text ?? "").trim();
     if (!text) return res.status(400).json({ error: "Text is required" });
+    if (protectedAiGuard(req.body?.tab_id)) {
+      return res.status(423).json({ error: "This note is protected from AI processing" });
+    }
     try {
       const settings = store.getSettings();
       const system = "You are an expert bilingual proofreader (Arabic and English). Meticulously correct spelling, grammar, and punctuation errors in the provided text while strictly maintaining markdown formatting, code blocks, technical terms, and original tone. Do not add any conversational filler, explanations, or quotes around the output. Return ONLY the corrected text.";
@@ -90,6 +101,9 @@ export function aiRoutes(ctx: RouteContext) {
     const prefix = String(req.body?.prefix ?? "").trim();
     const maxTokens = Number(req.body?.maxTokens) || 64;
     if (!prefix) {
+      return res.json({ completion: "", done: true });
+    }
+    if (protectedAiGuard(req.body?.tab_id)) {
       return res.json({ completion: "", done: true });
     }
     try {
@@ -203,6 +217,9 @@ export function aiRoutes(ctx: RouteContext) {
   });
 
   r.post("/rewrite", async (req, res) => {
+    if (protectedAiGuard(req.body?.tab_id)) {
+      return res.status(423).json({ error: "This note is protected from AI processing" });
+    }
     const text = String(req.body?.text ?? "").trim();
     const style = String(req.body?.style ?? "professional") as
       | "human"

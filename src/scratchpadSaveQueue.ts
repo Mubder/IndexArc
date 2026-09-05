@@ -51,6 +51,11 @@ async function postTabContent(t: ScratchTab, baseRev?: number, force?: boolean):
     conflictHandler?.(data?.server_tab ?? null);
     return false;
   }
+  if (res.status === 423) {
+    // Protected note: the server refuses, period. Drop the local divergence
+    // instead of retrying forever.
+    return false;
+  }
   if (!res.ok) throw new Error(`scratchpad tab save failed: ${res.status}`);
   return true;
 }

@@ -15,6 +15,14 @@ import { DEFAULT_SETTINGS } from "./types.js";
 import { deriveKey, deriveKeyAsync, generateSalt, encryptString, decryptString } from "./crypto.js";
 import { addLog } from "./logs.js";
 
+/** Thrown when a save would mutate/remove a protected tab (map to HTTP 423). */
+export class ProtectedTabError extends Error {
+  constructor(public tabIds: string[]) {
+    super(`Protected notes cannot be changed: ${tabIds.join(", ")}`);
+    this.name = "ProtectedTabError";
+  }
+}
+
 interface VaultFile {
   version: 1;
   entries: VaultEntry[];
@@ -603,7 +611,10 @@ export class VaultStore {
     return all.filter((t: any) => t && !t.archived);
   }
 
-  saveScratchpad(tabs: any[], opts: { force?: boolean } = {}): any[] {
+  saveScratchpad(
+    tabs: any[],
+    opts: { force?: boolean; override_protected?: boolean } = {}
+  ): any[] {
     const incoming = Array.isArray(tabs) ? tabs : [];
     // Ensure only unarchived tabs live in the active store
     const safe = incoming.filter((t: any) => !t.archived);
@@ -622,6 +633,15 @@ export class VaultStore {
     // The rev increments whenever the server observes a content or title change
     // — it is the optimistic-concurrency token for saves (409 on mismatch).
     const prevById = new Map<any, any>(this.readScratchpadRaw().map((t: any) => [t.id, t]));
+
+    // PROTECTION GUARD (server-enforced, defense in depth): a save that
+    // modifies or omits a protected tab is rejected. `override_protected` is
+    // set ONLY by the dedicated protect/unprotect flows — no generic endpoint
+    // can pass it.
+    if (!opts.override_protected) {
+      const violations = this.findScratchpadProtectViolations(safe, prevById);
+      if (violations.length) throw new ProtectedTabError(violations);
+    }
     const nowIso = new Date().toISOString();
     const enriched = safe.map((t: any) => {
       const prev = prevById.get(t.id);
@@ -661,14 +681,90 @@ export class VaultStore {
     return enriched;
   }
 
+  /**
+   * Protection violations for a whole-array save: a protected tab that is
+   * missing (deletion-by-omission) or whose content/title differs.
+   */
+  findScratchpadProtectViolations(incoming: any[], prevById?: Map<any, any>): string[] {
+    const prev = prevById || new Map<any, any>(this.readScratchpadRaw().map((t: any) => [t.id, t]));
+    const violations: string[] = [];
+    for (const [id, p] of prev) {
+      if (!p.protected) continue;
+      const next = (incoming || []).find((t: any) => t && t.id === id);
+      if (!next) {
+        violations.push(id); // omitted → deletion attempt
+      } else if (next.content !== p.content || next.title !== p.title) {
+        violations.push(id); // mutated
+      }
+    }
+    return violations;
+  }
+
+  /** Toggle protection. Returns the updated tab or null. */
+  setScratchpadTabProtected(id: string, protect: boolean): any | null {
+    const active = this.getScratchpad();
+    const tab = active.find((t: any) => t.id === id);
+    if (!tab) return null;
+    const saved = this.saveScratchpad(
+      active.map((t: any) =>
+        t.id === id
+          ? protect
+            ? { ...t, protected: true, protected_at: Date.now() }
+            : { ...t, protected: false, protected_at: undefined }
+          : t
+      ),
+      { force: true, override_protected: true }
+    );
+    return saved.find((t: any) => t.id === id) || null;
+  }
+
+  /** Toggle pin. Pinning a protected note is allowed (ordering is not content). */
+  setScratchpadTabPinned(id: string, pinned: boolean): any | null {
+    const active = this.getScratchpad();
+    const tab = active.find((t: any) => t.id === id);
+    if (!tab) return null;
+    const saved = this.saveScratchpad(
+      active.map((t: any) =>
+        t.id === id ? { ...t, pinned: !!pinned, pinned_at: pinned ? Date.now() : undefined } : t
+      ),
+      { force: true }
+    );
+    return saved.find((t: any) => t.id === id) || null;
+  }
+
+  /**
+   * Verify a master password against the vault envelope WITHOUT changing lock
+   * state. Used by the unprotect flow. Unencrypted vaults have no password to
+   * check (the UNPROTECT confirm word is the only gate there).
+   */
+  async verifyMasterPassword(password: string): Promise<boolean> {
+    const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
+    if (!raw || !raw.encrypted) return false;
+    try {
+      const key = await deriveKeyAsync(password, raw.salt);
+      decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // --- Granular scratchpad operations (PR-12) ---
   // Content/meta/delete/order are per-tab so one stale client can never
   // clobber unrelated notes (the whole-array POST is a compat path only).
 
   /** Update one tab's content. baseRev mismatch (and differing content) → conflict. */
-  updateScratchpadTabContent(id: string, content: string, baseRev?: number): { ok: boolean; conflict?: boolean; tab?: any } {
+  updateScratchpadTabContent(
+    id: string,
+    content: string,
+    baseRev?: number,
+    force = false
+  ): { ok: boolean; conflict?: boolean; protected?: boolean; tab?: any } {
     const active = this.getScratchpad();
     const tab = active.find((t: any) => t.id === id);
+    if (tab && tab.protected && !force) {
+      return { ok: false, protected: true, tab };
+    }
     if (!tab) {
       // Upsert: a brand-new tab created by a client (client-generated id).
       const created = { id, title: "Scratch", content, archived: false };
@@ -679,21 +775,29 @@ export class VaultStore {
       return { ok: false, conflict: true, tab };
     }
     const updated = active.map((t: any) => (t.id === id ? { ...t, content } : t));
-    const saved = this.saveScratchpad(updated, { force: true });
+    // `force` here is internal-only (never accepted from route bodies on
+    // protected notes) and carries the override through the store guard.
+    const saved = this.saveScratchpad(updated, { force: true, override_protected: force });
     return { ok: true, tab: saved.find((t: any) => t.id === id) };
   }
 
   renameScratchpadTab(id: string, title: string): any | null {
     const active = this.getScratchpad();
-    if (!active.some((t: any) => t.id === id)) return null;
+    const target = active.find((t: any) => t.id === id);
+    if (!target) return null;
+    if (target.protected && target.title !== title) {
+      throw new ProtectedTabError([id]);
+    }
     const saved = this.saveScratchpad(active.map((t: any) => (t.id === id ? { ...t, title } : t)), { force: true });
     return saved.find((t: any) => t.id === id) || null;
   }
 
-  deleteScratchpadTab(id: string): boolean {
+  deleteScratchpadTab(id: string): boolean | "protected" {
     const active = this.getScratchpad();
-    if (!active.some((t: any) => t.id === id)) return false;
-    this.saveScratchpad(active.filter((t: any) => t.id !== id), { force: true });
+    const target = active.find((t: any) => t.id === id);
+    if (!target) return false;
+    if (target.protected) return "protected";
+    this.saveScratchpad(active.filter((t: any) => t.id !== id), { force: true, override_protected: true });
     this.clearNoteRevisions(id);
     return true;
   }
@@ -789,10 +893,19 @@ export class VaultStore {
     return safe;
   }
 
-  archiveScratchpadTab(tabId: string, tabFallback?: any): { success: boolean; activeTabs: any[]; archivedCount: number } {
+  archiveScratchpadTab(tabId: string, tabFallback?: any): { success: boolean; reason?: string; activeTabs: any[]; archivedCount: number } {
     const active = this.getScratchpad();
     const targetIdx = active.findIndex((t: any) => t.id === tabId);
     let target = targetIdx !== -1 ? active[targetIdx] : tabFallback;
+
+    if (target && target.protected && targetIdx !== -1) {
+      return {
+        success: false,
+        reason: "protected",
+        activeTabs: active,
+        archivedCount: this.getScratchpadArchive().length,
+      };
+    }
 
     if (!target) {
       return {
@@ -810,7 +923,7 @@ export class VaultStore {
     this.saveScratchpadArchive(newArchive);
 
     const newActive = active.filter((t: any) => t.id !== tabId);
-    this.saveScratchpad(newActive, { force: true });
+    this.saveScratchpad(newActive, { force: true, override_protected: true });
 
     return {
       success: true,

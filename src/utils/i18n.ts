@@ -163,6 +163,19 @@ export interface TranslationDict {
   spellcheck_ai_label: string;
   spellcheck_ai_desc: string;
   autolock_minutes_label: string;
+  pin_pin: string;
+  pin_pinned: string;
+  pin_unpin: string;
+  protect_protect: string;
+  protect_protected: string;
+  protect_title: string;
+  protect_unprotect_title: string;
+  protect_enable: string;
+  protect_remove_btn: string;
+  protect_confirm_title: string;
+  protect_confirm_msg: string;
+  protect_remove_title: string;
+  protect_remove_msg: string;
   autolock_desc: string;
   autolock_minimize_label: string;
   autolock_section_title: string;
@@ -501,6 +514,19 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     spellcheck_ai_label: "AI Proofreader",
     spellcheck_ai_desc: "Show the 'Proofread' button in the Scratchpad to fix grammar and spelling using local AI.",
     autolock_section_title: "Auto-Lock",
+    pin_pin: "Pin",
+    pin_pinned: "Pinned",
+    pin_unpin: "Unpin",
+    protect_protect: "Protect",
+    protect_protected: "Protected",
+    protect_title: "Protect this note from edit/delete",
+    protect_unprotect_title: "Remove protection",
+    protect_enable: "Protect note",
+    protect_remove_btn: "Remove protection",
+    protect_confirm_title: "Protect this note?",
+    protect_confirm_msg: "A protected note cannot be edited, renamed, deleted, archived, or sent to AI. Remove protection anytime with your confirmation word.",
+    protect_remove_title: "Remove protection",
+    protect_remove_msg: "Type UNPROTECT (or your master password if the vault is encrypted) to allow edits and deletion again.",
     autolock_minutes_label: "Lock after inactivity (minutes, 0 = off)",
     autolock_desc: "Locks the vault automatically after the chosen number of minutes without activity. Requires vault encryption.",
     autolock_minimize_label: "Lock when the window is minimized",
@@ -837,6 +863,19 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     spellcheck_ai_label: "مصحح لغوي بالذكاء الاصطناعي",
     spellcheck_ai_desc: "إظهار زر 'مراجعة' في المسودة لتصحيح القواعد والإملاء باستخدام الذكاء الاصطناعي المحلي.",
     autolock_section_title: "القفل التلقائي",
+    pin_pin: "تثبيت",
+    pin_pinned: "مثبتة",
+    pin_unpin: "إلغاء التثبيت",
+    protect_protect: "حماية",
+    protect_protected: "محمية",
+    protect_title: "حماية هذه الملاحظة من التعديل والحذف",
+    protect_unprotect_title: "إزالة الحماية",
+    protect_enable: "حماية الملاحظة",
+    protect_remove_btn: "إزالة الحماية",
+    protect_confirm_title: "حماية هذه الملاحظة؟",
+    protect_confirm_msg: "لا يمكن تعديل الملاحظة المحمية أو إعادة تسميتها أو حذفها أو أرشفتها أو إرسالها إلى الذكاء الاصطناعي. يمكنك إزالة الحماية في أي وقت بكلمة التأكيد.",
+    protect_remove_title: "إزالة الحماية",
+    protect_remove_msg: "اكتب UNPROTECT (أو كلمة المرور الرئيسية إذا كانت الخزنة مشفرة) للسماح بالتعديل والحذف مرة أخرى.",
     autolock_minutes_label: "القفل بعد فترة عدم النشاط (بالدقائق، 0 = إيقاف)",
     autolock_desc: "يقفل الخزنة تلقائيًا بعد عدد الدقائق المحدد دون نشاط. يتطلب تشفير الخزنة.",
     autolock_minimize_label: "القفل عند تصغير النافذة",

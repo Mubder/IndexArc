@@ -605,6 +605,58 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   // 409 conflict banner state: the server's current version of the tab whose
   // save conflicted, offered to the user when an autosave raced another window.
   const [conflictTab, setConflictTab] = useState<any>(null);
+  // Live set of protected tab ids (read inside callbacks without re-binding deps)
+  const protectedIdsRef = useRef<Set<string>>(new Set());
+  protectedIdsRef.current = new Set(tabs.filter((t) => (t as any).protected).map((t) => t.id));
+  // Protect/Pin UI state
+  const [protectModal, setProtectModal] = useState<{ mode: "on" | "off"; tabId: string } | null>(null);
+  const [protectConfirmInput, setProtectConfirmInput] = useState("");
+  const [protectError, setProtectError] = useState("");
+
+  const togglePin = useCallback(async () => {
+    if (!activeId) return;
+    const wantPinned = !(tabs.find((x) => x.id === activeId) as any)?.pinned;
+    try {
+      const res = await fetch(`/api/scratchpad/tabs/${encodeURIComponent(activeId)}/pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pinned: wantPinned }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.tab) {
+          setTabs((prev) => prev.map((x) => (x.id === activeId ? { ...x, ...(data.tab as any) } : x)));
+          setSyncedScratchpadTabs(tabs.map((x) => (x.id === activeId ? { ...(data.tab as any), title: x.title } : x)));
+        }
+      }
+    } catch {}
+  }, [activeId, tabs]);
+
+  const submitProtect = useCallback(async () => {
+    if (!protectModal) return;
+    const wantProtected = protectModal.mode === "on";
+    const body: any = wantProtected
+      ? { protected: true }
+      : { protected: false, confirm_word: protectConfirmInput.trim(), password: protectConfirmInput.trim() };
+    try {
+      const res = await fetch(`/api/scratchpad/tabs/${encodeURIComponent(protectModal.tabId)}/protect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setTabs((prev) => prev.map((x) => (x.id === protectModal.tabId ? { ...x, ...(data.tab as any) } : x)));
+        setProtectModal(null);
+        setProtectConfirmInput("");
+        setProtectError("");
+      } else {
+        setProtectError(data.error || "Confirmation failed");
+      }
+    } catch (e: any) {
+      setProtectError(e?.message || "Request failed");
+    }
+  }, [protectModal, protectConfirmInput]);
 
   const shellRef = useRef<HTMLDivElement>(null);
   const scratchRootRef = useRef<HTMLDivElement>(null);
@@ -998,6 +1050,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   const fallbackTab: ScratchTab = { id: activeId || "default", title: "Scratch", content: "" };
   const active = tabs.find((x) => x.id === activeId) || tabs[0] || fallbackTab;
+  const activeIsProtected = protectedIdsRef.current.has(activeId);
+  const activeIsPinned = !!(active as any)?.pinned;
   const b = busy[activeId] || {};
   const detection = detections[activeId];
   const hasSecret =
@@ -1028,6 +1082,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   // editor has key={activeId}, so it remounts). After this, React NEVER
   // re-applies innerHTML while editing — the editor is uncontrolled, which
   // is what keeps the selection and undo stack intact.
+  // Protected notes are read-only at the editor level (server still enforces).
+  useEffect(() => {
+    if (!tiptap || tiptap.isDestroyed) return;
+    try {
+      tiptap.setEditable(!protectedIdsRef.current.has(activeId));
+    } catch {}
+  }, [tiptap, activeId, tabs]);
+
   useLayoutEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -1400,6 +1462,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   }, []);
 
   const triggerAutocomplete = useCallback((prefixText: string) => {
+    if (protectedIdsRef.current.has(activeIdRef.current)) return;
     if (!enablePredictions) {
       setGhostCompletion("");
       setCaretPos(null);
@@ -1417,7 +1480,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         const res = await fetch("/api/autocomplete", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prefix: cleanPrefix, maxTokens: 16 }),
+          body: JSON.stringify({ prefix: cleanPrefix, maxTokens: 16, tab_id: activeIdRef.current }),
         });
         const data = await res.json();
         if (data && data.completion && typeof data.completion === "string") {
@@ -1911,6 +1974,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   };
 
   const handleRephrase = async () => {
+    if (protectedIdsRef.current.has(activeId)) return;
     const original = active?.content || "";
     const text = htmlToPlainText(original).trim();
     if (!text) return;
@@ -1921,7 +1985,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       const res = await fetch("/api/rewrite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, style }),
+        body: JSON.stringify({ text, style, tab_id: activeId }),
       });
       const data = await res.json();
       if (res.ok && data.rewritten) {
@@ -1946,6 +2010,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   };
 
   const handleProofread = async () => {
+    if (protectedIdsRef.current.has(activeId)) return;
     const original = active?.content || "";
     const text = htmlToPlainText(original).trim();
     if (!text) return;
@@ -1956,7 +2021,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       const res = await fetch("/api/proofread", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, tab_id: activeId }),
       });
       const data = await res.json();
       if (res.ok && data.corrected) {
@@ -2090,9 +2155,16 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       )}
       {/* Internal tabs — unified pill strip */}
       <div className="scratchpad-tab-strip flex items-center gap-1.5 flex-wrap">
-        {tabs.filter((t) => !t.archived).map((tab) => {
+        {[...tabs.filter((t) => !t.archived)].sort((a, b) => {
+          const ap = (a as any).pinned ? 1 : 0;
+          const bp = (b as any).pinned ? 1 : 0;
+          if (ap !== bp) return bp - ap; // pinned first
+          return ((b as any).pinned_at || 0) - ((a as any).pinned_at || 0);
+        }).map((tab) => {
           const isActive = tab.id === activeId;
           const renaming = renameId === tab.id;
+          const tabProtected = (tab as any).protected;
+          const tabPinned = (tab as any).pinned;
           return (
             <div
               key={tab.id}
@@ -2147,12 +2219,15 @@ className="scratchpad-tab group cursor-pointer"
               ) : (
                 <span
                   onDoubleClick={(e) => { e.stopPropagation(); startRename(tab.id); }}
-                  className="truncate flex-1 min-w-0"
+                  className="truncate flex-1 min-w-0 flex items-center gap-1"
                   title={tab.title}
                 >
-                  {tab.title}
+                  {tabPinned && <span title={t("pin_pinned" as any) || "Pinned"}>📌</span>}
+                  {tabProtected && <span title={t("protect_protected" as any) || "Protected"}>🔒</span>}
+                  <span className="truncate">{tab.title}</span>
                 </span>
               )}
+              {!tabProtected && (
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); startRename(tab.id); }}
@@ -2162,6 +2237,8 @@ className="scratchpad-tab group cursor-pointer"
               >
                 <Pencil className="w-3 h-3" />
               </button>
+              )}
+              {!tabProtected && (
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); archiveTab(tab.id); }}
@@ -2171,6 +2248,8 @@ className="scratchpad-tab group cursor-pointer"
               >
                 <Archive className="w-3 h-3" />
               </button>
+              )}
+              {!tabProtected && (
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
@@ -2180,6 +2259,7 @@ className="scratchpad-tab group cursor-pointer"
               >
                 <X className="w-3 h-3" />
               </button>
+              )}
             </div>
           );
         })}
@@ -2245,6 +2325,7 @@ className="scratchpad-tab group cursor-pointer"
             {copied ? t("scratchpad_copied") : t("scratchpad_copy")}
           </button>
 
+           {!activeIsProtected && (
            <button
               type="button"
               onClick={() => {
@@ -2259,8 +2340,9 @@ className="scratchpad-tab group cursor-pointer"
               <Trash2 className="w-3.5 h-3.5" />
               {t("scratchpad_clear")}
             </button>
+           )}
 
-            {settings?.enable_ai_proofreader !== false && (
+            {settings?.enable_ai_proofreader !== false && !activeIsProtected && (
               <button
                 type="button"
                 onClick={handleProofread}
@@ -2274,6 +2356,7 @@ className="scratchpad-tab group cursor-pointer"
               </button>
             )}
 
+            {!activeIsProtected && (
             <button
               type="button"
               onClick={handleSmartSplitParagraphs}
@@ -2285,6 +2368,7 @@ className="scratchpad-tab group cursor-pointer"
               <AlignJustify className="w-3.5 h-3.5" />
               <span>Format Paragraphs</span>
             </button>
+            )}
 
             <button
               type="button"
@@ -2622,6 +2706,34 @@ className="scratchpad-tab group cursor-pointer"
               <span className="uppercase text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded" style={{ background: "var(--accent-bg)", color: "var(--accent-bright)" }}>
                 {bidiMode === "auto" ? `AUTO (${detectedDir.toUpperCase()})` : bidiMode.toUpperCase()}
               </span>
+              <button
+                onClick={togglePin}
+                title={activeIsPinned ? (t("pin_unpin" as any) || "Unpin note") : (t("pin_pin" as any) || "Pin note")}
+                className="px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all"
+                style={{
+                  background: activeIsPinned ? "var(--accent-bg)" : "var(--bg-input)",
+                  color: activeIsPinned ? "var(--accent-bright)" : "var(--text-muted)",
+                  border: "1px solid " + (activeIsPinned ? "var(--border-glow)" : "var(--border)"),
+                }}
+              >
+                {activeIsPinned ? "📌" : "📍"} {activeIsPinned ? (t("pin_pinned" as any) || "Pinned") : (t("pin_pin" as any) || "Pin")}
+              </button>
+              <button
+                onClick={() => {
+                  setProtectConfirmInput("");
+                  setProtectError("");
+                  setProtectModal({ mode: activeIsProtected ? "off" : "on", tabId: activeId });
+                }}
+                title={activeIsProtected ? (t("protect_unprotect_title" as any) || "Remove protection") : (t("protect_title" as any) || "Protect this note from edit/delete")}
+                className="px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all"
+                style={{
+                  background: activeIsProtected ? "rgba(248,113,113,0.12)" : "var(--bg-input)",
+                  color: activeIsProtected ? "#f87171" : "var(--text-muted)",
+                  border: "1px solid " + (activeIsProtected ? "rgba(248,113,113,0.4)" : "var(--border)"),
+                }}
+              >
+                {activeIsProtected ? "🔒" : "🛡️"} {activeIsProtected ? (t("protect_protected" as any) || "Protected") : (t("protect_protect" as any) || "Protect")}
+              </button>
             </div>
           </div>
         </div>
@@ -3287,6 +3399,86 @@ className="scratchpad-tab group cursor-pointer"
           >
             <X className="w-3.5 h-3.5" />
           </button>
+        </div>
+      )}
+
+      {/* Protect / Unprotect modal */}
+      {protectModal && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center p-4"
+          style={{ background: "rgba(2,6,23,0.7)", backdropFilter: "blur(4px)" }}
+          onClick={() => { setProtectModal(null); setProtectError(""); }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl p-5 space-y-3"
+            style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {protectModal.mode === "on" ? (
+              <>
+                <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: "var(--text)" }}>
+                  🛡️ {t("protect_confirm_title" as any) || "Protect this note?"}
+                </h3>
+                <p className="text-xs leading-relaxed" style={{ color: "var(--text-dim)" }}>
+                  {t("protect_confirm_msg" as any) || "A protected note cannot be edited, renamed, deleted, archived, or sent to AI. You can remove protection anytime with your confirmation word."}
+                </p>
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    onClick={() => { setProtectModal(null); setProtectError(""); }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium"
+                    style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
+                  >
+                    {t("identify_cancel_btn") || "Cancel"}
+                  </button>
+                  <button
+                    onClick={submitProtect}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                    style={{ background: "rgba(248,113,113,0.15)", border: "1px solid rgba(248,113,113,0.4)", color: "#f87171" }}
+                  >
+                    🔒 {t("protect_enable" as any) || "Protect note"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: "var(--text)" }}>
+                  🔓 {t("protect_remove_title" as any) || "Remove protection"}
+                </h3>
+                <p className="text-xs leading-relaxed" style={{ color: "var(--text-dim)" }}>
+                  {t("protect_remove_msg" as any) || "Type UNPROTECT (or your master password if the vault is encrypted) to allow edits and deletion again."}
+                </p>
+                <input
+                  autoFocus
+                  type="password"
+                  value={protectConfirmInput}
+                  onChange={(e) => { setProtectConfirmInput(e.target.value); setProtectError(""); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") submitProtect(); }}
+                  placeholder="UNPROTECT"
+                  className="w-full rounded-lg px-3 py-2 text-sm"
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
+                />
+                {protectError && (
+                  <p className="text-xs" style={{ color: "#f87171" }}>{protectError}</p>
+                )}
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    onClick={() => { setProtectModal(null); setProtectError(""); }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium"
+                    style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
+                  >
+                    {t("identify_cancel_btn") || "Cancel"}
+                  </button>
+                  <button
+                    onClick={submitProtect}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                    style={{ background: "var(--accent-bg)", border: "1px solid var(--border-glow)", color: "var(--accent-bright)" }}
+                  >
+                    {t("protect_remove_btn" as any) || "Remove protection"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
