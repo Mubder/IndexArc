@@ -163,6 +163,8 @@ export default function App() {
   const closeConfirm = useCallback(() => setConfirmState(null), []);
 
   const [vaultStatus, setVaultStatus] = useState<{ is_locked: boolean; encryption_enabled: boolean } | null>(null);
+  const [integrityWarnings, setIntegrityWarnings] = useState<string[]>([]);
+  const [integrityDismissed, setIntegrityDismissed] = useState(false);
 
   // Theme management
   useEffect(() => {
@@ -391,6 +393,16 @@ export default function App() {
       fetchAll();
     }
   }, [fetchAll]));
+
+  // Data-integrity check result (quarantine/corruption warnings from the store)
+  useEffect(() => {
+    fetch("/api/integrity")
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d?.warnings) && d.warnings.length) setIntegrityWarnings(d.warnings);
+      })
+      .catch(() => {});
+  }, []);
 
   const handleAnalyze = async () => {
     if (!paste.trim()) return;
@@ -1118,6 +1130,29 @@ return (
               onConfigureAI={() => setTab("settings")}
               onRefresh={fetchAll}
             />
+
+            {integrityWarnings.length > 0 && !integrityDismissed && (
+              <div className="mb-4 flex items-start justify-between gap-3 rounded-xl px-4 py-3 text-sm" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.35)", color: "var(--text)" }}>
+                <div>
+                  <div className="font-semibold mb-0.5">Data integrity warning</div>
+                  <ul className="list-disc pl-5 text-xs" style={{ color: "var(--text-dim)" }}>
+                    {integrityWarnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                  <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                    Check Settings → Logs for details. Corrupt copies are quarantined, never deleted.
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIntegrityDismissed(true)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium shrink-0"
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
 
             {tab === "home" && (
               <HomeTab

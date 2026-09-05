@@ -18,6 +18,10 @@ export function miscRoutes(ctx: RouteContext) {
     res.json({ snapshots: store.listEmergencySnapshots() });
   });
 
+  r.get("/integrity", (_req, res) => {
+    res.json({ warnings: store.getIntegrityWarnings() });
+  });
+
   r.post("/emergency/create", (_req, res) => {
     const name = store.createEmergencySnapshot();
     if (name) addLog("SYSTEM", `Emergency snapshot created (manual) → ${name}`);

@@ -94,6 +94,8 @@ export function ensurePortableLayout(root: string = getAppRoot()) {
     scratchpadFile: path.join(root, "data", "scratchpad.json"),
     scratchpadArchiveFile: path.join(root, "data", "scratchpad_archive.json"),
     noteRevisionsFile: path.join(root, "data", "note_revisions.json"),
+    manifestFile: path.join(root, "data", "manifest.json"),
+    manifestKeyFile: path.join(root, "config", "manifest.key"),
   };
 }
 

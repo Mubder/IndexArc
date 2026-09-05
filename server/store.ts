@@ -1,7 +1,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { randomUUID } from "crypto";
+import crypto, { randomUUID } from "crypto";
 import type { PortablePaths } from "./paths.js";
 import type {
   AppSettings,
@@ -13,6 +13,7 @@ import type {
 } from "./types.js";
 import { DEFAULT_SETTINGS } from "./types.js";
 import { deriveKey, deriveKeyAsync, generateSalt, encryptString, decryptString } from "./crypto.js";
+import { addLog } from "./logs.js";
 
 interface VaultFile {
   version: 1;
@@ -30,6 +31,26 @@ function atomicWrite(filePath: string, data: string) {
   const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.tmp`);
   fs.writeFileSync(tmp, data, "utf-8");
   fs.renameSync(tmp, filePath);
+}
+
+// Like readJson, but for critical data files: an unparseable file is renamed
+// to *.corrupt-<stamp> (quarantined, never deleted or overwritten) so the
+// user can recover it manually instead of the store silently wiping it.
+function readJsonOrQuarantine<T>(filePath: string, fallback: T, label: string): T {
+  if (!fs.existsSync(filePath)) return fallback;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+  } catch (e: any) {
+    try {
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const quarantined = `${filePath}.corrupt-${stamp}`;
+      fs.renameSync(filePath, quarantined);
+      addLog("DATA", `${label} was unreadable — quarantined as ${path.basename(quarantined)} (NOT deleted)`);
+    } catch {
+      addLog("DATA", `${label} was unreadable and could not be quarantined: ${e?.message || e}`);
+    }
+    return fallback;
+  }
 }
 
 function readJson<T>(filePath: string, fallback: T): T {
@@ -67,7 +88,7 @@ export class VaultStore {
 
   // --- Encryption Support ---
   isEncryptionEnabled(): boolean {
-    const raw = readJson<any>(this.paths.vaultFile, null);
+    const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
     return !!(raw && raw.encrypted);
   }
 
@@ -142,7 +163,7 @@ export class VaultStore {
     if (!this.isEncryptionEnabled()) {
       return true;
     }
-    const raw = readJson<any>(this.paths.vaultFile, null);
+    const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
     try {
       const key = await deriveKeyAsync(password, raw.salt);
       const decryptedVault = decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
@@ -178,6 +199,9 @@ export class VaultStore {
       atomicWrite(this.paths.scratchpadFile, JSON.stringify({ version: 2, tabs: scratch }, null, 2));
       atomicWrite(this.paths.scratchpadArchiveFile, JSON.stringify({ version: 1, tabs: archive }, null, 2));
       atomicWrite(this.paths.noteRevisionsFile, JSON.stringify(revs, null, 2));
+      for (const f of [this.paths.vaultFile, this.paths.vectorsFile, this.paths.scratchpadFile, this.paths.scratchpadArchiveFile, this.paths.noteRevisionsFile]) {
+        this.recordIntegrity(f);
+      }
       this._scratchpadCache = null;
       this._scratchpadArchiveCache = null;
       return true;
@@ -189,7 +213,7 @@ export class VaultStore {
   // --- Settings ---
   getSettings(): AppSettings {
     if (this._settingsCache) return this._settingsCache;
-    const raw = readJson<Partial<AppSettings>>(this.paths.settingsFile, {});
+    const raw = readJsonOrQuarantine<Partial<AppSettings>>(this.paths.settingsFile, {}, "settings.json");
     // Prefer env keys if settings keys are empty
     const settings: AppSettings = { ...DEFAULT_SETTINGS, ...raw };
     if (!settings.gemini_api_key && process.env.GEMINI_API_KEY) {
@@ -263,6 +287,7 @@ export class VaultStore {
     } else {
       atomicWrite(this.paths.vaultFile, JSON.stringify(vault, null, 2));
     }
+    this.recordIntegrity(this.paths.vaultFile);
   }
 
   listEntries(filter?: { status?: EntryStatus | EntryStatus[]; family?: string }): VaultEntry[] {
@@ -385,7 +410,7 @@ export class VaultStore {
       if (!this.encryptionKey) {
         throw new Error("Vault is locked");
       }
-      const salt = rawDisk?.salt || generateSalt();
+      const salt = this.encryptionSaltHex || rawDisk?.salt || generateSalt();
       const text = JSON.stringify(v);
       const encrypted = encryptString(text, this.encryptionKey);
       
@@ -399,6 +424,7 @@ export class VaultStore {
     } else {
       atomicWrite(this.paths.vectorsFile, JSON.stringify(v));
     }
+    this.recordIntegrity(this.paths.vectorsFile);
   }
 
   upsertVector(chunk: VectorChunk) {
@@ -447,10 +473,11 @@ export class VaultStore {
     } else {
       atomicWrite(file, JSON.stringify(obj, null, 2));
     }
+    this.recordIntegrity(file);
   }
 
   private readProtectedJson<T>(file: string, fallback: T): T {
-    const raw = readJson<any>(file, null);
+    const raw = readJsonOrQuarantine<any>(file, null, path.basename(file));
     if (!raw) return fallback;
     if (raw.encrypted) {
       if (!this.encryptionKey) return fallback; // locked → looks empty
@@ -461,6 +488,78 @@ export class VaultStore {
       }
     }
     return raw as T;
+  }
+
+  // --- Integrity manifest (tamper/bit-rot EVIDENCE, not protection) ---
+  // The HMAC key lives next to the data on the same disk, so this detects
+  // accidental corruption/overwrite — it cannot stop someone who can write
+  // to data/. Honest scope: recovery aid, not a security boundary.
+  private _integrityWarnings: string[] = [];
+  private _integrityKeyBuf: Buffer | null = null;
+
+  private integrityKey(): Buffer {
+    if (!this._integrityKeyBuf) {
+      try {
+        if (fs.existsSync(this.paths.manifestKeyFile)) {
+          this._integrityKeyBuf = Buffer.from(fs.readFileSync(this.paths.manifestKeyFile, "utf-8"), "hex");
+        }
+      } catch {}
+      if (!this._integrityKeyBuf || this._integrityKeyBuf.length < 32) {
+        this._integrityKeyBuf = crypto.randomBytes(32);
+        try {
+          fs.mkdirSync(path.dirname(this.paths.manifestKeyFile), { recursive: true });
+          fs.writeFileSync(this.paths.manifestKeyFile, this._integrityKeyBuf.toString("hex"), "utf-8");
+        } catch {}
+      }
+    }
+    return this._integrityKeyBuf;
+  }
+
+  private computeMac(file: string): string {
+    return crypto.createHmac("sha256", this.integrityKey()).update(fs.readFileSync(file)).digest("hex");
+  }
+
+  private recordIntegrity(file: string): void {
+    try {
+      if (!fs.existsSync(file)) return;
+      const raw = readJson<{ hmacs: Record<string, string> }>(this.paths.manifestFile, { hmacs: {} });
+      const macs = raw.hmacs || {};
+      macs[path.basename(file)] = this.computeMac(file);
+      atomicWrite(this.paths.manifestFile, JSON.stringify({ version: 1, hmacs: macs }, null, 2));
+    } catch {}
+  }
+
+  /** Compare tracked files against the manifest; returns human-readable warnings. */
+  verifyIntegrity(): string[] {
+    const warnings: string[] = [];
+    try {
+      const tracked = [
+        this.paths.vaultFile,
+        this.paths.vectorsFile,
+        this.paths.scratchpadFile,
+        this.paths.scratchpadArchiveFile,
+        this.paths.noteRevisionsFile,
+        this.paths.settingsFile,
+      ];
+      const stored = readJson<{ hmacs: Record<string, string> }>(this.paths.manifestFile, { hmacs: {} }).hmacs || {};
+      const macs: Record<string, string> = {};
+      for (const f of tracked) {
+        if (!fs.existsSync(f)) continue;
+        const name = path.basename(f);
+        const mac = this.computeMac(f);
+        macs[name] = mac;
+        if (stored[name] && stored[name] !== mac) {
+          warnings.push(`${name} changed since IndexArc last wrote it (unexpected modification or corruption).`);
+        }
+      }
+      atomicWrite(this.paths.manifestFile, JSON.stringify({ version: 1, hmacs: macs }, null, 2));
+    } catch {}
+    this._integrityWarnings = warnings;
+    return warnings;
+  }
+
+  getIntegrityWarnings(): string[] {
+    return this._integrityWarnings;
   }
 
   // --- Scratchpad tabs (portable, survives reinstall/update) ---

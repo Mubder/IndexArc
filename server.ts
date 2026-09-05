@@ -119,6 +119,17 @@ try {
   /* best-effort */
 }
 
+// Integrity check: compare data files against the HMAC manifest. Detects
+// accidental corruption/overwrites (bit-rot, crashed editors) — the manifest
+// key lives on the same disk, so this is recovery aid, not a security boundary.
+try {
+  for (const w of store.verifyIntegrity()) {
+    addLog("DATA", `Integrity warning: ${w}`);
+  }
+} catch {
+  /* best-effort */
+}
+
 async function startServer() {
   const settings = store.getSettings();
   const PORT = Number(process.env.PORT) || settings.port || 3000;
