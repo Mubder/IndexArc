@@ -27,6 +27,11 @@ export function miscRoutes(ctx: RouteContext) {
   r.post("/emergency/restore", (req, res) => {
     const name = String(req.body?.name ?? "").trim();
     if (!name) return res.status(400).json({ ok: false, error: "name required" });
+    // Strict allowlist: this value is joined onto snapshot directory paths, so
+    // anything but a genuine snapshot filename is a path-traversal attempt.
+    if (!/^indexarc-emergency-[\w\-.]+\.iabak$/.test(name)) {
+      return res.status(400).json({ ok: false, error: "invalid snapshot name" });
+    }
     const ok = store.restoreEmergencySnapshot(name);
     if (ok) addLog("SYSTEM", `Restored from emergency snapshot → ${name}`);
     res.json({ ok, locked: store.isLocked() });

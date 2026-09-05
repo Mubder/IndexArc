@@ -12,7 +12,7 @@ import type {
   WatchedFolder,
 } from "./types.js";
 import { DEFAULT_SETTINGS } from "./types.js";
-import { deriveKey, generateSalt, encryptString, decryptString } from "./crypto.js";
+import { deriveKey, deriveKeyAsync, generateSalt, encryptString, decryptString } from "./crypto.js";
 
 interface VaultFile {
   version: 1;
@@ -70,13 +70,13 @@ export class VaultStore {
     return this.isEncryptionEnabled() && !this.encryptionKey;
   }
 
-  unlock(password: string): boolean {
+  async unlock(password: string): Promise<boolean> {
     const raw = readJson<any>(this.paths.vaultFile, null);
     if (!raw || !raw.encrypted) {
       return true;
     }
     try {
-      const key = deriveKey(password, raw.salt);
+      const key = await deriveKeyAsync(password, raw.salt);
       const decrypted = decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
       JSON.parse(decrypted); // Verify valid JSON
       this.encryptionKey = key;
@@ -90,12 +90,12 @@ export class VaultStore {
     this.encryptionKey = null;
   }
 
-  setupPassword(password: string): void {
+  async setupPassword(password: string): Promise<void> {
     if (this.isEncryptionEnabled()) {
       throw new Error("Vault is already encrypted. Remove the current password first.");
     }
     const salt = generateSalt();
-    const key = deriveKey(password, salt);
+    const key = await deriveKeyAsync(password, salt);
     this.encryptionKey = key;
 
     const vault = this.readVault();
@@ -110,13 +110,13 @@ export class VaultStore {
     this.writeVectors(vectors);
   }
 
-  removePassword(password: string): boolean {
+  async removePassword(password: string): Promise<boolean> {
     if (!this.isEncryptionEnabled()) {
       return true;
     }
     const raw = readJson<any>(this.paths.vaultFile, null);
     try {
-      const key = deriveKey(password, raw.salt);
+      const key = await deriveKeyAsync(password, raw.salt);
       const decryptedVault = decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
       const vault = JSON.parse(decryptedVault) as VaultFile;
 

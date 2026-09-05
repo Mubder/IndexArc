@@ -14,10 +14,25 @@ export interface EncryptedPayload {
 
 /**
  * Derives a strong 256-bit AES key from a master password and salt using PBKDF2.
+ * Synchronous — hot path only (e.g. already-known-key re-derivation).
  */
 export function deriveKey(password: string, saltHex: string): Buffer {
   const salt = Buffer.from(saltHex, "hex");
   return crypto.pbkdf2Sync(password, salt, ITERATIONS, KEY_LEN, DIGEST);
+}
+
+/**
+ * Async PBKDF2 for password-verification paths (unlock/remove-password).
+ * Keeps the 100k-iteration derivation off the event loop so repeated wrong
+ * passwords cannot starve the server.
+ */
+export function deriveKeyAsync(password: string, saltHex: string): Promise<Buffer> {
+  const salt = Buffer.from(saltHex, "hex");
+  return new Promise((resolve, reject) => {
+    crypto.pbkdf2(password, salt, ITERATIONS, KEY_LEN, DIGEST, (err, key) =>
+      err ? reject(err) : resolve(key)
+    );
+  });
 }
 
 /**
