@@ -58,6 +58,7 @@ import { getTranslation } from "../utils/i18n";
 import { sanitizeNoteHtml, textToNoteHtml } from "../sanitize";
 import { enqueueScratchpadSave, drainScratchpadSaves, setScratchpadConflictHandler, setSyncedScratchpadTabs, forceSaveScratchpadTab } from "../scratchpadSaveQueue";
 import { takeHandoffNote, REOPEN_NOTE_EVENT } from "../noteHandoff";
+import { ensureHtmlParagraphs, htmlToPlainText } from "../lib/noteHtml";
 import { isArabicText } from "../utils";
 
 export interface NoteRevision {
@@ -126,25 +127,6 @@ const TEXT_COLORS = [
   { hex: "#38bdf8", key: "text_color_blue" },
   { hex: "#c084fc", key: "text_color_purple" },
 ];
-
-export function ensureHtmlParagraphs(content: string): string {
-  if (!content) return "<p></p>";
-  // If it already has block-level HTML tags (<p>, <div>, <h1>-<h6>, <ul>, <ol>, <li>, <blockquote>, <pre>), preserve structure
-  if (/<(p|div|h[1-6]|ul|ol|li|blockquote|pre|table)\b/i.test(content)) {
-    return content.replace(/<br\s*\/?>/gi, "</p><p>");
-  }
-  // Plain text with newlines (\r\n or \n) -> convert to <p> tags
-  const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  const html = lines
-    .map((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return "<p></p>";
-      const escaped = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      return `<p>${escaped}</p>`;
-    })
-    .join("");
-  return html || "<p></p>";
-}
 
 export function smartFormatParagraphs(content: string): string {
   if (!content || !content.trim()) return "<p></p>";
@@ -597,7 +579,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [rephraseUndo, setRephraseUndo] = useState<Record<string, string[]>>({});
-  const [historyVersion, setHistoryVersion] = useState(0);
   const [showRevisions, setShowRevisions] = useState(false);
   const [revisionsList, setRevisionsList] = useState<NoteRevision[]>([]);
   const [selectedRevision, setSelectedRevision] = useState<NoteRevision | null>(null);
@@ -676,7 +657,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const spellWorkerRef = useRef<Worker | null>(null);
   const misspelledRef = useRef(misspelledWords);
   misspelledRef.current = misspelledWords;
-  const htmlToTextDiv = useRef<HTMLDivElement | null>(null);
   const autocompleteTimerRef = useRef<NodeJS.Timeout | null>(null);
   const debouncedTabsSync = useRef<number | null>(null);
 
@@ -878,71 +858,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   // script is cramped, without per-script scaling that desyncs the overlay.
   const noteFontSize = Math.max(settings?.font_size_en || 14, settings?.font_size_ar || 16);
 
-  // --- Owned undo/redo history -------------------------------------------
-  // The browser's native undo stack is unreliable here (React reconciliation
-  // + innerHTML reassignment fragment it), so we keep our own. Each entry is
-  // an innerHTML snapshot plus the (start,end) character offsets of the
-  // selection at that point. Undo/redo restore both content and caret.
-  interface HistoryEntry {
-    html: string;
-    sel: [number, number];
-  }
-  const historyRef = useRef<HistoryEntry[]>([]);
-  const historyIndexRef = useRef<number>(-1);
-  const historyTimerRef = useRef<number | null>(null);
-  const seedHandledRef = useRef<Set<string>>(new Set()); // tracks which tab ids have been seeded
-
-  void historyVersion;
-  const historyCanUndo = (() => { try { return tiptap?.can?.().undo?.() ?? historyIndexRef.current > 0; } catch { return historyIndexRef.current > 0; } })();
-  const historyCanRedo = (() => { try { return tiptap?.can?.().redo?.() ?? historyIndexRef.current < historyRef.current.length - 1; } catch { return historyIndexRef.current < historyRef.current.length - 1; } })();
-
-  const historyPushImmediate = useCallback(() => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const entry: HistoryEntry = {
-      html: editor.innerHTML,
-      sel: getSelectionOffsets(editor),
-    };
-    // Drop any redo tail beyond the current index.
-    historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
-    const last = historyRef.current[historyRef.current.length - 1];
-    if (last && last.html === entry.html) {
-      last.sel = entry.sel; // just update caret position
-    } else {
-      historyRef.current.push(entry);
-    }
-    // Cap the stack to a sane size.
-    if (historyRef.current.length > 200) {
-      historyRef.current = historyRef.current.slice(-200);
-    }
-    historyIndexRef.current = historyRef.current.length - 1;
-    setHistoryVersion((v) => v + 1);
-  }, []);
-
-  // Coalesce rapid edits (typing) into one history entry.
-  const scheduleHistoryPush = useCallback(() => {
-    if (historyTimerRef.current !== null) {
-      window.clearTimeout(historyTimerRef.current);
-    }
-    historyTimerRef.current = window.setTimeout(() => {
-      historyTimerRef.current = null;
-      historyPushImmediate();
-    }, 350);
-  }, [historyPushImmediate]);
-
-  const historyApply = useCallback((entry: HistoryEntry) => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    editor.innerHTML = entry.html;
-    setSelectionOffsets(editor, entry.sel[0], entry.sel[1]);
-    editor.focus();
-    // Keep the ref buffer in sync so persistence still fires.
-    contentRef.current[activeIdRef.current] = entry.html;
-    setTabs((prev) =>
-      prev.map((x) => (x.id === activeIdRef.current ? { ...x, content: entry.html } : x))
-    );
-  }, []);
-
   const historyUndo = useCallback(() => {
     if (!tiptap || tiptap.isDestroyed) return;
     if (tiptap.can().undo()) tiptap.chain().focus().undo().run();
@@ -953,16 +868,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     if (tiptap.can().redo()) tiptap.chain().focus().redo().run();
   }, [tiptap]);
 
-  const historyInit = useCallback((html: string) => {
-    const editor = editorRef.current;
-    historyRef.current = [{ html, sel: [0, 0] }];
-    historyIndexRef.current = 0;
-    if (editor) {
-      const sel = getSelectionOffsets(editor);
-      historyRef.current[0].sel = sel;
-    }
-    setHistoryVersion((v) => v + 1);
-  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -1012,21 +917,11 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       }
     } catch {}
     editor.focus();
-    historyPushImmediate();
     contentRef.current[activeIdRef.current] = editor.innerHTML;
     setTabs((prev) =>
       prev.map((x) => (x.id === activeIdRef.current ? { ...x, content: editor.innerHTML } : x))
     );
-  }, [historyPushImmediate, tiptap]);
-
-  // Reuse one detached div for html->text (avoids GC thrash on every keystroke)
-  const htmlToPlainText = useCallback((html: string): string => {
-    if (!html) return "";
-    const d = htmlToTextDiv.current ?? (htmlToTextDiv.current = document.createElement("div"));
-    d.innerHTML = html.replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n</$1>");
-    const text = d.textContent || d.innerText || "";
-    return text.replace(/[\u00A0\u1680\u180E\u2000-\u200B\u202F\u205F\u3000]/g, " ");
-  }, []);
+  }, [tiptap]);
 
   // Single entry point for any EXTERNAL content write (rephrase, clear,
   // undo-rephrase, etc.). Updates the DOM, the history stack, the ref buffer
@@ -1043,9 +938,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           tiptap.commands.setContent(html);
         } catch {}
       }
-      historyInit(html);
     },
-    [tiptap, historyInit]
+    [tiptap]
   );
 
   const fallbackTab: ScratchTab = { id: activeId || "default", title: "Scratch", content: "" };
@@ -1095,10 +989,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     if (!editor) return;
     const html = contentRef.current[activeId] ?? active?.content ?? "";
     editor.innerHTML = html;
-    historyInit(html);
-    if (!seedHandledRef.current.has(activeId)) {
-      seedHandledRef.current.add(activeId);
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
@@ -1565,11 +1455,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         tiptap.commands.setContent(restored, { emitUpdate: true });
         tiptap.chain().focus().run();
       } catch {}
-      historyInit(restored);
       setStatusMsg("Restored multiline paragraph formatting!");
       setTimeout(() => setStatusMsg(""), 3000);
     }
-  }, [tiptap, activeId, historyInit, recordSnapshot]);
+  }, [tiptap, activeId, recordSnapshot]);
 
   const handleRestoreRevision = useCallback(
     (rev: NoteRevision) => {
@@ -1606,7 +1495,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     const html = editor.innerHTML;
     const id = activeIdRef.current;
     contentRef.current[id] = html;
-    scheduleHistoryPush();
     if (pasteFlag.current[id]) {
       pasteFlag.current[id] = false;
       analyze(id, html);
@@ -1631,31 +1519,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         return prev.map((x) => (x.id === id ? { ...x, content: html } : x));
       });
     }, 320);
-  }, [active?.title, analyze, ghostCompletion, scheduleHistoryPush, triggerAutocomplete, htmlToPlainText]);
-
-  const onPaste = (e: React.ClipboardEvent) => {
-    pasteFlag.current[activeId] = true;
-    if (!pastePlain) {
-      requestAnimationFrame(updateScrollAffordances);
-      return;
-    }
-    e.preventDefault();
-    const text = e.clipboardData.getData("text/plain");
-    const editor = editorRef.current;
-    if (!editor) return;
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || !editor.contains(sel.anchorNode)) return;
-    const range = sel.getRangeAt(0);
-    range.deleteContents();
-    const textNode = document.createTextNode(text);
-    range.insertNode(textNode);
-    range.setStartAfter(textNode);
-    range.setEndAfter(textNode);
-    sel.removeAllRanges();
-    sel.addRange(range);
-    onEditorInput();
-    requestAnimationFrame(updateScrollAffordances);
-  };
+  }, [active?.title, analyze, ghostCompletion, triggerAutocomplete, htmlToPlainText]);
 
   // Intercept Tab / ArrowRight to accept inline ghost text auto-complete,
   // and Ctrl/Cmd+Z/Y for undo/redo history.
@@ -2473,6 +2337,17 @@ className="scratchpad-tab group cursor-pointer"
                 onKeyDown={onKeyDown}
                 onPaste={(e) => {
                   pasteFlag.current[activeId] = true;
+                  if (pastePlain) {
+                    // Plain-text paste: strip rich HTML from the clipboard.
+                    e.preventDefault();
+                    const text = e.clipboardData.getData("text/plain");
+                    if (text && !tiptap.isDestroyed) {
+                      const paras = text.replace(/\r\n/g, "\n").split("\n")
+                        .map((l) => `<p>${l ? l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : ""}</p>`)
+                        .join("");
+                      try { tiptap.commands.insertContent(paras); } catch {}
+                    }
+                  }
                   setTimeout(() => { try { analyze(activeId, safeGetHTML(tiptap)); } catch {} }, 80);
                 }}
                 className="relative w-full"
@@ -2813,7 +2688,7 @@ className="scratchpad-tab group cursor-pointer"
           <button
             type="button"
             onClick={historyUndo}
-            disabled={!historyCanUndo}
+            disabled={(() => { try { return !tiptap?.can?.().undo?.(); } catch { return true; } })()}
             className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
             style={{ color: "var(--text-dim)" }}
             title={t("scratchpad_undo")}
@@ -2823,7 +2698,7 @@ className="scratchpad-tab group cursor-pointer"
           <button
             type="button"
             onClick={historyRedo}
-            disabled={!historyCanRedo}
+            disabled={(() => { try { return !tiptap?.can?.().redo?.(); } catch { return true; } })()}
             className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
             style={{ color: "var(--text-dim)" }}
             title={t("scratchpad_redo")}
