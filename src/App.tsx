@@ -151,7 +151,9 @@ export default function App() {
           setConfirmState(null);
         },
         onCancel: () => {
-          reject();
+          // Cancelling is not an error: resolve so an uncaught rejection can
+          // never blank the app via the error boundary.
+          resolve();
           setConfirmState(null);
         },
       });
@@ -542,7 +544,7 @@ export default function App() {
       await fetch(`/api/entries/${id}`, { method: "DELETE" });
       removeEntriesLocally([id]);
       await fetchAll();
-    }, "Delete");
+    }, "Delete").catch((e) => console.error("delete failed:", e?.message || e));
   };
 
   const bulkDeleteEntries = async (ids: string[]) => {
@@ -732,7 +734,7 @@ export default function App() {
       await fetch(`/api/folders/sessions/${scanSession.id}/discard`, { method: "POST" });
       setScanSession(null);
       fetchAll();
-    }, "Discard");
+    }, "Discard").catch((e) => console.error("discard failed:", e?.message || e));
   };
 
   const nav: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = useMemo(

@@ -27,9 +27,12 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
       const err = e.error instanceof Error ? e.error : new Error(e.message || "Unknown error");
       this.setState({ error: err });
     };
+    // Unhandled promise rejections (a failed background fetch, a dismissed
+    // dialog, …) are logged but NOT fatal — treating every rejection as a
+    // crash turned recoverable hiccups into full-screen failures.
     const onReject = (e: PromiseRejectionEvent) => {
-      const err = e.reason instanceof Error ? e.reason : new Error(String(e.reason));
-      this.setState({ error: err });
+      // eslint-disable-next-line no-console
+      console.error("Unhandled rejection:", e.reason);
     };
     window.addEventListener("error", onError);
     window.addEventListener("unhandledrejection", onReject);

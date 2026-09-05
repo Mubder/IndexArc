@@ -719,7 +719,9 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
         dropcursor: { width: 2, color: "var(--accent)" },
-        undoRedo: false, // Disabled — custom history stack (historyRef) handles per-tab undo/redo
+        // TipTap's transactional undo/redo (Ctrl+Z / Ctrl+Y, toolbar buttons).
+        // The legacy custom innerHTML snapshot stack below is dormant.
+        undoRedo: {},
       }),
       TiptapUnderline,
       TextStyle,
@@ -909,27 +911,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   }, []);
 
   const historyUndo = useCallback(() => {
-    if (tiptap) { if (tiptap.can().undo()) tiptap.chain().focus().undo().run(); return; }
-    if (historyIndexRef.current <= 0) return;
-    if (historyTimerRef.current !== null) {
-      window.clearTimeout(historyTimerRef.current);
-      historyTimerRef.current = null;
-      historyPushImmediate();
-    }
-    historyIndexRef.current -= 1;
-    const entry = historyRef.current[historyIndexRef.current];
-    if (entry) historyApply(entry);
-    setHistoryVersion((v) => v + 1);
-  }, [historyApply, historyPushImmediate, tiptap]);
+    if (!tiptap || tiptap.isDestroyed) return;
+    if (tiptap.can().undo()) tiptap.chain().focus().undo().run();
+  }, [tiptap]);
 
   const historyRedo = useCallback(() => {
-    if (tiptap) { if (tiptap.can().redo()) tiptap.chain().focus().redo().run(); return; }
-    if (historyIndexRef.current >= historyRef.current.length - 1) return;
-    historyIndexRef.current += 1;
-    const entry = historyRef.current[historyIndexRef.current];
-    if (entry) historyApply(entry);
-    setHistoryVersion((v) => v + 1);
-  }, [historyApply, tiptap]);
+    if (!tiptap || tiptap.isDestroyed) return;
+    if (tiptap.can().redo()) tiptap.chain().focus().redo().run();
+  }, [tiptap]);
 
   const historyInit = useCallback((html: string) => {
     const editor = editorRef.current;
