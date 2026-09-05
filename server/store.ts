@@ -43,6 +43,11 @@ function readJson<T>(filePath: string, fallback: T): T {
 
 export class VaultStore {
   private encryptionKey: Buffer | null = null;
+  // The salt the CURRENT key was actually derived from. Must always be the
+  // salt written into encrypted envelopes — a mismatch means the file can
+  // never be decrypted again (this exact bug previously broke unlock after
+  // setupPassword: writeVault stored a freshly generated salt instead).
+  private encryptionSaltHex: string | null = null;
   private _settingsCache: AppSettings | null = null;
   private _entriesCache: VaultEntry[] | null = null;
   private _foldersCache: WatchedFolder[] | null = null;
@@ -80,6 +85,11 @@ export class VaultStore {
       const decrypted = decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
       JSON.parse(decrypted); // Verify valid JSON
       this.encryptionKey = key;
+      this.encryptionSaltHex = raw.salt;
+      // The locked period may have cached empty reads — drop them so the
+      // freshly decrypted content is served.
+      this._scratchpadCache = null;
+      this._scratchpadArchiveCache = null;
       return true;
     } catch {
       return false;
@@ -88,6 +98,11 @@ export class VaultStore {
 
   lock(): void {
     this.encryptionKey = null;
+    this.encryptionSaltHex = null;
+    // Purge decrypted caches too — a locked vault must not serve content
+    // that is still sitting in memory caches.
+    this._scratchpadCache = null;
+    this._scratchpadArchiveCache = null;
   }
 
   async setupPassword(password: string): Promise<void> {
@@ -97,6 +112,7 @@ export class VaultStore {
     const salt = generateSalt();
     const key = await deriveKeyAsync(password, salt);
     this.encryptionKey = key;
+    this.encryptionSaltHex = salt;
 
     const vault = this.readVault();
     let vectors = { version: 1 as const, chunks: [] as any[] };
@@ -108,6 +124,18 @@ export class VaultStore {
 
     this.writeVault(vault);
     this.writeVectors(vectors);
+
+    // Eagerly pull the companion files into the encrypted envelope (they were
+    // plaintext until this point).
+    try { this.saveScratchpad(this.getScratchpad(), { force: true }); } catch {}
+    try { this.saveScratchpadArchive(this.getScratchpadArchive()); } catch {}
+    try {
+      const revs = this.readProtectedJson<any>(this.paths.noteRevisionsFile, {
+        version: 1,
+        revisions: {},
+      });
+      this.writeProtectedJson(this.paths.noteRevisionsFile, revs);
+    } catch {}
   }
 
   async removePassword(password: string): Promise<boolean> {
@@ -133,10 +161,25 @@ export class VaultStore {
         // ignore
       }
 
+      // Read companion files while the key is still available, then rewrite
+      // them as plaintext alongside the decrypted vault.
+      const scratch = this.getScratchpad();
+      const archive = this.getScratchpadArchive();
+      const revs = this.readProtectedJson<any>(this.paths.noteRevisionsFile, {
+        version: 1,
+        revisions: {},
+      });
+
       this.encryptionKey = null;
+      this.encryptionSaltHex = null;
 
       atomicWrite(this.paths.vaultFile, JSON.stringify(vault, null, 2));
       atomicWrite(this.paths.vectorsFile, JSON.stringify(vectors));
+      atomicWrite(this.paths.scratchpadFile, JSON.stringify({ version: 2, tabs: scratch }, null, 2));
+      atomicWrite(this.paths.scratchpadArchiveFile, JSON.stringify({ version: 1, tabs: archive }, null, 2));
+      atomicWrite(this.paths.noteRevisionsFile, JSON.stringify(revs, null, 2));
+      this._scratchpadCache = null;
+      this._scratchpadArchiveCache = null;
       return true;
     } catch {
       return false;
@@ -205,7 +248,8 @@ export class VaultStore {
       if (!this.encryptionKey) {
         throw new Error("Vault is locked");
       }
-      const salt = rawDisk?.salt || generateSalt();
+      // The stored salt MUST be the one the key was derived from.
+      const salt = this.encryptionSaltHex || rawDisk?.salt || generateSalt();
       const text = JSON.stringify(vault, null, 2);
       const encrypted = encryptString(text, this.encryptionKey);
       
@@ -378,10 +422,51 @@ export class VaultStore {
     return this.paths.root;
   }
 
+  // --- Vault-key encryption for scratchpad companion files ---
+  // Same envelope as vault.json ({encrypted, salt, iv, authTag, ciphertext}).
+  // Plaintext scratchpad files were the biggest at-rest leak: notes are where
+  // users paste secrets, yet they sat outside the encrypted vault.
+  private writeProtectedJson(file: string, obj: unknown): void {
+    const rawDisk = readJson<any>(file, null);
+    const isDiskEncrypted = !!(rawDisk && rawDisk.encrypted);
+    if (isDiskEncrypted || this.encryptionKey) {
+      if (!this.encryptionKey) {
+        // Locked: refuse rather than write plaintext over ciphertext.
+        throw new Error("Vault is locked");
+      }
+      const salt =
+        this.encryptionSaltHex ||
+        rawDisk?.salt ||
+        readJson<any>(this.paths.vaultFile, null)?.salt ||
+        generateSalt();
+      const encrypted = encryptString(JSON.stringify(obj), this.encryptionKey);
+      atomicWrite(
+        file,
+        JSON.stringify({ version: 2, encrypted: true as const, salt, ...encrypted }, null, 2)
+      );
+    } else {
+      atomicWrite(file, JSON.stringify(obj, null, 2));
+    }
+  }
+
+  private readProtectedJson<T>(file: string, fallback: T): T {
+    const raw = readJson<any>(file, null);
+    if (!raw) return fallback;
+    if (raw.encrypted) {
+      if (!this.encryptionKey) return fallback; // locked → looks empty
+      try {
+        return JSON.parse(decryptString(raw.ciphertext, this.encryptionKey, raw.iv, raw.authTag)) as T;
+      } catch {
+        return fallback;
+      }
+    }
+    return raw as T;
+  }
+
   // --- Scratchpad tabs (portable, survives reinstall/update) ---
   getScratchpad(): any[] {
     if (this._scratchpadCache) return this._scratchpadCache;
-    const raw = readJson<{ tabs: any[] }>(this.paths.scratchpadFile, { tabs: [] }).tabs;
+    const raw = this.readProtectedJson<{ tabs: any[] }>(this.paths.scratchpadFile, { tabs: [] }).tabs;
     const all = Array.isArray(raw) ? raw : [];
 
     // MIGRATION / PURGE: If scratchpad.json has archived tabs, migrate them
@@ -412,7 +497,7 @@ export class VaultStore {
   // Used by saveScratchpad so metadata enrichment can't recurse into the
   // getScratchpad migration path (which itself saves).
   private readScratchpadRaw(): any[] {
-    const raw = readJson<any>(this.paths.scratchpadFile, { tabs: [] });
+    const raw = this.readProtectedJson<any>(this.paths.scratchpadFile, { tabs: [] });
     const all = Array.isArray(raw) ? raw : Array.isArray(raw?.tabs) ? raw.tabs : [];
     return all.filter((t: any) => t && !t.archived);
   }
@@ -471,16 +556,13 @@ export class VaultStore {
     } catch {}
 
     this._scratchpadCache = enriched;
-    atomicWrite(
-      this.paths.scratchpadFile,
-      JSON.stringify({ version: 2, tabs: enriched }, null, 2)
-    );
+    this.writeProtectedJson(this.paths.scratchpadFile, { version: 2, tabs: enriched });
     return enriched;
   }
 
   // --- Note revisions (server-side history — the client keeps no durable copy) ---
   getNoteRevisions(tabId: string): any[] {
-    const raw = readJson<{ revisions: Record<string, any[]> }>(this.paths.noteRevisionsFile, {
+    const raw = this.readProtectedJson<{ revisions: Record<string, any[]> }>(this.paths.noteRevisionsFile, {
       revisions: {},
     });
     const all = raw.revisions || {};
@@ -490,7 +572,7 @@ export class VaultStore {
   addNoteRevision(rev: any, maxKeep = 30): any[] {
     const tabId = String(rev?.tabId || "");
     if (!tabId) return [];
-    const raw = readJson<{ revisions: Record<string, any[]> }>(this.paths.noteRevisionsFile, {
+    const raw = this.readProtectedJson<{ revisions: Record<string, any[]> }>(this.paths.noteRevisionsFile, {
       revisions: {},
     });
     const all = raw.revisions || {};
@@ -498,24 +580,24 @@ export class VaultStore {
     if (existing.length > 0 && existing[0].content === rev.content) return existing;
     const updated = [rev, ...existing.filter((x) => x.content !== rev.content)].slice(0, maxKeep);
     all[tabId] = updated;
-    atomicWrite(this.paths.noteRevisionsFile, JSON.stringify({ version: 1, revisions: all }));
+    this.writeProtectedJson(this.paths.noteRevisionsFile, { version: 1, revisions: all });
     return updated;
   }
 
   clearNoteRevisions(tabId: string): void {
-    const raw = readJson<{ revisions: Record<string, any[]> }>(this.paths.noteRevisionsFile, {
+    const raw = this.readProtectedJson<{ revisions: Record<string, any[]> }>(this.paths.noteRevisionsFile, {
       revisions: {},
     });
     const all = raw.revisions || {};
     if (!all[tabId]) return;
     delete all[tabId];
-    atomicWrite(this.paths.noteRevisionsFile, JSON.stringify({ version: 1, revisions: all }));
+    this.writeProtectedJson(this.paths.noteRevisionsFile, { version: 1, revisions: all });
   }
 
   // --- Scratchpad Archive (Passive Cold Storage) ---
   getScratchpadArchive(): any[] {
     if (this._scratchpadArchiveCache) return this._scratchpadArchiveCache;
-    const raw = readJson<{ tabs: any[] }>(this.paths.scratchpadArchiveFile, { tabs: [] }).tabs;
+    const raw = this.readProtectedJson<{ tabs: any[] }>(this.paths.scratchpadArchiveFile, { tabs: [] }).tabs;
     const tabs = Array.isArray(raw) ? raw : [];
     this._scratchpadArchiveCache = tabs;
     return tabs;
@@ -533,10 +615,7 @@ export class VaultStore {
     } catch {}
 
     this._scratchpadArchiveCache = safe;
-    atomicWrite(
-      this.paths.scratchpadArchiveFile,
-      JSON.stringify({ version: 1, tabs: safe }, null, 2)
-    );
+    this.writeProtectedJson(this.paths.scratchpadArchiveFile, { version: 1, tabs: safe });
     return safe;
   }
 
