@@ -62,6 +62,8 @@ export function settingsRoutes(ctx: RouteContext) {
       "font_size_ar",
       "enable_live_spellcheck",
       "enable_ai_proofreader",
+      "auto_lock_minutes",
+      "lock_on_minimize",
       "llm_provider_override",
       "embed_provider_override",
     ];
@@ -73,6 +75,13 @@ export function settingsRoutes(ctx: RouteContext) {
       // never wipe a saved key.
       if ((KEY_FIELDS as readonly string[]).includes(k) && String(body[k]).trim() === "") continue;
       patch[k] = body[k];
+    }
+    if (patch.auto_lock_minutes !== undefined) {
+      const n = Number(patch.auto_lock_minutes);
+      if (!Number.isFinite(n) || n < 0 || n > 1440) {
+        return res.status(400).json({ error: "auto_lock_minutes must be 0-1440" });
+      }
+      patch.auto_lock_minutes = Math.round(n);
     }
     if (
       patch.ai_provider &&

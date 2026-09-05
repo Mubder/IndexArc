@@ -321,6 +321,35 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         </label>
       </div>
 
+      {/* Auto-Lock */}
+      <div className="space-y-3 rounded-xl p-4" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+        <h3 className="text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5" style={{ color: "var(--cyan)" }}>
+          <Lock className="w-3.5 h-3.5" /> {t("autolock_section_title")}
+        </h3>
+        <label className="block text-xs space-y-1">
+          <span style={{ color: "var(--text-dim)" }}>{t("autolock_minutes_label")}</span>
+          <input
+            type="number"
+            min={0}
+            max={1440}
+            value={settings.auto_lock_minutes ?? 5}
+            onChange={(e) => onPatchSettings({ auto_lock_minutes: Math.max(0, Math.min(1440, Number(e.target.value) || 0)) })}
+            className="w-28 rounded-lg px-2 py-1.5 text-sm"
+            style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
+          />
+          <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{t("autolock_desc")}</p>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!settings.lock_on_minimize}
+            onChange={(e) => onPatchSettings({ lock_on_minimize: e.target.checked })}
+            className="accent-blue-500"
+          />
+          <span className="text-xs" style={{ color: "var(--text)" }}>{t("autolock_minimize_label")}</span>
+        </label>
+      </div>
+
       <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("ai_provider_choice")}</h2>
       <div className="flex flex-wrap gap-2">
         {([

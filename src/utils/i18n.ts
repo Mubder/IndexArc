@@ -162,6 +162,10 @@ export interface TranslationDict {
   spellcheck_live_desc: string;
   spellcheck_ai_label: string;
   spellcheck_ai_desc: string;
+  autolock_minutes_label: string;
+  autolock_desc: string;
+  autolock_minimize_label: string;
+  autolock_section_title: string;
 
   candidates_title: string;
   save_selected_btn: string;
@@ -496,6 +500,10 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     spellcheck_live_desc: "Show red squiggles under misspelled words as you type using high-speed local dictionaries.",
     spellcheck_ai_label: "AI Proofreader",
     spellcheck_ai_desc: "Show the 'Proofread' button in the Scratchpad to fix grammar and spelling using local AI.",
+    autolock_section_title: "Auto-Lock",
+    autolock_minutes_label: "Lock after inactivity (minutes, 0 = off)",
+    autolock_desc: "Locks the vault automatically after the chosen number of minutes without activity. Requires vault encryption.",
+    autolock_minimize_label: "Lock when the window is minimized",
 
     candidates_title: "Extraction Candidates",
     save_selected_btn: "Save Selected to Vault",
@@ -828,6 +836,10 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     spellcheck_live_desc: "إظهار خطوط حمراء متعرجة أسفل الكلمات التي بها أخطاء إملائية أثناء الكتابة باستخدام قواميس محلية عالية السرعة.",
     spellcheck_ai_label: "مصحح لغوي بالذكاء الاصطناعي",
     spellcheck_ai_desc: "إظهار زر 'مراجعة' في المسودة لتصحيح القواعد والإملاء باستخدام الذكاء الاصطناعي المحلي.",
+    autolock_section_title: "القفل التلقائي",
+    autolock_minutes_label: "القفل بعد فترة عدم النشاط (بالدقائق، 0 = إيقاف)",
+    autolock_desc: "يقفل الخزنة تلقائيًا بعد عدد الدقائق المحدد دون نشاط. يتطلب تشفير الخزنة.",
+    autolock_minimize_label: "القفل عند تصغير النافذة",
 
     candidates_title: "المرشحون المستخرجون",
     save_selected_btn: "حفظ العناصر المحددة في الخزنة",

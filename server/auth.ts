@@ -19,6 +19,14 @@ const token = crypto.randomBytes(32).toString("hex");
 
 const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost|\[::1\]|::1)(:\d+)?$/i;
 
+// Last observed user activity (any authenticated /api request). The auto-lock
+// timer in server.ts reads this.
+let lastActivity = Date.now();
+
+export function getLastActivity(): number {
+  return lastActivity;
+}
+
 // One-time, short-lived tickets for EventSource, which cannot send headers.
 const sseTickets = new Map<string, number>();
 const TICKET_TTL_MS = 30_000;
@@ -80,5 +88,6 @@ export function apiAuthMiddleware(req: Request, res: Response, next: NextFunctio
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
+  lastActivity = Date.now();
   next();
 }

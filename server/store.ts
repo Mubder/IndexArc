@@ -264,8 +264,7 @@ export class VaultStore {
   }
 
   private writeVault(vault: VaultFile) {
-    this._entriesCache = null;
-    const rawDisk = readJson<any>(this.paths.vaultFile, null);
+    const rawDisk = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
     const isDiskEncrypted = rawDisk && rawDisk.encrypted;
 
     if (isDiskEncrypted || this.encryptionKey) {
@@ -287,6 +286,9 @@ export class VaultStore {
     } else {
       atomicWrite(this.paths.vaultFile, JSON.stringify(vault, null, 2));
     }
+    // Only after the write succeeded — a failed write must not invalidate
+    // the cache and silently resurrect the previous disk state.
+    this._entriesCache = null;
     this.recordIntegrity(this.paths.vaultFile);
   }
 
@@ -754,13 +756,15 @@ export class VaultStore {
       };
     }
 
-    const newActive = active.filter((t: any) => t.id !== tabId);
-    this.saveScratchpad(newActive, { force: true });
-
+    // Cold storage FIRST: a crash between the two writes then leaves the tab
+    // duplicated (active + archive) instead of silently gone.
     const archive = this.getScratchpadArchive();
     const archivedItem = { ...target, archived: true, archivedAt: Date.now() };
     const newArchive = [archivedItem, ...archive.filter((t: any) => t.id !== tabId)];
     this.saveScratchpadArchive(newArchive);
+
+    const newActive = active.filter((t: any) => t.id !== tabId);
+    this.saveScratchpad(newActive, { force: true });
 
     return {
       success: true,
@@ -780,14 +784,16 @@ export class VaultStore {
       };
     }
 
-    const newArchive = archive.filter((t: any) => t.id !== tabId);
-    this.saveScratchpadArchive(newArchive);
-
-    const active = this.getScratchpad();
+    // Active list FIRST (deduped by id): a crash then leaves the tab in both
+    // places — recoverable — instead of in neither.
+    const active = this.getScratchpad().filter((t: any) => t.id !== tabId);
     const restored = { ...target, archived: false };
     delete restored.archivedAt;
     const newActive = [...active, restored];
     this.saveScratchpad(newActive, { force: true });
+
+    const newArchive = archive.filter((t: any) => t.id !== tabId);
+    this.saveScratchpadArchive(newArchive);
 
     return {
       success: true,
@@ -825,10 +831,17 @@ export class VaultStore {
 
       // Skip if identical to the newest existing backup (avoid churn on
       // every restart when nothing changed).
+      const byMtime = (a: string, b: string) => {
+        try {
+          return fs.statSync(path.join(dir, a)).mtimeMs - fs.statSync(path.join(dir, b)).mtimeMs;
+        } catch {
+          return a < b ? -1 : 1;
+        }
+      };
       const existing = fs
         .readdirSync(dir)
         .filter((f) => /^vault-.*\.json$/.test(f))
-        .sort();
+        .sort(byMtime);
       const newest = existing[existing.length - 1];
       if (newest) {
         try {
@@ -872,10 +885,18 @@ export class VaultStore {
     try {
       const dir = this.paths.backupsDir;
       const prune = (prefix: string) => {
+        // Order by mtime, not filename sort — non-conforming filenames (e.g. a
+        // hand-restored copy) must not decide which backups survive.
         const files = fs
           .readdirSync(dir)
           .filter((f) => f.startsWith(prefix) && f.endsWith(".json"))
-          .sort();
+          .sort((a, b) => {
+            try {
+              return fs.statSync(path.join(dir, a)).mtimeMs - fs.statSync(path.join(dir, b)).mtimeMs;
+            } catch {
+              return a < b ? -1 : 1;
+            }
+          });
         while (files.length > keep) {
           const old = files.shift();
           if (old) {

@@ -404,6 +404,19 @@ export default function App() {
       .catch(() => {});
   }, []);
 
+  // Lock-on-minimize: when the window is hidden and the setting is on, lock.
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden" && settingsRef.current?.lock_on_minimize) {
+        fetch("/api/vault/lock", { method: "POST" }).catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
   const handleAnalyze = async () => {
     if (!paste.trim()) return;
     setAnalyzing(true);

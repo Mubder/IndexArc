@@ -6,7 +6,7 @@ import { ensurePortableLayout } from "./server/paths.js";
 import { VaultStore } from "./server/store.js";
 import { addLog } from "./server/logs.js";
 import { FolderWatcherManager } from "./server/services/folderWatcher.js";
-import { apiAuthMiddleware } from "./server/auth.js";
+import { apiAuthMiddleware, getLastActivity } from "./server/auth.js";
 import { vaultRoutes, checkVaultUnlocked } from "./server/routes/vault.js";
 import { entriesRoutes } from "./server/routes/entries.js";
 import { foldersRoutes, fsRoutes } from "./server/routes/folders.js";
@@ -129,6 +129,26 @@ try {
 } catch {
   /* best-effort */
 }
+
+// Auto-lock: lock the vault after configured minutes without any API activity.
+// Only applies when a master password is set (otherwise there is nothing to
+// lock). 0 disables.
+const AUTO_LOCK_CHECK_MS = 15_000;
+setInterval(() => {
+  try {
+    const settings = store.getSettings();
+    const minutes = Number(settings.auto_lock_minutes) || 0;
+    if (minutes <= 0) return;
+    if (!store.isEncryptionEnabled()) return; // no password set — nothing to lock
+    if (store.isLocked()) return; // already locked
+    if (Date.now() - getLastActivity() < minutes * 60_000) return;
+    store.lock();
+    addLog("SECURITY", `Vault auto-locked after ${minutes} minute(s) of inactivity`);
+    sendSSE("vault-changed", { locked: true });
+  } catch {
+    /* best-effort */
+  }
+}, AUTO_LOCK_CHECK_MS);
 
 async function startServer() {
   const settings = store.getSettings();

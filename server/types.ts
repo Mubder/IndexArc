@@ -79,6 +79,10 @@ export interface AppSettings {
   bind_host: string;
   port: number;
   enable_live_spellcheck?: boolean;
+  /** Auto-lock the vault after N minutes of inactivity (0 = disabled). */
+  auto_lock_minutes?: number;
+  /** Lock when the app window is minimized/hidden. */
+  lock_on_minimize?: boolean;
   enable_ai_proofreader?: boolean;
   // Per-provider selection for flexible model mixing (LM Studio + Ollama + etc)
   llm_provider_override?: "local" | "api" | "openai" | "groq" | "openrouter" | "anthropic" | "local_openai" | "heuristic";
@@ -111,6 +115,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   bind_host: "127.0.0.1",
   port: 3000,
   enable_live_spellcheck: true,
+  auto_lock_minutes: 5,
+  lock_on_minimize: false,
   enable_ai_proofreader: true,
   llm_provider_override: undefined as "local" | "api" | "openai" | "groq" | "openrouter" | "anthropic" | "local_openai" | "heuristic" | undefined,
   embed_provider_override: undefined as "local" | "api" | "openai" | "local_openai" | undefined,

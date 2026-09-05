@@ -77,6 +77,8 @@ export interface Settings {
   font_size_ar: number;
   enable_live_spellcheck?: boolean;
   enable_ai_proofreader?: boolean;
+  auto_lock_minutes?: number;
+  lock_on_minimize?: boolean;
   // Write-only key fields: GET /api/settings never returns key material — it
   // returns these booleans instead. Key inputs in the UI keep drafts locally
   // and only send non-empty values.
