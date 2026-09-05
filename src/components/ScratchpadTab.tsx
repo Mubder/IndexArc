@@ -57,6 +57,7 @@ import {
 } from "../types";
 import { getTranslation } from "../utils/i18n";
 import { sanitizeNoteHtml, textToNoteHtml } from "../sanitize";
+import { enqueueScratchpadSave, drainScratchpadSaves } from "../scratchpadSaveQueue";
 import { isArabicText } from "../utils";
 
 export interface NoteRevision {
@@ -1188,6 +1189,9 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     let cancelled = false;
     (async () => {
       try {
+        // Land any save queued by a previous mount FIRST, so the server copy
+        // we load is never older than what the user actually typed.
+        await drainScratchpadSaves();
         const res = await fetch("/api/scratchpad");
         if (!res.ok) return;
         const data = await res.json();
@@ -1256,15 +1260,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs)); } catch {}
     saveTabsIDB(tabs);
     if (!serverLoaded.current) return;
-    const handle = setTimeout(() => {
-      if (typeof navigator !== "undefined" && (navigator as any).scheduling?.isInputPending?.()) return;
-      fetch("/api/scratchpad", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tabs }),
-      }).catch(() => {});
-    }, 1200);
-    return () => clearTimeout(handle);
+    // The queue lives outside React: it survives unmount/tab-switch, so the
+    // last keystrokes always reach the server (the old in-effect debounce was
+    // cancelled by cleanup and dropped them).
+    enqueueScratchpadSave(tabs);
   }, [tabs]);
 
   const setStatus = useCallback((msg: string) => {
