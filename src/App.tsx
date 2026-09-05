@@ -31,6 +31,7 @@ import {
 
 import { readJson } from "./utils";
 import { getTranslation } from "./utils/i18n";
+import { offerNoteToScratchpad } from "./noteHandoff";
 
 // Subcomponents — Scratchpad is TipTap-heavy, lazy-split to keep main bundle ~220kB
 import { HomeTab } from "./components/HomeTab";
@@ -1217,10 +1218,8 @@ return (
                 onDeleteEntry={deleteEntry}
                 onBulkDeleteEntries={bulkDeleteEntries}
                 onReopenInScratchpad={(title, html) => {
-                  try {
-                    localStorage.setItem("indexarc-reopen-note", JSON.stringify({ title, html, time: Date.now() }));
-                    window.dispatchEvent(new Event("indexarc-reopen-note"));
-                  } catch (_) {}
+                  // In-memory handoff — note content must not touch browser storage.
+                  offerNoteToScratchpad({ title, html });
                   setTab("scratchpad");
                 }}
                 settings={settings}

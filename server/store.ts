@@ -408,6 +408,15 @@ export class VaultStore {
     return active;
   }
 
+  // Side-effect-free read of the durable active tabs (no migration, no cache).
+  // Used by saveScratchpad so metadata enrichment can't recurse into the
+  // getScratchpad migration path (which itself saves).
+  private readScratchpadRaw(): any[] {
+    const raw = readJson<any>(this.paths.scratchpadFile, { tabs: [] });
+    const all = Array.isArray(raw) ? raw : Array.isArray(raw?.tabs) ? raw.tabs : [];
+    return all.filter((t: any) => t && !t.archived);
+  }
+
   saveScratchpad(tabs: any[], opts: { force?: boolean } = {}): any[] {
     const incoming = Array.isArray(tabs) ? tabs : [];
     // Ensure only unarchived tabs live in the active store
@@ -417,11 +426,38 @@ export class VaultStore {
     // tabs. If the incoming set is empty but a non-empty file already exists,
     // refuse (unless explicitly forced, e.g. the user really deleted all tabs).
     if (safe.length === 0 && !opts.force) {
-      const existing = this.getScratchpad();
+      const existing = this.readScratchpadRaw();
       if (existing.length > 0) {
         return existing;
       }
     }
+
+    // Envelope v2: the server owns `created_at` / `updated_at` / `rev` per tab.
+    // The rev increments whenever the server observes a content or title change
+    // — it is the optimistic-concurrency token for saves (409 on mismatch).
+    const prevById = new Map<any, any>(this.readScratchpadRaw().map((t: any) => [t.id, t]));
+    const nowIso = new Date().toISOString();
+    const enriched = safe.map((t: any) => {
+      const prev = prevById.get(t.id);
+      const created_at =
+        typeof t.created_at === "string" && t.created_at
+          ? t.created_at
+          : typeof prev?.created_at === "string" && prev.created_at
+          ? prev.created_at
+          : nowIso;
+      const changed = !!prev && (prev.content !== t.content || prev.title !== t.title);
+      const rev = changed
+        ? (Number(prev?.rev) || 1) + 1
+        : Number(t.rev) || Number(prev?.rev) || 1;
+      const updated_at = changed
+        ? nowIso
+        : typeof t.updated_at === "string" && t.updated_at
+        ? t.updated_at
+        : typeof prev?.updated_at === "string" && prev.updated_at
+        ? prev.updated_at
+        : created_at;
+      return { ...t, created_at, updated_at, rev };
+    });
 
     // Keep a rolling one-step-back copy before every overwrite, so even a
     // forced/mistaken save can be undone.
@@ -434,12 +470,46 @@ export class VaultStore {
       }
     } catch {}
 
-    this._scratchpadCache = safe;
+    this._scratchpadCache = enriched;
     atomicWrite(
       this.paths.scratchpadFile,
-      JSON.stringify({ version: 1, tabs: safe }, null, 2)
+      JSON.stringify({ version: 2, tabs: enriched }, null, 2)
     );
-    return safe;
+    return enriched;
+  }
+
+  // --- Note revisions (server-side history — the client keeps no durable copy) ---
+  getNoteRevisions(tabId: string): any[] {
+    const raw = readJson<{ revisions: Record<string, any[]> }>(this.paths.noteRevisionsFile, {
+      revisions: {},
+    });
+    const all = raw.revisions || {};
+    return Array.isArray(all[tabId]) ? all[tabId] : [];
+  }
+
+  addNoteRevision(rev: any, maxKeep = 30): any[] {
+    const tabId = String(rev?.tabId || "");
+    if (!tabId) return [];
+    const raw = readJson<{ revisions: Record<string, any[]> }>(this.paths.noteRevisionsFile, {
+      revisions: {},
+    });
+    const all = raw.revisions || {};
+    const existing: any[] = Array.isArray(all[tabId]) ? all[tabId] : [];
+    if (existing.length > 0 && existing[0].content === rev.content) return existing;
+    const updated = [rev, ...existing.filter((x) => x.content !== rev.content)].slice(0, maxKeep);
+    all[tabId] = updated;
+    atomicWrite(this.paths.noteRevisionsFile, JSON.stringify({ version: 1, revisions: all }));
+    return updated;
+  }
+
+  clearNoteRevisions(tabId: string): void {
+    const raw = readJson<{ revisions: Record<string, any[]> }>(this.paths.noteRevisionsFile, {
+      revisions: {},
+    });
+    const all = raw.revisions || {};
+    if (!all[tabId]) return;
+    delete all[tabId];
+    atomicWrite(this.paths.noteRevisionsFile, JSON.stringify({ version: 1, revisions: all }));
   }
 
   // --- Scratchpad Archive (Passive Cold Storage) ---

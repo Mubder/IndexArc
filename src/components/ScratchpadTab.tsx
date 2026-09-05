@@ -7,7 +7,6 @@ import { TextStyle } from "@tiptap/extension-text-style";
 import Color from "@tiptap/extension-color";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
-import * as Y from "yjs";
 import {
   Plus,
   X,
@@ -58,6 +57,7 @@ import {
 import { getTranslation } from "../utils/i18n";
 import { sanitizeNoteHtml, textToNoteHtml } from "../sanitize";
 import { enqueueScratchpadSave, drainScratchpadSaves } from "../scratchpadSaveQueue";
+import { takeHandoffNote, REOPEN_NOTE_EVENT } from "../noteHandoff";
 import { isArabicText } from "../utils";
 
 export interface NoteRevision {
@@ -74,31 +74,29 @@ export interface NoteRevision {
 const STORAGE_KEY = "indexarc_scratchpad_tabs";
 const REVISIONS_KEY_PREFIX = "indexarc_note_revisions_";
 
+// Revisions live on the SERVER (data/note_revisions.json) — the durable,
+// encrypted store. The browser keeps no copy (the old idb-keyval/localStorage
+// revisions died with the client-persistence cleanup).
 export async function getNoteRevisions(tabId: string): Promise<NoteRevision[]> {
   try {
-    const { get } = await import("idb-keyval");
-    const val = await get(`${REVISIONS_KEY_PREFIX}${tabId}`);
-    if (Array.isArray(val)) return val;
-  } catch {}
-  try {
-    const raw = localStorage.getItem(`${REVISIONS_KEY_PREFIX}${tabId}`);
-    if (raw) return JSON.parse(raw);
+    const res = await fetch(`/api/scratchpad/tabs/${encodeURIComponent(tabId)}/revisions`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.revisions)) return data.revisions;
+    }
   } catch {}
   return [];
 }
 
-export async function saveNoteRevision(rev: NoteRevision, maxKeep = 30): Promise<void> {
+export async function saveNoteRevision(rev: NoteRevision, _maxKeep = 30): Promise<void> {
   try {
     const existing = await getNoteRevisions(rev.tabId);
     if (existing.length > 0 && existing[0].content === rev.content) return;
-    const updated = [rev, ...existing.filter((x) => x.content !== rev.content)].slice(0, maxKeep);
-    try {
-      const { set } = await import("idb-keyval");
-      await set(`${REVISIONS_KEY_PREFIX}${rev.tabId}`, updated);
-    } catch {}
-    try {
-      localStorage.setItem(`${REVISIONS_KEY_PREFIX}${rev.tabId}`, JSON.stringify(updated.slice(0, 10)));
-    } catch {}
+    await fetch(`/api/scratchpad/tabs/${encodeURIComponent(rev.tabId)}/revisions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rev),
+    });
   } catch {}
 }
 const REWRITE_STYLES: RewriteStyle[] = ["professional", "casual", "human", "technical", "concise", "formal"];
@@ -227,27 +225,6 @@ function loadTabs(): ScratchTab[] {
   } catch {}
   return [{ id: uid(), title: "Scratch 1", content: "<p></p>" }];
 }
-// IndexedDB durable cache (idb-keyval) — survives large notes that exceed localStorage quota
-async function loadTabsIDB(): Promise<ScratchTab[] | null> {
-  try {
-    const { get } = await import("idb-keyval");
-    const val = await get(STORAGE_KEY);
-    if (Array.isArray(val) && val.length) {
-      return (val as ScratchTab[])
-        .filter((t) => !t.archived)
-        .map((t) => ({ ...t, content: ensureHtmlParagraphs(t.content || ""), archived: false }));
-    }
-  } catch {}
-  return null;
-}
-
-async function saveTabsIDB(tabs: ScratchTab[]) {
-  try {
-    const { set } = await import("idb-keyval");
-    await set(STORAGE_KEY, tabs);
-  } catch {}
-}
-
 // --- Caret/selection offset helpers -------------------------------------
 // We snapshot the editor's selection as a (start, end) character offset
 // pair over its textContent. This survives DOM replacement (unlike Range
@@ -621,7 +598,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [overId, setOverId] = useState<string | null>(null);
   const [rephraseUndo, setRephraseUndo] = useState<Record<string, string[]>>({});
   const [historyVersion, setHistoryVersion] = useState(0);
-  const [yjsReady, setYjsReady] = useState(false);
   const [showRevisions, setShowRevisions] = useState(false);
   const [revisionsList, setRevisionsList] = useState<NoteRevision[]>([]);
   const [selectedRevision, setSelectedRevision] = useState<NoteRevision | null>(null);
@@ -645,7 +621,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const spellWorkerRef = useRef<Worker | null>(null);
   const misspelledRef = useRef(misspelledWords);
   misspelledRef.current = misspelledWords;
-  const yDocRef = useRef<Y.Doc | null>(null);
   const htmlToTextDiv = useRef<HTMLDivElement | null>(null);
   const autocompleteTimerRef = useRef<NodeJS.Timeout | null>(null);
   const debouncedTabsSync = useRef<number | null>(null);
@@ -683,22 +658,16 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   // Listen for "Reopen in Scratchpad" event from Library or Command Palette
   useEffect(() => {
     const handleReopenEvent = () => {
-      try {
-        const raw = localStorage.getItem("indexarc-reopen-note");
-        if (!raw) return;
-        localStorage.removeItem("indexarc-reopen-note");
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.title && parsed.html) {
-          const newId = `note-${Date.now()}`;
-          const newTab = { id: newId, title: parsed.title, content: ensureHtmlParagraphs(parsed.html), archived: false };
-          setTabs((prev) => [...prev, newTab]);
-          setActiveId(newId);
-        }
-      } catch (_) {}
+      const note = takeHandoffNote();
+      if (!note || !note.title || !note.html) return;
+      const newId = `note-${Date.now()}`;
+      const newTab = { id: newId, title: note.title, content: ensureHtmlParagraphs(note.html), archived: false };
+      setTabs((prev) => [...prev, newTab]);
+      setActiveId(newId);
     };
-    window.addEventListener("indexarc-reopen-note", handleReopenEvent);
+    window.addEventListener(REOPEN_NOTE_EVENT, handleReopenEvent);
     handleReopenEvent();
-    return () => window.removeEventListener("indexarc-reopen-note", handleReopenEvent);
+    return () => window.removeEventListener(REOPEN_NOTE_EVENT, handleReopenEvent);
   }, []);
 
   const reorderTab = useCallback((fromId: string, toId: string) => {
@@ -1024,33 +993,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     !!detection &&
     (detection.families.includes("secret") || detection.families.includes("unknown"));
 
-  // Yjs offline-first — IndexedDB persistence per tab (collaboration-ready) — dynamic import safe
-  useEffect(() => {
-    let cancelled = false;
-    let doc: Y.Doc | null = null;
-    let persist: any = null;
-    (async () => {
-      try {
-        const { IndexeddbPersistence } = await import("y-indexeddb");
-        if (cancelled) return;
-        doc = new Y.Doc();
-        yDocRef.current = doc;
-        try { persist = new (IndexeddbPersistence as any)(`scratchpad-yjs-${activeId}`, doc); } catch {}
-        try { persist?.on?.("synced", () => !cancelled && setYjsReady(true)); } catch {}
-        try {
-          const yText = doc.getText("content");
-          if (yText.length === 0 && active?.content) yText.insert(0, active.content.slice(0, 8000));
-          if (!cancelled) setYjsReady(true);
-        } catch { if (!cancelled) setYjsReady(true); }
-      } catch { if (!cancelled) setYjsReady(false); }
-    })();
-    return () => {
-      cancelled = true;
-      try { persist?.destroy?.(); doc?.destroy(); } catch {}
-      setYjsReady(false);
-    };
-  }, [activeId]);
-
   // Fix sticky selection: ensure ProseMirror is selectable and scroll syncs overlays
   useEffect(() => {
     if (!tiptap || tiptap.isDestroyed || !tiptap.view?.dom) return;
@@ -1243,22 +1185,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     };
   }, []);
 
-  // Persist to localStorage (fast cache) + the server (durable) on change — unified, throttled
-  // Hydrate from IndexedDB (survives quota, large notes)
+  // Persist to the server (the ONLY durable store) on change. localStorage is
+  // no longer written — notes must not live in browser storage (plaintext
+  // secrets at rest). loadTabs() above stays as a one-way migration source.
   useEffect(() => {
-    loadTabsIDB().then((idb) => {
-      if (idb && idb.length && !serverLoaded.current) {
-        const hasContent = idb.some((x) => (x.content || "").trim() || x.title !== "Scratch 1");
-        if (hasContent) {
-          setTabs(idb);
-          setActiveId(idb[0].id);
-        }
-      }
-    });
-  }, []);
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs)); } catch {}
-    saveTabsIDB(tabs);
     if (!serverLoaded.current) return;
     // The queue lives outside React: it survives unmount/tab-switch, so the
     // last keystrokes always reach the server (the old in-effect debounce was
@@ -2326,9 +2256,6 @@ className="scratchpad-tab group cursor-pointer"
               {enablePredictions ? <Zap className="w-3.5 h-3.5" /> : <ZapOff className="w-3.5 h-3.5" />}
               <span>Predictions: <strong>{enablePredictions ? "ON" : "OFF"}</strong></span>
             </button>
-            <span className="px-2 py-1 rounded-full text-[10px] font-mono flex items-center gap-1" style={{ background: yjsReady ? "var(--emerald-bg)" : "var(--bg-input)", color: yjsReady ? "var(--emerald)" : "var(--text-muted)", border: "1px solid var(--border)" }} title="Yjs IndexedDB offline persistence">
-              <span className={`w-1.5 h-1.5 rounded-full ${yjsReady ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"}`} /> Yjs {yjsReady ? "✓" : "…"}
-            </span>
 
            <div className="flex-1" />
 
@@ -2636,10 +2563,6 @@ className="scratchpad-tab group cursor-pointer"
               </span>
             </div>
             <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1.5" title="Yjs IndexedDB offline persistence">
-                <span className={`w-1.5 h-1.5 rounded-full ${yjsReady ? "bg-emerald-400" : "bg-amber-400"}`} />
-                <span>Yjs {yjsReady ? "Synced" : "Offline"}</span>
-              </span>
               <span className="opacity-30">•</span>
               <span className="uppercase text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded" style={{ background: "var(--accent-bg)", color: "var(--accent-bright)" }}>
                 {bidiMode === "auto" ? `AUTO (${detectedDir.toUpperCase()})` : bidiMode.toUpperCase()}

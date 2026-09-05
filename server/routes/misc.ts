@@ -41,6 +41,27 @@ export function miscRoutes(ctx: RouteContext) {
     res.json({ tabs: store.getScratchpad() });
   });
 
+  // --- Note revisions (server-side history) ---
+  r.get("/scratchpad/tabs/:id/revisions", (req, res) => {
+    res.json({ revisions: store.getNoteRevisions(req.params.id) });
+  });
+
+  r.post("/scratchpad/tabs/:id/revisions", (req, res) => {
+    const b = req.body || {};
+    const rev = {
+      id: String(b.id ?? `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+      tabId: req.params.id,
+      timestamp: Number(b.timestamp) || Date.now(),
+      title: String(b.title ?? "Note"),
+      content: String(b.content ?? ""),
+      charCount: Number(b.charCount) || 0,
+      wordCount: Number(b.wordCount) || 0,
+      reason: b.reason ? String(b.reason) : undefined,
+    };
+    const revisions = store.addNoteRevision(rev);
+    res.json({ revisions });
+  });
+
   r.post("/scratchpad", (req, res) => {
     const tabs = Array.isArray(req.body?.tabs) ? req.body.tabs : [];
     const force = req.body?.force === true;
