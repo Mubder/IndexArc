@@ -7,6 +7,7 @@ import type {
 } from "../types.js";
 import { analyzePaste, embedText, resolveActiveProvider } from "../ai/providers.js";
 import { addLog } from "../logs.js";
+import { asString, asStringArray } from "../validate.js";
 import { randomUUID } from "crypto";
 
 function statusFromCandidate(c: AnalyzeCandidate): EntryStatus {
@@ -87,8 +88,13 @@ export async function saveCandidate(
   settings: AppSettings,
   input: SaveCandidateInput
 ): Promise<VaultEntry> {
-  const type = (input.type || "").trim();
-  const name = (input.name || "").trim();
+  // Coerce untrusted body shapes first (labels as string/object used to
+  // crash indexEntry with .join is not a function AFTER the entry persisted).
+  const value = asString(input.value);
+  const type = asString(input.type).trim();
+  const name = asString(input.name).trim();
+  const labels = asStringArray(input.labels);
+  const aliasesIn = asStringArray(input.type_aliases);
   const family = input.family || (type ? "secret" : "unknown");
 
   let status: EntryStatus = "saved";
@@ -114,17 +120,17 @@ export async function saveCandidate(
 
   // duplicate name warning handled by caller; we allow save
   const entry = store.createEntry({
-    value: input.value,
+    value,
     type: type || "unidentified",
     name: name || "unnamed",
-    raw_fragment: input.raw_fragment || input.value,
+    raw_fragment: asString(input.raw_fragment) || value,
     paste_id: input.paste_id,
-    labels: input.labels || [],
-    type_aliases: input.type_aliases || (type ? [type] : []),
+    labels,
+    type_aliases: aliasesIn.length ? aliasesIn : type ? [type] : [],
     status,
     family: finalFamily,
-    notes: input.notes,
-    source_file: input.source_file,
+    notes: input.notes === undefined ? undefined : asString(input.notes),
+    source_file: input.source_file === undefined ? undefined : asString(input.source_file),
   });
 
   if (status === "saved") {
@@ -161,8 +167,8 @@ export async function clarifyEntry(
   const existing = store.getEntry(id);
   if (!existing) return null;
 
-  const type = (patch.type ?? existing.type).trim();
-  const name = (patch.name ?? existing.name).trim();
+  const type = asString(patch.type ?? existing.type).trim();
+  const name = asString(patch.name ?? existing.name).trim();
   let status: EntryStatus = "saved";
   let family = patch.family ?? existing.family;
 

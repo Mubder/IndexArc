@@ -2,10 +2,23 @@ import { GoogleGenAI, Type } from "@google/genai";
 import type { AnalyzeCandidate, AppSettings } from "../types.js";
 import { heuristicAnalyze } from "./heuristics.js";
 import { addLog } from "../logs.js";
+import { isHttpUrl, withTimeout } from "../validate.js";
 import { randomUUID } from "crypto";
 
 let lastOllamaCheck: { online: boolean; models: string[] } | null = null;
 let lastOllamaCheckTime = 0;
+
+// Base URLs come from settings and end up in fetch targets that carry vault
+// content. Only http(s) with a hostname is accepted; anything else falls
+// through to the next provider instead of erroring the request path.
+function safeBaseUrl(url: string | undefined, label: string): string | null {
+  const raw = String(url || "").trim();
+  if (!isHttpUrl(raw)) {
+    addLog("AI", `${label}: invalid base URL (must be http/https) — skipping provider`);
+    return null;
+  }
+  return raw.replace(/\/$/, "");
+}
 
 export async function checkOllama(baseUrl: string, force = false): Promise<{ online: boolean; models: string[] }> {
   const now = Date.now();
@@ -264,10 +277,14 @@ async function geminiEmbed(settings: AppSettings, text: string): Promise<number[
   if (!settings.gemini_api_key) return null;
   try {
     const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
-    const res: any = await ai.models.embedContent({
-      model: settings.gemini_embed_model,
-      contents: text.slice(0, 8000),
-    });
+    const res: any = await withTimeout(
+      ai.models.embedContent({
+        model: settings.gemini_embed_model,
+        contents: text.slice(0, 8000),
+      }),
+      60_000,
+      "Gemini embed"
+    );
     const values =
       res.embedding?.values ||
       res.embeddings?.[0]?.values ||
@@ -437,7 +454,8 @@ export async function embedText(
     );
   }
   if (active === "local_openai") {
-    const baseUrl = settings.local_openai_base_url.replace(/\/$/, "");
+    const baseUrl = safeBaseUrl(settings.local_openai_base_url, "local_openai embeddings");
+    if (!baseUrl) return null;
     // Use local_openai_embed_model for embeddings, fallback to llm_model
     const embedModel = settings.local_openai_embed_model || settings.local_openai_llm_model;
     return fetchOpenAiEmbeddings(
@@ -652,7 +670,8 @@ export async function analyzePaste(
     } else if (active === "api") {
       addLog("ANALYZE", `Gemini classify via ${settings.gemini_llm_model}`);
       const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
-      const response = await ai.models.generateContent({
+      const response = await withTimeout(
+        ai.models.generateContent({
         model: settings.gemini_llm_model,
         contents: userPrompt,
         config: {
@@ -685,7 +704,10 @@ export async function analyzePaste(
             required: ["candidates"],
           },
         },
-      });
+        }),
+        120_000,
+        "Gemini analyze"
+      );
       text = response.text || null;
       usedLabel = "gemini+heuristic";
     } else if (active === "openai") {
@@ -832,6 +854,8 @@ export async function pullOllamaModel(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: modelName }),
+      // Model pulls are legitimately slow, but the operation must not hang forever.
+      signal: AbortSignal.timeout(600_000),
     });
     if (!res.ok || !res.body) return false;
     const reader = res.body.getReader();
@@ -914,7 +938,8 @@ export async function generateText(
       text = await anthropicGenerate(settings, prompt, system);
       usedLabel = `anthropic (${settings.anthropic_llm_model})`;
     } else if (active === "local_openai") {
-      const baseUrl = settings.local_openai_base_url.replace(/\/$/, "");
+      const baseUrl = safeBaseUrl(settings.local_openai_base_url, "local_openai generate");
+      if (!baseUrl) throw new Error("Invalid local_openai_base_url");
       text = await fetchOpenAiCompatible(
         `${baseUrl}/chat/completions`,
         settings.local_openai_api_key,
@@ -1013,14 +1038,18 @@ async function geminiGenerateText(
   if (!settings.gemini_api_key) return null;
   try {
     const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
-    const response = await ai.models.generateContent({
-      model: settings.gemini_llm_model,
-      contents: prompt,
-      config: {
-        systemInstruction: system,
-        temperature: 0.3,
-      },
-    });
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: settings.gemini_llm_model,
+        contents: prompt,
+        config: {
+          systemInstruction: system,
+          temperature: 0.3,
+        },
+      }),
+      120_000,
+      "Gemini generateText"
+    );
     return response.text || null;
   } catch (e: any) {
     addLog("GEMINI", `generateText failed: ${e.message}`);
@@ -1128,35 +1157,43 @@ export async function autoComplete(
         raw = data.response || null;
       }
     } else if (active === "local_openai") {
-      const baseUrl = settings.local_openai_base_url.replace(/\/$/, "");
-      const res = await fetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: settings.local_openai_llm_model,
-          messages: [
-            { role: "system", content: AUTO_COMPLETION_SYSTEM },
-            { role: "user", content: text },
-          ],
-          max_tokens: maxTokens,
-          temperature: 0.2,
-        }),
-        signal: AbortSignal.timeout(15000),
-      });
-      if (res.ok) {
-        const data = await res.json() as { choices?: { message?: { content?: string } }[] };
-        raw = data.choices?.[0]?.message?.content || null;
+      const baseUrl = safeBaseUrl(settings.local_openai_base_url, "local_openai autocomplete");
+      if (!baseUrl) {
+        raw = null;
+      } else {
+        const res = await fetch(`${baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: settings.local_openai_llm_model,
+            messages: [
+              { role: "system", content: AUTO_COMPLETION_SYSTEM },
+              { role: "user", content: text },
+            ],
+            max_tokens: maxTokens,
+            temperature: 0.2,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (res.ok) {
+          const data = await res.json() as { choices?: { message?: { content?: string } }[] };
+          raw = data.choices?.[0]?.message?.content || null;
+        }
       }
     } else if (active === "api") {
       const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
-      const response = await ai.models.generateContent({
-        model: settings.gemini_llm_model,
-        contents: `${AUTO_COMPLETION_SYSTEM}\n\nUser Text:\n${text}`,
-        config: {
-          temperature: 0.2,
-          maxOutputTokens: maxTokens,
-        },
-      });
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: settings.gemini_llm_model,
+          contents: `${AUTO_COMPLETION_SYSTEM}\n\nUser Text:\n${text}`,
+          config: {
+            temperature: 0.2,
+            maxOutputTokens: maxTokens,
+          },
+        }),
+        60_000,
+        "Gemini autocomplete"
+      );
       raw = response.text || null;
     } else if (active === "openai") {
       raw = await fetchOpenAiCompatible(

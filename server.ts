@@ -158,6 +158,16 @@ async function startServer() {
     res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });
   });
 
+  // JSON error handler: Express 4 rejections wrapped with wrapAsync land here.
+  // Returns JSON (never an HTML stack trace with absolute paths).
+  app.use(
+    (err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+      const status = Number(err?.status || err?.statusCode) || 500;
+      if (status >= 500) addLog("ERROR", `${req.method} ${req.path} → ${err?.message || err}`);
+      res.status(status).json({ error: err?.message || "Internal server error" });
+    }
+  );
+
   app.listen(PORT, HOST, () => {
     addLog("SYSTEM", `Vault server listening on http://${HOST}:${PORT}`);
     console.log(`IndexArc Vault → http://${HOST}:${PORT}`);

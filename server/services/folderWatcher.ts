@@ -48,6 +48,12 @@ export class FolderWatcherManager {
         const full = path.join(dir, filename.toString());
         this.queueFile(folder.id, full);
       });
+      // A deleted/unmounted watched folder makes the FSWatcher emit 'error';
+      // without a listener that exception kills the whole server process.
+      watcher.on("error", (err: Error) => {
+        addLog("WATCH", `Watcher error on ${dir} (${err.message}) — stopping watch`);
+        this.stop(folder.id);
+      });
 
       this.handles.set(folder.id, {
         watcher,

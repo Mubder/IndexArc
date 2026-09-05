@@ -4,10 +4,15 @@ import type { RouteContext } from "./types.js";
 
 // SSE client management
 const clients = new Set<any>();
+const MAX_CLIENTS = 50;
 
 export function sendSSE(event: string, data: any) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of clients) {
+    if (client.writableEnded) {
+      clients.delete(client);
+      continue;
+    }
     try {
       client.write(payload);
     } catch {
@@ -27,6 +32,14 @@ export function sseRoutes(_ctx: RouteContext) {
   });
 
   r.get("/events", (req, res) => {
+    // Bounded: a leaky local client pool must not grow without limit.
+    if (clients.size >= MAX_CLIENTS) {
+      const oldest = clients.values().next().value;
+      if (oldest) {
+        try { oldest.end(); } catch {}
+        clients.delete(oldest);
+      }
+    }
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");

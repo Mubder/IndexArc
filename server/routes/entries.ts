@@ -2,6 +2,7 @@ import { Router } from "express";
 import { addLog } from "../logs.js";
 import { saveCandidate, saveMany, clarifyEntry } from "../services/vault.js";
 import { sendSSE } from "./sse.js";
+import { wrapAsync } from "../asyncWrap.js";
 import type { RouteContext } from "./types.js";
 
 export function entriesRoutes(ctx: RouteContext) {
@@ -54,7 +55,7 @@ export function entriesRoutes(ctx: RouteContext) {
     }
   });
 
-  r.post("/park", async (req, res) => {
+  r.post("/park", wrapAsync(async (req, res) => {
     const settings = store.getSettings();
     const items = Array.isArray(req.body?.candidates) ? req.body.candidates : [req.body];
     const paste_id = req.body?.paste_id;
@@ -76,7 +77,7 @@ export function entriesRoutes(ctx: RouteContext) {
       );
     }
     res.json({ entries: saved });
-  });
+  }));
 
   r.get("/", (req, res) => {
     const status = req.query.status as string | undefined;
@@ -93,7 +94,7 @@ export function entriesRoutes(ctx: RouteContext) {
     res.json(e);
   });
 
-  r.patch("/:id", async (req, res) => {
+  r.patch("/:id", wrapAsync(async (req, res) => {
     const updated = await clarifyEntry(store, store.getSettings(), req.params.id, {
       type: req.body?.type,
       name: req.body?.name,
@@ -104,7 +105,7 @@ export function entriesRoutes(ctx: RouteContext) {
     });
     if (!updated) return res.status(404).json({ error: "Not found" });
     res.json(updated);
-  });
+  }));
 
   r.delete("/:id", (req, res) => {
     const ok = store.deleteEntry(req.params.id);

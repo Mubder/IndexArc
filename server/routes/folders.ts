@@ -5,6 +5,7 @@ import { scanFolder } from "../services/folderScan.js";
 import { saveCandidate } from "../services/vault.js";
 import { listDirectory, listFsRoots } from "../services/fsBrowser.js";
 import { sendSSE } from "./sse.js";
+import { wrapAsync } from "../asyncWrap.js";
 import type { AnalyzeCandidate, WatchedFolder } from "../types.js";
 import type { RouteContext } from "./types.js";
 
@@ -134,7 +135,7 @@ export function foldersRoutes(ctx: RouteContext) {
     res.json(updated);
   });
 
-  r.post("/sessions/:id/commit", async (req, res) => {
+  r.post("/sessions/:id/commit", wrapAsync(async (req, res) => {
     const session = store.getScanSession(req.params.id);
     if (!session) return res.status(404).json({ error: "Session not found" });
     if (session.status !== "review") {
@@ -189,9 +190,9 @@ export function foldersRoutes(ctx: RouteContext) {
     );
     sendSSE("folders-changed", { action: "commit", saved: saved.length, parked: parked.length });
     res.json({ saved, parked, discarded, session_id: session.id });
-  });
+  }));
 
-  r.post("/sessions/:id/apply", async (req, res) => {
+  r.post("/sessions/:id/apply", wrapAsync(async (req, res) => {
     const session = store.getScanSession(req.params.id);
     if (!session) return res.status(404).json({ error: "Session not found" });
     if (session.status !== "review") {
@@ -253,7 +254,7 @@ export function foldersRoutes(ctx: RouteContext) {
       saved,
       parked,
     });
-  });
+  }));
 
   r.post("/sessions/:id/discard", (req, res) => {
     const session = store.getScanSession(req.params.id);

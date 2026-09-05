@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { addLog, getLogs } from "../logs.js";
 import { sendSSE } from "./sse.js";
+import { isHttpUrl } from "../validate.js";
 import type { RouteContext } from "./types.js";
 
 // API keys are write-only: they are accepted by POST and never returned.
@@ -87,6 +88,14 @@ export function settingsRoutes(ctx: RouteContext) {
       ].includes(patch.ai_provider as string)
     ) {
       return res.status(400).json({ error: "Invalid ai_provider" });
+    }
+    // Base URLs become fetch targets that carry vault content — validate here
+    // centrally (providers also guard defensively at call time).
+    for (const k of ["ollama_base_url", "local_openai_base_url"] as const) {
+      const v = patch[k];
+      if (typeof v === "string" && v.trim() && !isHttpUrl(v)) {
+        return res.status(400).json({ error: `${k} must be a valid http(s) URL` });
+      }
     }
     const next = store.saveSettings(patch as Partial<ReturnType<typeof store.getSettings>>);
     addLog("SETTINGS", `Updated AI provider mode: ${next.ai_provider}`);
