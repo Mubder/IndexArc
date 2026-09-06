@@ -60,6 +60,7 @@ import { sanitizeNoteHtml, textToNoteHtml } from "../sanitize";
 import { enqueueScratchpadSave, drainScratchpadSaves, setScratchpadConflictHandler, setSyncedScratchpadTabs, forceSaveScratchpadTab } from "../scratchpadSaveQueue";
 import { takeHandoffNote, REOPEN_NOTE_EVENT } from "../noteHandoff";
 import { ensureHtmlParagraphs, htmlToPlainText } from "../lib/noteHtml";
+import { normalizeServerTab } from "../lib/serverTabs";
 import { isArabicText } from "../utils";
 
 export interface NoteRevision {
@@ -197,12 +198,11 @@ function loadTabs(): ScratchTab[] {
       if (Array.isArray(parsed) && parsed.length) {
         return parsed
           .filter((x: any) => !x.archived)
-          .map((x: any) => ({
-            id: x.id || uid(),
-            title: x.title || "Scratch",
-            content: ensureHtmlParagraphs(x.content || ""),
-            archived: false,
-          }));
+          .map((x: any) => {
+            const t = normalizeServerTab(x);
+            t.content = ensureHtmlParagraphs(t.content || "");
+            return t;
+          });
       }
     }
   } catch {}
@@ -1125,15 +1125,12 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         const res = await fetch("/api/scratchpad");
         if (!res.ok) return;
         const data = await res.json();
+        // normalizeServerTab PRESERVES rev + pinned/protected flags — stripping
+        // them here made protection invisible after every restart.
         const serverTabs: ScratchTab[] = Array.isArray(data.tabs)
           ? data.tabs
               .filter((x: any) => x && typeof x === "object" && !x.archived)
-              .map((x: any) => ({
-                id: x.id || uid(),
-                title: x.title || "Scratch",
-                content: x.content || "",
-                archived: false,
-              }))
+              .map((x: any) => normalizeServerTab(x))
           : [];
         if (cancelled) return;
         // Prime the save queue's mirror so it knows each tab's server rev.
@@ -1631,28 +1628,43 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     const target = tabs.find((x) => x.id === id);
     if (!window.confirm(`Are you sure you want to archive note "${target?.title || "Scratch"}"?`)) return;
 
-    // Optimistic UI update
-    const remaining = tabs.filter((x) => x.id !== id);
-    if (remaining.length === 0) {
-      const fresh = { id: uid(), title: "Scratch 1", content: "", archived: false };
-      setTabs([fresh]);
-      setActiveId(fresh.id);
-    } else {
-      setTabs(remaining);
-      if (id === activeId) setActiveId(remaining[0].id);
-    }
-    setArchivedCount((c) => c + 1);
-    if (archivedTabs !== null && target) {
-      setArchivedTabs((prev) => [{ ...target, archived: true, archivedAt: Date.now() }, ...(prev || [])]);
-    }
-
+    // SERVER FIRST: the server decides (it refuses protected notes). Local
+    // state only changes after a confirmed success — an optimistic removal
+    // followed by a refusal made the note "disappear then reappear".
+    let data: any = null;
     try {
-      await fetch("/api/scratchpad/archive-tab", {
+      const res = await fetch("/api/scratchpad/archive-tab", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tabId: id, tab: target }),
       });
-    } catch {}
+      data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.success === false) {
+        setStatus(t("scratchpad_archive_protected" as any) || "This note is protected — unprotect it before archiving.");
+        return;
+      }
+    } catch {
+      setStatus(t("scratchpad_archive_failed" as any) || "Archive failed — nothing was changed.");
+      return;
+    }
+
+    // Server confirmed: adopt its authoritative active-tab list.
+    const activeTabs: ScratchTab[] = Array.isArray(data.activeTabs)
+      ? data.activeTabs.map((x: any) => normalizeServerTab(x))
+      : tabs.filter((x) => x.id !== id);
+    if (activeTabs.length === 0) {
+      const fresh = { id: uid(), title: "Scratch 1", content: "", archived: false };
+      setTabs([fresh]);
+      setActiveId(fresh.id);
+    } else {
+      setTabs(activeTabs);
+      if (id === activeId || !activeTabs.some((x) => x.id === activeId)) setActiveId(activeTabs[0].id);
+    }
+    setSyncedScratchpadTabs(activeTabs);
+    setArchivedCount(typeof data.archivedCount === "number" ? data.archivedCount : (c) => c + 1);
+    if (archivedTabs !== null && target) {
+      setArchivedTabs((prev) => [{ ...target, archived: true, archivedAt: Date.now() }, ...(prev || [])]);
+    }
   };
 
   const restoreTab = async (id: string) => {
@@ -1705,13 +1717,35 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     } catch {}
   };
 
-  const closeTab = (id: string, skipConfirm: boolean = false) => {
+  const closeTab = async (id: string, skipConfirm: boolean = false) => {
     const target = tabs.find((x) => x.id === id);
     if (!skipConfirm && !window.confirm(`Are you sure you want to delete "${target?.title || "Scratch"}"?`)) return;
-    if (tabs.length === 1) {
+
+    // SERVER FIRST: only remove the note locally once the server confirms the
+    // delete. A protected note (423) stays exactly where it is.
+    try {
+      const res = await fetch(`/api/scratchpad/tabs/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (res.status === 423) {
+        setStatus(t("scratchpad_close_protected" as any) || "This note is protected — unprotect it before deleting.");
+        return;
+      }
+      if (!res.ok && res.status !== 404) {
+        setStatus(t("scratchpad_close_failed" as any) || "Delete failed — nothing was changed.");
+        return;
+      }
+    } catch {
+      setStatus(t("scratchpad_close_failed" as any) || "Delete failed — nothing was changed.");
+      return;
+    }
+
+    // Server confirmed the deletion. Replace an emptied notebook with a fresh
+    // note (the old one is already gone server-side, so no resurrection).
+    const remainingTabs = tabs.filter((x) => x.id !== id);
+    if (remainingTabs.length === 0) {
       const fresh = { id: uid(), title: "Scratch 1", content: "" };
       setTabs([fresh]);
       setActiveId(fresh.id);
+      setSyncedScratchpadTabs([]);
       setDetections({});
       setRephraseUndo({});
       titleTouched.current = {};
@@ -1722,10 +1756,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       if (id === activeId) setActiveId(next[0].id);
       return next;
     });
-    // Explicit delete endpoint — whole-array saves can no longer remove tabs.
-    fetch(`/api/scratchpad/tabs/${encodeURIComponent(id)}`, { method: "DELETE" })
-      .then(() => setSyncedScratchpadTabs(tabs.filter((x) => x.id !== id)))
-      .catch(() => {});
+    setSyncedScratchpadTabs(remainingTabs);
     delete titleTouched.current[id];
     setDetections((d) => {
       const n = { ...d };

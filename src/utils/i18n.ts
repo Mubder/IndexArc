@@ -176,6 +176,10 @@ export interface TranslationDict {
   protect_confirm_msg: string;
   protect_remove_title: string;
   protect_remove_msg: string;
+  scratchpad_archive_protected: string;
+  scratchpad_archive_failed: string;
+  scratchpad_close_protected: string;
+  scratchpad_close_failed: string;
   autolock_desc: string;
   autolock_minimize_label: string;
   autolock_section_title: string;
@@ -527,6 +531,10 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     protect_confirm_msg: "A protected note cannot be edited, renamed, deleted, archived, or sent to AI. Remove protection anytime with your confirmation word.",
     protect_remove_title: "Remove protection",
     protect_remove_msg: "Type UNPROTECT (or your master password if the vault is encrypted) to allow edits and deletion again.",
+    scratchpad_archive_protected: "This note is protected — unprotect it before archiving.",
+    scratchpad_archive_failed: "Archive failed — nothing was changed.",
+    scratchpad_close_protected: "This note is protected — unprotect it before deleting.",
+    scratchpad_close_failed: "Delete failed — nothing was changed.",
     autolock_minutes_label: "Lock after inactivity (minutes, 0 = off)",
     autolock_desc: "Locks the vault automatically after the chosen number of minutes without activity. Requires vault encryption.",
     autolock_minimize_label: "Lock when the window is minimized",
@@ -876,6 +884,10 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     protect_confirm_msg: "لا يمكن تعديل الملاحظة المحمية أو إعادة تسميتها أو حذفها أو أرشفتها أو إرسالها إلى الذكاء الاصطناعي. يمكنك إزالة الحماية في أي وقت بكلمة التأكيد.",
     protect_remove_title: "إزالة الحماية",
     protect_remove_msg: "اكتب UNPROTECT (أو كلمة المرور الرئيسية إذا كانت الخزنة مشفرة) للسماح بالتعديل والحذف مرة أخرى.",
+    scratchpad_archive_protected: "هذه الملاحظة محمية — أزل الحماية قبل الأرشفة.",
+    scratchpad_archive_failed: "فشل الأرشفة — لم يتغير شيء.",
+    scratchpad_close_protected: "هذه الملاحظة محمية — أزل الحماية قبل الحذف.",
+    scratchpad_close_failed: "فشل الحذف — لم يتغير شيء.",
     autolock_minutes_label: "القفل بعد فترة عدم النشاط (بالدقائق، 0 = إيقاف)",
     autolock_desc: "يقفل الخزنة تلقائيًا بعد عدد الدقائق المحدد دون نشاط. يتطلب تشفير الخزنة.",
     autolock_minimize_label: "القفل عند تصغير النافذة",

@@ -176,6 +176,10 @@ export interface ScratchTab {
   rev?: number;
   created_at?: string;
   updated_at?: string;
+  pinned?: boolean;
+  pinned_at?: number;
+  protected?: boolean;
+  protected_at?: number;
 }
 
 export interface Detection {
