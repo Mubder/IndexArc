@@ -68,7 +68,6 @@ function mergeSynced(tabs: ScratchTab[]): void {
 
 function doFlush(): void {
   const save = pending;
-  console.log("[q] doFlush save:", JSON.stringify(save));
   pending = null;
   chain = chain
     .then(async () => {

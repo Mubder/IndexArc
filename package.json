@@ -14,11 +14,12 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "desktop": "npm run build && electron electron-main.cjs",
-    "desktop:pack": "npm run build && electron-builder --dir --win",
-    "desktop:win": "npm run build && electron-builder --win portable nsis --x64",
-    "desktop:mac": "npm run build && electron-builder --mac dmg zip --x64 --arm64",
-    "desktop:linux": "npm run build && electron-builder --linux AppImage tar.gz --x64",
+    "check:dist": "node scripts/check-dist.cjs",
+    "desktop": "npm run build && npm run check:dist && electron electron-main.cjs",
+    "desktop:pack": "npm run build && npm run check:dist && electron-builder --dir --win",
+    "desktop:win": "npm run build && npm run check:dist && electron-builder --win portable nsis --x64",
+    "desktop:mac": "npm run build && npm run check:dist && electron-builder --mac dmg zip --x64 --arm64",
+    "desktop:linux": "npm run build && npm run check:dist && electron-builder --linux AppImage tar.gz --x64",
     "desktop:dist": "npm run desktop:win"
   },
   "dependencies": {

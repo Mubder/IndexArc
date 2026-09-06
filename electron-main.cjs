@@ -545,6 +545,21 @@ function startBackendServer() {
   let serverPath = candidateServerPaths.find((p) => fs.existsSync(p)) || candidateServerPaths[0];
   let distDir = path.dirname(serverPath);
 
+  // Fail LOUDLY instead of booting to a blank window: a package without the
+  // backend bundle (dist/server.cjs) can never serve the UI.
+  if (!fs.existsSync(serverPath)) {
+    const msg =
+      "The backend server bundle is missing from this installation:\n\n" +
+      serverPath +
+      "\n\nThe application cannot start. The package was built incompletely — rebuild with: npm run desktop:win";
+    console.error("[embedded-server] " + msg);
+    try {
+      dialog.showErrorBox("IndexArc — build incomplete", msg);
+    } catch {}
+    app.exit(1);
+    return;
+  }
+
   // Ensure portable folders exist next to exe / project
   for (const sub of ["data", "config", "logs", "tmp"]) {
     const d = path.join(portableRoot, sub);
