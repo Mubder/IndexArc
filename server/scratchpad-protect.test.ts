@@ -47,10 +47,10 @@ describe("note protection (server-enforced)", () => {
     expect(() =>
       store.saveScratchpad([{ id: "note2", title: "Normal", content: "<p>editable</p>" }])
     ).toThrow(ProtectedTabError);
-    // identical resave passes
+    // identical resave (with flags, as the real client sends) passes
     expect(() =>
       store.saveScratchpad([
-        { id: "note1", title: "Precious", content: "<p>important</p>" },
+        { id: "note1", title: "Precious", content: "<p>important</p>", protected: true },
         { id: "note2", title: "Normal", content: "<p>editable</p>" },
       ])
     ).not.toThrow();
@@ -68,6 +68,39 @@ describe("note protection (server-enforced)", () => {
   it("blocks rename of a protected note", () => {
     expect(() => store.renameScratchpadTab("note1", "Renamed")).toThrow(ProtectedTabError);
     expect(store.renameScratchpadTab("note2", "Renamed")?.title).toBe("Renamed");
+  });
+
+  it("blocks flag-stripping via whole-array saves (pins and protection)", () => {
+    // a stale client that omits the flags must not wipe them
+    expect(() =>
+      store.saveScratchpad([
+        { id: "note1", title: "Precious", content: "<p>important</p>" },
+        { id: "note2", title: "Normal", content: "<p>editable</p>" },
+      ])
+    ).toThrow(ProtectedTabError); // strips protected flag
+    expect(() =>
+      store.saveScratchpad([
+        { id: "note1", title: "Precious", content: "<p>important</p>", protected: true },
+        { id: "note2", title: "Normal", content: "<p>editable</p>" }, // note2 has no pin yet — nothing dropped
+      ])
+    ).not.toThrow();
+  });
+
+  it("treats a dropped pinned flag as a violation", () => {
+    store.setScratchpadTabPinned("note2", true);
+    expect(() =>
+      store.saveScratchpad([
+        { id: "note1", title: "Precious", content: "<p>important</p>", protected: true },
+        { id: "note2", title: "Normal", content: "<p>editable</p>" },
+      ])
+    ).toThrow(ProtectedTabError);
+    // identical state passes
+    expect(() =>
+      store.saveScratchpad([
+        { id: "note1", title: "Precious", content: "<p>important</p>", protected: true },
+        { id: "note2", title: "Normal", content: "<p>editable</p>", pinned: true },
+      ])
+    ).not.toThrow();
   });
 
   it("allows unprotect with the UNPROTECT word on an unencrypted vault", async () => {

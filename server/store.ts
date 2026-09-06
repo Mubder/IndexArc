@@ -689,12 +689,19 @@ export class VaultStore {
     const prev = prevById || new Map<any, any>(this.readScratchpadRaw().map((t: any) => [t.id, t]));
     const violations: string[] = [];
     for (const [id, p] of prev) {
-      if (!p.protected) continue;
       const next = (incoming || []).find((t: any) => t && t.id === id);
-      if (!next) {
-        violations.push(id); // omitted → deletion attempt
-      } else if (next.content !== p.content || next.title !== p.title) {
-        violations.push(id); // mutated
+      if (p.protected) {
+        // A protected note may not be omitted, mutated, or have its flag
+        // stripped by a generic save (this exact hole once let a stale client
+        // wipe the flags of every note in one whole-array write).
+        if (!next || next.content !== p.content || next.title !== p.title || !next.protected) {
+          violations.push(id);
+          continue;
+        }
+      }
+      // Pin flags are also route-only: a whole-array save may not flip them.
+      if (next && !!next.pinned !== !!p.pinned) {
+        violations.push(id);
       }
     }
     return violations;
@@ -727,7 +734,9 @@ export class VaultStore {
       active.map((t: any) =>
         t.id === id ? { ...t, pinned: !!pinned, pinned_at: pinned ? Date.now() : undefined } : t
       ),
-      { force: true }
+      // Trusted internal flow: the dedicated /pin route is the only thing
+      // allowed to change pin flags past the generic-save guard.
+      { force: true, override_protected: true }
     );
     return saved.find((t: any) => t.id === id) || null;
   }
