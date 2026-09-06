@@ -37,11 +37,13 @@ function loadPersistedRoot(): string | null {
 function hasVault(root: string | null | undefined): boolean {
   if (!root) return false;
   try {
-    const v = path.join(root, "data", "vault.json");
-    return fs.existsSync(v) && fs.statSync(v).size > 0;
-  } catch {
-    return false;
-  }
+    // Scratchpad-only users never create vault.json — their notes count too.
+    for (const f of ["vault.json", "scratchpad.json"]) {
+      const v = path.join(root, "data", f);
+      if (fs.existsSync(v) && fs.statSync(v).size > 0) return true;
+    }
+  } catch {}
+  return false;
 }
 
 export function getAppRoot(): string {

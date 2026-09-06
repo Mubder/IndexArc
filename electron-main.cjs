@@ -146,8 +146,13 @@ function findExistingVaultRoot(candidates) {
   for (const c of candidates) {
     if (!c) continue;
     try {
-      const v = path.join(c, "data", "vault.json");
-      if (fs.existsSync(v) && fs.statSync(v).size > 0) return c;
+      // A vault is either encrypted entries (vault.json) or scratchpad notes —
+      // scratchpad-only users never create vault.json, and ignoring their data
+      // made the portable root flap between folders.
+      for (const f of ["vault.json", "scratchpad.json"]) {
+        const v = path.join(c, "data", f);
+        if (fs.existsSync(v) && fs.statSync(v).size > 0) return c;
+      }
     } catch {}
   }
   return null;
@@ -169,6 +174,8 @@ function savePortableRoot(root) {
 }
 
 function loadPortableRoot() {
+  // A persisted root is only trustworthy if it still holds data — an empty
+  // (or dev-artifact) folder must never hijack the portable root.
   try {
     const out = execSync(`reg query "${REG_KEY}" /v ${REG_VALUE}`, {
       windowsHide: true,
@@ -178,14 +185,16 @@ function loadPortableRoot() {
     const m = out.match(/REG_SZ\s+(.+)$/m);
     if (m) {
       const r = m[1].trim();
-      if (r && fs.existsSync(r)) return r;
+      if (r && fs.existsSync(r) && findExistingVaultRoot([r])) return r;
     }
   } catch {}
   try {
     const m = getMarkerPath();
     if (fs.existsSync(m)) {
       const parsed = JSON.parse(fs.readFileSync(m, "utf8"));
-      if (parsed && parsed.root && fs.existsSync(parsed.root)) return parsed.root;
+      if (parsed && parsed.root && fs.existsSync(parsed.root) && findExistingVaultRoot([parsed.root])) {
+        return parsed.root;
+      }
     }
   } catch {}
   return null;
