@@ -261,6 +261,7 @@ export interface TranslationDict {
   egress_cloud_desc: string;
   egress_lt_label: string;
   egress_lt_desc: string;
+  loading_settings: string;
   sec_error_incorrect: string;
   sec_error_length: string;
   sec_status_enabled: string;
@@ -644,6 +645,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     egress_cloud_desc: "OFF by default. When ON, cloud providers (Gemini/OpenAI/Groq/OpenRouter/Anthropic) receive vault-derived text for search and answers — secret values are never included, only names/types/labels.",
     egress_lt_label: "Allow public LanguageTool API",
     egress_lt_desc: "OFF by default. When ON, note words are sent to languagetool.org for proofreading when the local engine is unavailable.",
+    loading_settings: "Loading settings…",
     sec_error_incorrect: "Incorrect master password",
     sec_error_length: "Password must be at least 8 characters",
     sec_status_enabled: "Encrypted (AES-256-GCM)",
@@ -1025,6 +1027,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     egress_cloud_desc: "معطّل افتراضيًا. عند التفعيل، تستقبل المزودات السحابية (Gemini/OpenAI/Groq/OpenRouter/Anthropic) نصوصًا مشتقة من الخزنة للبحث والإجابات — دون تضمين قيم الأسرار مطلقًا، فقط الأسماء والأنواع والوسوم.",
     egress_lt_label: "السماح بواجهة LanguageTool العامة",
     egress_lt_desc: "معطّل افتراضيًا. عند التفعيل، تُرسل كلمات الملاحظات إلى languagetool.org للتدقيق اللغوي عند عدم توفر المحرك المحلي.",
+    loading_settings: "جارٍ تحميل الإعدادات…",
     sec_error_incorrect: "كلمة المرور الرئيسية غير صحيحة",
     sec_error_length: "يجب أن تكون كلمة المرور 8 أحرف على الأقل",
     sec_status_enabled: "مشفرة (AES-256-GCM)",

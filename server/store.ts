@@ -487,6 +487,10 @@ export class VaultStore {
       }
     }
     atomicWrite(this.paths.settingsFile, JSON.stringify(atRest, null, 2));
+    // Re-baseline the integrity manifest — without this, every legitimate
+    // settings save tripped "settings.json changed unexpectedly" on the next
+    // startup (a false corruption warning).
+    this.recordIntegrity(this.paths.settingsFile);
     this._settingsCache = null;
     this.touchEmergencySnapshot();
     return next;

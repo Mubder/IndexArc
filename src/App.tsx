@@ -1431,18 +1431,29 @@ return (
               />
             )}
 
-            {tab === "settings" && settings && (
-              <SettingsTab
-                settings={settings}
-                onPatchSettings={patchSettings}
-                status={status}
-                onWarmOllama={warmOllama}
-                onSaveSettings={saveSettings}
-                vaultStatus={vaultStatus}
-                onRefreshVaultStatus={fetchVaultStatus}
-                logs={logs}
-                onOpenHealth={() => setHealthOpen(true)}
-              />
+            {tab === "settings" && (
+              settings ? (
+                <SettingsTab
+                  settings={settings}
+                  onPatchSettings={patchSettings}
+                  status={status}
+                  onWarmOllama={warmOllama}
+                  onSaveSettings={saveSettings}
+                  vaultStatus={vaultStatus}
+                  onRefreshVaultStatus={fetchVaultStatus}
+                  logs={logs}
+                  onOpenHealth={() => setHealthOpen(true)}
+                />
+              ) : (
+                // Never render NOTHING for a tab: "Encrypt Now" is clickable
+                // within milliseconds of launch (the banner needs only vault
+                // status), while settings arrive with the first fetchAll —
+                // this gap used to blank the whole lower half of the app.
+                <div className="flex items-center justify-center py-16 text-sm" style={{ color: "var(--text-muted)" }}>
+                  <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin mr-3" />
+                  {t("loading_settings") || "Loading settings…"}
+                </div>
+              )
             )}
           </main>
         </div>
