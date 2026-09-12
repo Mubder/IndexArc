@@ -878,7 +878,7 @@ export default function App() {
 
 return (
     <div
-      className="h-full font-sans antialiased flex flex-col relative overflow-x-hidden"
+      className="h-full font-sans antialiased flex flex-col relative overflow-hidden"
       style={{
         background: "var(--bg-root)",
         color: "var(--text)",
@@ -905,9 +905,23 @@ return (
               // Jump STRAIGHT to the Security & Encryption card — the button
               // previously only switched tabs, leaving users to find the
               // master-password UI (or mistake the egress toggles for it).
-              requestAnimationFrame(() => {
-                document.getElementById("security-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
-              });
+              // The Settings subtree is huge and mounts asynchronously, so a
+              // single smooth scrollIntoView races layout and silently lands
+              // nowhere; a few settled instant attempts always converge.
+              setTab("settings");
+              [0, 80, 250, 600].forEach((delay) =>
+                setTimeout(() => {
+                  document
+                    .getElementById("security-section")
+                    ?.scrollIntoView({ block: "start" });
+                  // scrollIntoView scrolls EVERY scrollable ancestor —
+                  // including this overflow-hidden shell (programmatically
+                  // scrollable per spec), which drifts the whole app frame.
+                  // Only main may scroll; pin the shell back every attempt.
+                  const shell = document.querySelector("#root")?.firstElementChild;
+                  if (shell) shell.scrollTop = 0;
+                }, delay)
+              );
             }}
             className="ml-auto shrink-0 font-semibold px-3 py-1 rounded-lg border cursor-pointer"
             style={{ borderColor: "rgba(251, 191, 36, 0.35)", background: "transparent", color: "var(--amber)" }}
