@@ -364,32 +364,16 @@ body {
   transition: background 0.3s, color 0.3s;
 }
 
-/* ── Scan Line ── */
-.scanline {
-  position: fixed; top: 0; left: 0; right: 0; height: 1px; z-index: 1;
-  background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
-  animation: scanMove 6s ease-in-out infinite;
-  pointer-events: none; opacity: 0.3;
-  /* Transform-only animation: runs as a GPU-composited layer with zero
-     layout/paint cost. The previous `top: 0 → 100%` keyframes relaid out and
-     repainted the entire viewport every frame — constant GPU load that
-     produced audible coil whine and UI jank whenever the window was visible
-     (Electron throttles hidden windows, so the noise appeared exactly on
-     bringing the app back to the foreground). */
-  will-change: transform;
-}
-[data-theme="light"] .scanline { opacity: 0.15; }
-@keyframes scanMove {
-  0%   { transform: translate3d(0, 0, 0); opacity: 0; }
-  10%  { opacity: 0.3; }
-  90%  { opacity: 0.3; }
-  100% { transform: translate3d(0, 100vh, 0); opacity: 0; }
-}
+/* ── Scan Line ── REMOVED (2026-09-12): the animated fixed-height scanline
+   caused constant GPU load (coil whine) in its `top`-animation form, and
+   GPU compositing artifacts (scroll drift + blank lower regions) once
+   promoted with will-change: transform. Decorative layers are not worth a
+   rendering-fragile app — background ambience is the Starfield alone. */
 
-/* Decorative animations respect the OS motion preference — accessibility,
-   and one less source of continuous GPU work. */
+/* Decorative animations must never run against the user's OS motion
+   preference — accessibility, and one less source of continuous GPU load. */
 @media (prefers-reduced-motion: reduce) {
-  .scanline, .skeleton, .toast, .duplicate-alert { animation: none !important; }
+  .skeleton, .toast, .duplicate-alert { animation: none !important; }
 }
 
 /* ── Scrollbar ── */

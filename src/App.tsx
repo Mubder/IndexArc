@@ -886,7 +886,6 @@ return (
     >
       {/* Animated Background */}
       <Starfield />
-      <div className="scanline" />
 
       {/* Encryption migration banner: an existing vault that predates
           encrypted-by-default stays usable, but the recommendation recurs

@@ -34,7 +34,12 @@ export default function Starfield() {
     let h = (canvas.height = window.innerHeight);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-    const count = w < 640 ? 260 : w < 1024 ? 460 : 800;
+    // Ambient star drift does not need full refresh rates: 800 particles at
+    // 60-144fps starved the compositor on weak GPUs (coil whine, scroll
+    // drift, blank paint regions). ~300 stars at ~24fps are visually
+    // identical and cost a fraction of the GPU.
+    const count = w < 640 ? 120 : w < 1024 ? 200 : 300;
+    const FRAME_MS = 1000 / 24;
     const dark = isDark();
     const palette = dark ? DARK_COLORS : LIGHT_COLORS;
 
@@ -53,8 +58,7 @@ export default function Starfield() {
 
     ctx.globalCompositeOperation = dark ? "lighter" : "source-over";
 
-    let raf: number;
-    const draw = () => {
+    const drawFrame = () => {
       ctx.clearRect(0, 0, w * dpr, h * dpr);
       ctx.save();
       ctx.scale(dpr, dpr);
@@ -89,10 +93,30 @@ export default function Starfield() {
       }
 
       ctx.restore();
-      raf = requestAnimationFrame(draw);
     };
 
-    draw();
+    // Users who asked the OS for reduced motion get a single static frame.
+    const reducedMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    let raf: number;
+    if (reducedMotion) {
+      drawFrame();
+    } else {
+      let last = 0;
+      const loop = (t: number) => {
+        // Frame cap: skip rAF ticks that arrive too early (high-refresh
+        // displays fire at 120-144Hz — uncapped, this loop redrew the
+        // full-screen canvas on every single one).
+        if (t - last >= FRAME_MS) {
+          last = t;
+          drawFrame();
+        }
+        raf = requestAnimationFrame(loop);
+      };
+      raf = requestAnimationFrame(loop);
+    }
 
     const onResize = () => {
       w = canvas.width = window.innerWidth;
