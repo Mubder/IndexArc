@@ -135,6 +135,15 @@ let tray = null;
 let isQuiting = false;
 const PORT = Number(process.env.PORT) || 3000;
 
+// Render in SOFTWARE. Three independent GPU-compositing failures on consumer
+// drivers (constant coil whine; scroll drift; blank unpainted regions where
+// the accessibility tree showed every element but the window painted only a
+// fragment). Layer tweaks and animation caps were insufficient. A secrets
+// vault must render correctly on every machine — correctness beats
+// compositing performance, and software raster also eliminates the
+// canvas-driven GPU load entirely.
+app.disableHardwareAcceleration();
+
 /**
  * Where vault data lives (data/, config/, logs/).
  * - Packaged: folder next to the .exe (USB portable) — starts EMPTY
