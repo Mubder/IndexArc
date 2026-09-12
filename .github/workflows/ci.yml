@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    name: Lint + Test + Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Typecheck (tsc --noEmit)
+        run: npm run lint
+      - name: Unit & integration tests
+        run: npm test
+      - name: Dependency audit (high/critical gate)
+        run: npm audit --audit-level=high
+
+  installer-preservation:
+    name: Build + reinstall data-preservation proof
+    runs-on: windows-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build UI + server bundle
+        run: npm run build
+      - name: Verify dist bundle completeness
+        run: npm run check:dist
+      - name: Build Windows installer (portable + NSIS)
+        run: npx electron-builder --win portable nsis --x64
+        env:
+          # CI has no signing identity; the artifacts remain unsigned (see
+          # docs/RELEASE.md for the signing prerequisite).
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Install → write data → reinstall → assert data survived
+        run: node scripts/test-installer-preservation.cjs

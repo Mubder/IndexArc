@@ -20,6 +20,44 @@ function safeBaseUrl(url: string | undefined, label: string): string | null {
   return raw.replace(/\/$/, "");
 }
 
+// ── Egress consent & locality (audit H2) ──────────────────────────────────
+// A vault must never leak secret-derived text off the machine by default.
+// Cloud providers (Gemini/OpenAI/Groq/OpenRouter/Anthropic, or a "local"
+// provider pointed at a non-loopback host) are blocked until the user
+// explicitly opts in via ai_cloud_consent. Loopback providers (Ollama,
+// LM Studio on 127.0.0.1) are always allowed — data stays on the machine.
+// Independently of consent, secret VALUES never enter cloud embedding or
+// LLM input at all (see services/vault.ts + services/ask.ts).
+
+function isLoopback(url: string | undefined): boolean {
+  try {
+    const u = new URL(String(url || ""));
+    return u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+export function isLocalProvider(settings: AppSettings, provider: string): boolean {
+  if (provider === "local") return isLoopback(settings.ollama_base_url || "http://127.0.0.1:11434");
+  if (provider === "local_openai") return isLoopback(settings.local_openai_base_url);
+  return false;
+}
+
+let consentWarnedAt = 0;
+export function cloudEgressAllowed(settings: AppSettings, provider: string, purpose: string): boolean {
+  if (provider === "heuristic" || isLocalProvider(settings, provider)) return true;
+  if (settings.ai_cloud_consent) return true;
+  if (Date.now() - consentWarnedAt > 30_000) {
+    consentWarnedAt = Date.now();
+    addLog(
+      "AI",
+      `Cloud AI (${provider}) blocked for ${purpose}: ai_cloud_consent is OFF. Enable it in Settings → AI after reviewing exactly what would leave this device.`
+    );
+  }
+  return false;
+}
+
 export async function checkOllama(baseUrl: string, force = false): Promise<{ online: boolean; models: string[] }> {
   const now = Date.now();
   if (!force && lastOllamaCheck && (now - lastOllamaCheckTime < 10000)) {
@@ -443,6 +481,8 @@ export async function embedText(
 ): Promise<number[] | null> {
   // Allow per-request provider override (for flexible LM Studio + Ollama mixing)
   const active = providerOverride || settings.embed_provider_override || (await resolveActiveProvider(settings));
+  // Egress gate: cloud embeddings of vault-derived text need explicit consent.
+  if (!cloudEgressAllowed(settings, active, "embeddings")) return null;
   if (active === "local") return ollamaEmbed(settings, text);
   if (active === "api") return geminiEmbed(settings, text);
   if (active === "openai") {
@@ -743,7 +783,6 @@ export async function analyzePaste(
         userPrompt,
         ANALYZE_SYSTEM,
         {
-          "HTTP-Referer": "https://github.com/Mubder/IndexArc",
           "X-Title": "IndexArc",
         },
         true
@@ -887,6 +926,9 @@ export async function generateText(
 ): Promise<{ text: string; provider_used: string } | null> {
   const active = await resolveActiveProvider(settings);
   if (active === "heuristic") return null;
+  // Egress gate: cloud LLM calls carrying vault-derived text need explicit
+  // consent. Local (loopback) providers pass untouched.
+  if (!cloudEgressAllowed(settings, active, "text generation")) return null;
 
   try {
     let text: string | null = null;
@@ -928,7 +970,6 @@ export async function generateText(
         prompt,
         system,
         {
-          "HTTP-Referer": "https://github.com/Mubder/IndexArc",
           "X-Title": "IndexArc",
         },
         false
@@ -1223,7 +1264,6 @@ export async function autoComplete(
         text,
         AUTO_COMPLETION_SYSTEM,
         {
-          "HTTP-Referer": "https://github.com/Mubder/IndexArc",
           "X-Title": "IndexArc",
         },
         false

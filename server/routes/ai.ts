@@ -20,7 +20,38 @@ export function aiRoutes(ctx: RouteContext) {
     const settings = store.getSettings();
     const ollama = await checkOllama(settings.ollama_base_url);
     const active = await resolveActiveProvider(settings);
-    const stats = store.stats();
+    // A locked (encrypted) vault must not 500 this endpoint: the SetupChecker
+    // and health UI poll it continuously, and a 500 here used to masquerade
+    // as "AI offline" while hiding the real problem (locked/empty vault).
+    let stats = {
+      total_saved: 0,
+      needs_attention: 0,
+      total_commands: 0,
+      total_notes: 0,
+      total_secrets: 0,
+      total_unknown: 0,
+      total: 0,
+    };
+    let is_locked = false;
+    let encryption_enabled = false;
+    try {
+      encryption_enabled = store.isEncryptionEnabled();
+    } catch {
+      encryption_enabled = false;
+    }
+    try {
+      is_locked = store.isLocked();
+    } catch {
+      is_locked = false;
+    }
+    if (!is_locked) {
+      try {
+        stats = store.stats();
+      } catch {
+        // unreadable vault (e.g. quarantined corrupt file) → report zeros;
+        // /api/health + /api/integrity carry the detailed diagnosis.
+      }
+    }
     res.json({
       portable_root: ctx.paths.root,
       ai_provider: settings.ai_provider,
@@ -28,12 +59,16 @@ export function aiRoutes(ctx: RouteContext) {
       is_ollama_online: ollama.online,
       ollama_models: ollama.models,
       is_gemini_configured: !!settings.gemini_api_key,
+      is_locked,
+      encryption_enabled,
       stats: {
         total_saved: stats.total_saved,
         needs_attention: stats.needs_attention,
         total_commands: stats.total_commands,
         total_notes: stats.total_notes,
         total_secrets: stats.total_secrets,
+        total_unknown: (stats as { total_unknown?: number }).total_unknown ?? 0,
+        total: (stats as { total?: number }).total ?? stats.total_saved + stats.needs_attention,
       },
     });
   });

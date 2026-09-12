@@ -84,6 +84,15 @@ export interface AppSettings {
   /** Lock when the app window is minimized/hidden. */
   lock_on_minimize?: boolean;
   enable_ai_proofreader?: boolean;
+  /**
+   * EGRESS CONSENT (audit H2): cloud AI providers (Gemini/OpenAI/Groq/
+   * OpenRouter/Anthropic, or any non-loopback custom endpoint) stay DISABLED
+   * until the user explicitly opts in. Local providers (Ollama, loopback
+   * LM Studio) never require consent — data stays on the machine.
+   */
+  ai_cloud_consent?: boolean;
+  /** Public LanguageTool API sends note words to languagetool.org — opt-in. */
+  languagetool_enabled?: boolean;
   // Per-provider selection for flexible model mixing (LM Studio + Ollama + etc)
   llm_provider_override?: "local" | "api" | "openai" | "groq" | "openrouter" | "anthropic" | "local_openai" | "heuristic";
   embed_provider_override?: "local" | "api" | "openai" | "local_openai";
@@ -118,6 +127,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   auto_lock_minutes: 5,
   lock_on_minimize: false,
   enable_ai_proofreader: true,
+  ai_cloud_consent: false,
+  languagetool_enabled: false,
   llm_provider_override: undefined as "local" | "api" | "openai" | "groq" | "openrouter" | "anthropic" | "local_openai" | "heuristic" | undefined,
   embed_provider_override: undefined as "local" | "api" | "openai" | "local_openai" | undefined,
 };

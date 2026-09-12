@@ -1,9 +1,10 @@
 import DOMPurify from "dompurify";
 
-// Single sanitizer for every note-HTML path: the note viewer (raw_fragment
-// pulled from scanned disk files), the archive/revision previews, and any
-// AI output that enters a note. Notes are rich text — keep formatting tags,
-// drop everything else (scripts, event handlers, inline styles, iframes…).
+// Single sanitizer config for every note-HTML path: the note viewer
+// (raw_fragment pulled from scanned disk files), the archive/revision
+// previews, and any AI output that enters a note. Notes are rich text —
+// keep formatting tags, drop everything else (scripts, event handlers,
+// iframes…). Previews deliberately drop inline styles too.
 const ALLOWED_TAGS = [
   "p", "br", "div", "span",
   "h1", "h2", "h3", "h4",
@@ -17,6 +18,22 @@ export function sanitizeNoteHtml(html: string): string {
   return DOMPurify.sanitize(html ?? "", {
     ALLOWED_TAGS,
     FORBID_ATTR: ["style"],
+  });
+}
+
+// Storage-grade sanitizer: applied wherever note HTML ENTERS the editor or
+// is PERSISTED (save queue, note handoff, plain-text extraction). It keeps
+// the Tiptap color/highlight `style` attributes (they are the note's own
+// formatting and are not a script vector in Chromium), but everything not on
+// the allowlist — event handlers, scripts, foreign elements, javascript:
+// URLs — is stripped BEFORE the HTML is stored or parsed. Defense in depth
+// on top of render-time sanitization: storage itself stays clean.
+const STORAGE_ALLOWED_ATTR = ["style", "href", "title"];
+
+export function sanitizeNoteHtmlForStorage(html: string): string {
+  return DOMPurify.sanitize(html ?? "", {
+    ALLOWED_TAGS,
+    ALLOWED_ATTR: STORAGE_ALLOWED_ATTR,
   });
 }
 

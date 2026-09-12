@@ -14,6 +14,8 @@ import {
   Moon,
   Globe,
   Menu,
+  Stethoscope,
+  ShieldAlert,
   X,
 } from "lucide-react";
 
@@ -27,9 +29,10 @@ import {
   ScanCandidate,
   FolderScanSession,
   WatchedFolderRow,
+  HealthReport,
 } from "./types";
 
-import { readJson } from "./utils";
+import { readJson, findDuplicateHits } from "./utils";
 import { getTranslation } from "./utils/i18n";
 import { offerNoteToScratchpad } from "./noteHandoff";
 
@@ -43,7 +46,9 @@ import { LibraryTab } from "./components/LibraryTab";
 import { useSSE } from "./hooks/useSSE";
 import { SettingsTab } from "./components/SettingsTab";
 import { LockScreen } from "./components/LockScreen";
+import { SetupScreen } from "./components/SetupScreen";
 import { SetupChecker } from "./components/SetupChecker";
+import { HealthModal } from "./components/HealthModal";
 
 // Modals
 import { FsBrowserModal } from "./components/FsBrowserModal";
@@ -74,6 +79,9 @@ export default function App() {
   const [toasts, setToasts] = useState<{ id: number; message: string; type: "success" | "error" | "info" }[]>([]);
   const toastIdRef = useRef(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Encryption-migration banner dismissal is intentionally per-session: an
+  // unencrypted vault should be surfaced again on every launch until fixed.
+  const [encryptBannerDismissed, setEncryptBannerDismissed] = useState(false);
   const showToast = useCallback((message: string, type: "success" | "error" | "info" = "info") => {
     const id = ++toastIdRef.current;
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -162,9 +170,11 @@ export default function App() {
   }, []);
   const closeConfirm = useCallback(() => setConfirmState(null), []);
 
-  const [vaultStatus, setVaultStatus] = useState<{ is_locked: boolean; encryption_enabled: boolean } | null>(null);
+  const [vaultStatus, setVaultStatus] = useState<{ is_locked: boolean; encryption_enabled: boolean; needs_setup?: boolean; migration_recommended?: boolean } | null>(null);
   const [integrityWarnings, setIntegrityWarnings] = useState<string[]>([]);
   const [integrityDismissed, setIntegrityDismissed] = useState(false);
+  const [health, setHealth] = useState<HealthReport | null>(null);
+  const [healthOpen, setHealthOpen] = useState(false);
 
   // Theme management
   useEffect(() => {
@@ -262,6 +272,21 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
+    }
+  }, []);
+
+  const fetchHealth = useCallback(async () => {
+    try {
+      const res = await fetch("/api/health");
+      if (res.ok) {
+        const h = (await res.json()) as HealthReport;
+        setHealth(h);
+        if (Array.isArray(h.integrity?.warnings) && h.integrity.warnings.length) {
+          setIntegrityWarnings(h.integrity.warnings);
+        }
+      }
+    } catch {
+      setHealth({ ok: false, overall: "attention", error: "unreachable", checks: [] });
     }
   }, []);
 
@@ -387,12 +412,19 @@ export default function App() {
     return () => clearInterval(t);
   }, [fetchAll]);
 
+  useEffect(() => {
+    fetchHealth();
+    const t = setInterval(fetchHealth, 60000);
+    return () => clearInterval(t);
+  }, [fetchHealth]);
+
   // SSE: refetch data when server state changes
   useSSE(useCallback((msg) => {
     if (msg.event === "vault-changed" || msg.event === "entries-changed" || msg.event === "folders-changed" || msg.event === "settings-changed") {
       fetchAll();
+      fetchHealth();
     }
-  }, [fetchAll]));
+  }, [fetchAll, fetchHealth]));
 
   // Data-integrity check result (quarantine/corruption warnings from the store)
   useEffect(() => {
@@ -473,31 +505,67 @@ export default function App() {
   const handleSaveSelected = async (parkIncomplete: boolean) => {
     const items = candidates.filter((c) => selected[c.temp_id]);
     if (!items.length) return;
-    const payload = items.map((c) => ({
-      value: c.value,
-      type: c.type,
-      name: c.name,
-      raw_fragment: c.raw_fragment,
-      labels: c.labels,
-      type_aliases: c.type_aliases,
-      family: c.family,
-    }));
-    const endpoint = parkIncomplete ? "/api/entries/park" : "/api/entries/save";
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paste_id: pasteId, candidates: payload }),
-    });
-    if (res.ok) {
-      setCandidates([]);
-      setPaste("");
-      setPasteId(null);
-      fetchAll();
-      setTab("home");
-    } else {
-      const err = await res.json();
-      showToast(err.error || "Save failed", "error");
+    const doSave = async () => {
+      const payload = items.map((c) => ({
+        value: c.value,
+        type: c.type,
+        name: c.name,
+        raw_fragment: c.raw_fragment,
+        labels: c.labels,
+        type_aliases: c.type_aliases,
+        family: c.family,
+      }));
+      const endpoint = parkIncomplete ? "/api/entries/park" : "/api/entries/save";
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paste_id: pasteId, candidates: payload }),
+      });
+      if (res.ok) {
+        setCandidates([]);
+        setPaste("");
+        setPasteId(null);
+        fetchAll();
+        setTab("home");
+      } else {
+        const err = await res.json();
+        showToast(err.error || "Save failed", "error");
+      }
+    };
+    // Pre-save duplicate screen: values already in the vault trigger a
+    // confirm instead of silently doubling entries. Cancelling deselects the
+    // duplicates so a second click saves only the new ones.
+    try {
+      const hits = await findDuplicateHits(items);
+      if (hits.length) {
+        const names = hits.map((h) => `"${h.existing_name}"`).slice(0, 4).join(", ");
+        const more = hits.length > 4 ? ` +${hits.length - 4} more` : "";
+        // showConfirm resolves on BOTH confirm and cancel — track the choice.
+        let confirmed = false;
+        await showConfirm(
+          "Possible duplicates",
+          `${hits.length} of ${items.length} already exist in the vault (${names}${more}). Save anyway?`,
+          async () => {
+            confirmed = true;
+            await doSave();
+          },
+          "Save anyway"
+        ).catch(() => {});
+        if (confirmed) return;
+        // Cancelled: deselect the duplicates, keep the rest selected.
+        const dupIds = new Set(hits.map((h) => items[h.index].temp_id));
+        setSelected((prev) => {
+          const n = { ...prev };
+          for (const id of dupIds) delete n[id];
+          return n;
+        });
+        showToast(`Duplicates deselected — save again for the ${items.length - hits.length} new one(s)`, "info");
+        return;
+      }
+    } catch {
+      /* fail open — duplicates are advisory */
     }
+    await doSave();
   };
 
   const handleAsk = async (e?: React.FormEvent) => {
@@ -781,6 +849,21 @@ export default function App() {
     [attention.length, scanSession, t]
   );
 
+  // Encrypted-by-default: a brand-new vault is unusable until a master
+  // password exists (no skip path). Checked BEFORE the lock gate — a fresh
+  // vault is never locked.
+  if (vaultStatus?.needs_setup) {
+    return (
+      <SetupScreen
+        settings={settings}
+        onSetupSuccess={() => {
+          fetchVaultStatus();
+          fetchAll();
+        }}
+      />
+    );
+  }
+
   if (vaultStatus?.is_locked) {
     return (
       <LockScreen
@@ -804,6 +887,35 @@ return (
       {/* Animated Background */}
       <Starfield />
       <div className="scanline" />
+
+      {/* Encryption migration banner: an existing vault that predates
+          encrypted-by-default stays usable, but the recommendation recurs
+          every session until acted on (dismissal is per-session only). */}
+      {vaultStatus?.migration_recommended && !encryptBannerDismissed && (
+        <div
+          className="flex items-center gap-3 px-4 py-2.5 text-xs border-b"
+          style={{ background: "var(--amber-bg)", borderColor: "rgba(251, 191, 36, 0.2)", color: "var(--amber)" }}
+          role="alert"
+        >
+          <ShieldAlert className="w-4 h-4 shrink-0" />
+          <span className="font-semibold">{t("sec_encrypt_banner_title")}</span>
+          <span className="opacity-80 hidden sm:inline">{t("sec_encrypt_banner_text")}</span>
+          <button
+            onClick={() => setTab("settings")}
+            className="ml-auto shrink-0 font-semibold px-3 py-1 rounded-lg border cursor-pointer"
+            style={{ borderColor: "rgba(251, 191, 36, 0.35)", background: "transparent", color: "var(--amber)" }}
+          >
+            {t("sec_encrypt_banner_btn")}
+          </button>
+          <button
+            onClick={() => setEncryptBannerDismissed(true)}
+            className="shrink-0 opacity-60 hover:opacity-100 cursor-pointer px-1"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Mobile sidebar overlay */}
         {sidebarOpen && (
@@ -1089,6 +1201,26 @@ return (
                 </button>
               )}
 
+              {/* App Health */}
+              <button
+                onClick={() => setHealthOpen(true)}
+                className="p-2 rounded-xl border transition-all relative"
+                style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
+                title={t("health_open_btn")}
+                aria-label={t("health_open_btn")}
+              >
+                <Stethoscope className="w-4 h-4" />
+                {health && health.overall !== "healthy" && (
+                  <span
+                    className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2"
+                    style={{
+                      background: health.overall === "attention" ? "var(--danger)" : "var(--amber)",
+                      borderColor: "var(--bg-surface)",
+                    }}
+                  />
+                )}
+              </button>
+
               {/* Theme Toggle */}
               <button
                 onClick={toggleTheme}
@@ -1142,9 +1274,34 @@ return (
               settings={settings}
               onConfigureAI={() => setTab("settings")}
               onRefresh={fetchAll}
+              health={health}
+              onOpenHealth={() => setHealthOpen(true)}
             />
 
-            {integrityWarnings.length > 0 && !integrityDismissed && (
+            {health?.overall === "attention" && (
+              <div className="mb-4 flex items-start justify-between gap-3 rounded-xl px-4 py-3 text-sm" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.35)", color: "var(--text)" }}>
+                <div className="min-w-0">
+                  <div className="font-semibold mb-0.5">{t("health_attention")} — {t("health_title")}</div>
+                  <ul className="list-disc pl-5 text-xs" style={{ color: "var(--text-dim)" }}>
+                    {(health.checks ?? []).filter((c) => c.severity === "critical" && !c.ok).slice(0, 3).map((c) => (
+                      <li key={c.id}>{c.label}: {c.detail}</li>
+                    ))}
+                    {(health.checks ?? []).filter((c) => c.severity === "critical" && !c.ok).length === 0 && (
+                      <li>{health.error || health.vault?.error || "Vault data unavailable in this data folder."}</li>
+                    )}
+                  </ul>
+                </div>
+                <button
+                  onClick={() => setHealthOpen(true)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium shrink-0"
+                  style={{ background: "var(--danger-bg)", border: "1px solid rgba(248,113,113,0.35)", color: "var(--danger)" }}
+                >
+                  {t("health_banner_action")}
+                </button>
+              </div>
+            )}
+
+            {integrityWarnings.length > 0 && !integrityDismissed && health?.overall !== "attention" && (
               <div className="mb-4 flex items-start justify-between gap-3 rounded-xl px-4 py-3 text-sm" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.35)", color: "var(--text)" }}>
                 <div>
                   <div className="font-semibold mb-0.5">Data integrity warning</div>
@@ -1284,6 +1441,7 @@ return (
                 vaultStatus={vaultStatus}
                 onRefreshVaultStatus={fetchVaultStatus}
                 logs={logs}
+                onOpenHealth={() => setHealthOpen(true)}
               />
             )}
           </main>
@@ -1356,6 +1514,18 @@ return (
         }}
         onNavigateTab={(t) => setTab(t)}
         settings={settings}
+      />
+
+      {/* App health diagnostics */}
+      <HealthModal
+        isOpen={healthOpen}
+        onClose={() => {
+          setHealthOpen(false);
+          fetchHealth();
+        }}
+        settings={settings}
+        initial={health}
+        onGoEmergency={() => setTab("settings")}
       />
 
       {/* Toast notifications */}

@@ -1,6 +1,7 @@
 import type { VaultStore } from "../store.js";
 import type { FolderWatcherManager } from "../services/folderWatcher.js";
 import type { PortablePaths } from "../paths.js";
+import type { AuditLog } from "../audit.js";
 
 export interface SpellcheckEngines {
   arSpell: any;
@@ -13,8 +14,8 @@ export interface SpellcheckEngines {
   isArabicToken: (word: string) => boolean;
   isLatinToken: (w: string) => boolean;
   addCustomWord: (word: string, dictPath: string, ar: any, en: any) => void;
-  checkArabicWord: (w: string, ar: any) => boolean;
-  checkEnglishWord: (w: string, en: any) => boolean;
+  checkArabicWord: (word: string, ar: any) => Promise<boolean>;
+  checkEnglishWord: (word: string, en: any) => Promise<boolean>;
 }
 
 export interface RouteContext {
@@ -22,4 +23,5 @@ export interface RouteContext {
   watchers: FolderWatcherManager;
   paths: PortablePaths;
   spellcheck?: SpellcheckEngines;
+  audit?: AuditLog;
 }

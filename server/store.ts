@@ -12,7 +12,7 @@ import type {
   WatchedFolder,
 } from "./types.js";
 import { DEFAULT_SETTINGS } from "./types.js";
-import { deriveKey, deriveKeyAsync, generateSalt, encryptString, decryptString } from "./crypto.js";
+import { deriveKeyAsync, generateSalt, decryptString, envelopePayload, kdfFromEnvelope, kdfNeedsUpgrade } from "./crypto.js";
 import { addLog } from "./logs.js";
 
 /** Thrown when a save would mutate/remove a protected tab (map to HTTP 423). */
@@ -28,8 +28,15 @@ interface VaultFile {
   entries: VaultEntry[];
 }
 
+// Schema 2 (audit H2): pre-2.1 vectors were built from embeddings whose
+// INPUT included raw secret values. Reading a legacy (or unknown-schema)
+// vectors file yields an EMPTY index — the stale secret-derived embeddings
+// are dropped, never re-served, and entries are re-embedded on their next
+// save under the redacted indexText rules.
+const VECTOR_SCHEMA = 2;
+
 interface VectorsFile {
-  version: 1;
+  version: typeof VECTOR_SCHEMA;
   chunks: VectorChunk[];
 }
 
@@ -47,7 +54,10 @@ function atomicWrite(filePath: string, data: string) {
 function readJsonOrQuarantine<T>(filePath: string, fallback: T, label: string): T {
   if (!fs.existsSync(filePath)) return fallback;
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+    // Tolerate a UTF-8 BOM (Windows editors like Notepad add one) — without
+    // this, a hand-edited file parses as "corrupt" and gets quarantined even
+    // though its content is perfectly valid.
+    return JSON.parse(fs.readFileSync(filePath, "utf-8").replace(/^\uFEFF/, "")) as T;
   } catch (e: any) {
     try {
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -64,7 +74,7 @@ function readJsonOrQuarantine<T>(filePath: string, fallback: T, label: string): 
 function readJson<T>(filePath: string, fallback: T): T {
   try {
     if (!fs.existsSync(filePath)) return fallback;
-    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+    return JSON.parse(fs.readFileSync(filePath, "utf-8").replace(/^\uFEFF/, "")) as T;
   } catch {
     return fallback;
   }
@@ -82,8 +92,39 @@ export class VaultStore {
   private _foldersCache: WatchedFolder[] | null = null;
   private _scratchpadCache: any[] | null = null;
   private _scratchpadArchiveCache: any[] | null = null;
+  private emergencyTimer: NodeJS.Timeout | null = null;
 
   constructor(private paths: PortablePaths) {}
+
+  /**
+   * Keep the machine-level emergency snapshots fresh. Snapshots fan out to
+   * %APPDATA%/IndexArc and ~/.IndexArc, which survive install-folder deletion
+   * — but they used to be written only at startup, so a tray-resident app
+   * (sessions lasting days) restored a stale vault after a reinstall wiped
+   * the install folder. Any user-data write re-arms a short debounce instead;
+   * flushEmergencySnapshot() fires it immediately (quit time).
+   */
+  private touchEmergencySnapshot() {
+    if (this.emergencyTimer) return;
+    this.emergencyTimer = setTimeout(() => {
+      this.emergencyTimer = null;
+      try {
+        this.createEmergencySnapshot();
+      } catch {}
+    }, 10_000);
+    this.emergencyTimer.unref?.();
+  }
+
+  /** Write an emergency snapshot now, discarding any pending debounce. */
+  flushEmergencySnapshot() {
+    if (this.emergencyTimer) {
+      clearTimeout(this.emergencyTimer);
+      this.emergencyTimer = null;
+    }
+    try {
+      this.createEmergencySnapshot();
+    } catch {}
+  }
 
   /** Invalidate all in-memory caches (call after any write) */
   clearCache() {
@@ -104,13 +145,28 @@ export class VaultStore {
     return this.isEncryptionEnabled() && !this.encryptionKey;
   }
 
+  /**
+   * True when no vault file exists yet — a brand-new installation where the
+   * user has saved nothing. This is the state in which master-password setup
+   * is MANDATORY (encrypted-by-default onboarding); an existing plaintext
+   * vault is instead surfaced as a migration recommendation.
+   */
+  isFreshVault(): boolean {
+    try {
+      return !fs.existsSync(this.paths.vaultFile);
+    } catch {
+      return false;
+    }
+  }
+
   async unlock(password: string): Promise<boolean> {
     const raw = readJson<any>(this.paths.vaultFile, null);
     if (!raw || !raw.encrypted) {
       return true;
     }
     try {
-      const key = await deriveKeyAsync(password, raw.salt);
+      const kdf = kdfFromEnvelope(raw);
+      const key = await deriveKeyAsync(password, raw.salt, kdf);
       const decrypted = decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
       JSON.parse(decrypted); // Verify valid JSON
       this.encryptionKey = key;
@@ -119,19 +175,66 @@ export class VaultStore {
       // freshly decrypted content is served.
       this._scratchpadCache = null;
       this._scratchpadArchiveCache = null;
+      // Transparent KDF migration: a legacy (or weaker-parameter) envelope is
+      // re-encrypted with the current Argon2id parameters on successful
+      // unlock. The user never sees this — the same password simply derives
+      // the stronger key and every file is rewritten under it.
+      if (kdfNeedsUpgrade(kdf)) {
+        try {
+          await this.upgradeKdf(password, raw.salt);
+        } catch {
+          // Migration is best-effort: the unlock itself succeeded, and the
+          // next unlock will retry the upgrade.
+        }
+      }
       return true;
     } catch {
       return false;
     }
   }
 
+  /**
+   * Re-keys the vault and every protected companion file with a key derived
+   * from the CURRENT KDF standard. Called from unlock() when the on-disk
+   * envelope predates it. `oldKey` state is already installed by the caller;
+   * this method reads everything (decrypting with that key), derives the new
+   * key, and rewrites all envelopes atomically.
+   */
+  private async upgradeKdf(password: string, saltHex: string): Promise<void> {
+    const vault = this.readVault();
+    let vectors: VectorsFile = { version: VECTOR_SCHEMA, chunks: [] };
+    try {
+      vectors = this.readVectors();
+    } catch {}
+    const scratch = this.getScratchpad();
+    const archive = this.getScratchpadArchive();
+    const revs = this.readProtectedJson<any>(this.paths.noteRevisionsFile, { version: 1, revisions: {} });
+
+    const newKey = await deriveKeyAsync(password, saltHex);
+    this.encryptionKey = newKey;
+    // Same salt, stronger KDF — the derived key is unrelated to the old one,
+    // so every envelope must be rewritten under the new key now.
+    this.writeVault(vault);
+    this.writeVectors(vectors);
+    this.saveScratchpad(scratch, { force: true });
+    this.saveScratchpadArchive(archive);
+    this.writeProtectedJson(this.paths.noteRevisionsFile, revs);
+    try { this.writeSessions(this.listScanSessions()); } catch {}
+    addLog("SYSTEM", "Vault re-keyed with current KDF standard (Argon2id) — envelopes upgraded.");
+    this.touchEmergencySnapshot();
+  }
+
   lock(): void {
+    // Zeroize the derived key material before dropping the reference — a
+    // locked vault must not keep raw AES keys on the heap.
+    try {
+      this.encryptionKey?.fill(0);
+    } catch {}
     this.encryptionKey = null;
     this.encryptionSaltHex = null;
-    // Purge decrypted caches too — a locked vault must not serve content
-    // that is still sitting in memory caches.
-    this._scratchpadCache = null;
-    this._scratchpadArchiveCache = null;
+    // Purge ALL decrypted caches — entries, settings (API keys), folders,
+    // notes. A locked vault serves nothing from memory.
+    this.clearCache();
   }
 
   async setupPassword(password: string): Promise<void> {
@@ -144,7 +247,7 @@ export class VaultStore {
     this.encryptionSaltHex = salt;
 
     const vault = this.readVault();
-    let vectors = { version: 1 as const, chunks: [] as any[] };
+    let vectors: VectorsFile = { version: VECTOR_SCHEMA, chunks: [] };
     try {
       vectors = this.readVectors();
     } catch {
@@ -165,6 +268,83 @@ export class VaultStore {
       });
       this.writeProtectedJson(this.paths.noteRevisionsFile, revs);
     } catch {}
+    try { this.writeSessions(this.listScanSessions()); } catch {}
+    // The vault is now encrypted at rest — every PLAINTEXT copy that existed
+    // a moment ago (backups, snapshots, .prev rollbacks) is a liability.
+    this.purgePlaintextArtifacts();
+    // Synchronous (not debounced): the moment encryption turns on is the
+    // moment a ciphertext snapshot must exist, before anything else happens.
+    this.flushEmergencySnapshot();
+  }
+
+  /**
+   * Delete every at-rest artifact that still holds plaintext secret data:
+   * timestamped backups, emergency snapshots recorded as unencrypted, and
+   * .prev rollback copies from the plaintext era. Called the moment a vault
+   * becomes encrypted (setupPassword) — a fresh ciphertext backup and
+   * snapshot are written immediately afterwards, so recovery capability is
+   * preserved while the plaintext footprint goes to zero.
+   */
+  private purgePlaintextArtifacts(): void {
+    let purgedBackups = 0;
+    let purgedSnapshots = 0;
+    let purgedPrev = 0;
+
+    const isPlaintextJson = (file: string): boolean => {
+      try {
+        const raw = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
+        return !raw?.encrypted;
+      } catch {
+        return false; // unreadable ≠ plaintext; never delete what we can't classify
+      }
+    };
+
+    // Timestamped backup sets (vault-/vectors-/scratchpad-/settings-*.json)
+    // and stray .prev copies. Settings backups hold API keys — same rule.
+    try {
+      for (const f of fs.readdirSync(this.paths.backupsDir)) {
+        if (!/\.(json|prev)$/.test(f)) continue;
+        const full = path.join(this.paths.backupsDir, f);
+        if (isPlaintextJson(full)) {
+          fs.unlinkSync(full);
+          purgedBackups++;
+        }
+      }
+    } catch {}
+
+    // Emergency snapshots flagged unencrypted, across ALL redundant locations.
+    for (const dir of this.emergencyDirs()) {
+      try {
+        for (const f of fs.readdirSync(dir)) {
+          if (!f.endsWith(".iabak")) continue;
+          const full = path.join(dir, f);
+          try {
+            const parsed = JSON.parse(fs.readFileSync(full, "utf8"));
+            if (!parsed?.encrypted) {
+              fs.unlinkSync(full);
+              purgedSnapshots++;
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+
+    // .prev rollback copies from the plaintext era.
+    for (const file of [this.paths.scratchpadFile + ".prev", this.paths.scratchpadArchiveFile + ".prev"]) {
+      try {
+        if (fs.existsSync(file) && isPlaintextJson(file)) {
+          fs.unlinkSync(file);
+          purgedPrev++;
+        }
+      } catch {}
+    }
+
+    if (purgedBackups || purgedSnapshots || purgedPrev) {
+      addLog(
+        "DATA",
+        `Plaintext scrub after encryption: removed ${purgedBackups} backup file(s), ${purgedSnapshots} unencrypted snapshot(s), ${purgedPrev} rollback copy(ies). Fresh encrypted backups replace them.`
+      );
+    }
   }
 
   async removePassword(password: string): Promise<boolean> {
@@ -173,11 +353,12 @@ export class VaultStore {
     }
     const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
     try {
-      const key = await deriveKeyAsync(password, raw.salt);
+      const kdf = kdfFromEnvelope(raw);
+      const key = await deriveKeyAsync(password, raw.salt, kdf);
       const decryptedVault = decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
       const vault = JSON.parse(decryptedVault) as VaultFile;
 
-      let vectors = { version: 1 as const, chunks: [] as any[] };
+      let vectors: VectorsFile = { version: VECTOR_SCHEMA, chunks: [] };
       try {
         const rawVectors = readJson<any>(this.paths.vectorsFile, null);
         if (rawVectors && rawVectors.encrypted) {
@@ -198,6 +379,7 @@ export class VaultStore {
         version: 1,
         revisions: {},
       });
+      const sessions = this.readSessions();
 
       this.encryptionKey = null;
       this.encryptionSaltHex = null;
@@ -207,11 +389,13 @@ export class VaultStore {
       atomicWrite(this.paths.scratchpadFile, JSON.stringify({ version: 2, tabs: scratch }, null, 2));
       atomicWrite(this.paths.scratchpadArchiveFile, JSON.stringify({ version: 1, tabs: archive }, null, 2));
       atomicWrite(this.paths.noteRevisionsFile, JSON.stringify(revs, null, 2));
-      for (const f of [this.paths.vaultFile, this.paths.vectorsFile, this.paths.scratchpadFile, this.paths.scratchpadArchiveFile, this.paths.noteRevisionsFile]) {
+      atomicWrite(this.paths.scanSessionsFile, JSON.stringify({ version: 1, sessions }, null, 2));
+      for (const f of [this.paths.vaultFile, this.paths.vectorsFile, this.paths.scratchpadFile, this.paths.scratchpadArchiveFile, this.paths.noteRevisionsFile, this.paths.scanSessionsFile]) {
         this.recordIntegrity(f);
       }
       this._scratchpadCache = null;
       this._scratchpadArchiveCache = null;
+      this.touchEmergencySnapshot();
       return true;
     } catch {
       return false;
@@ -219,11 +403,60 @@ export class VaultStore {
   }
 
   // --- Settings ---
+  // API keys are wrapped at rest with an OS-keychain-bound key
+  // (INDEXARC_SETTINGS_KEY, provisioned by Electron safeStorage/DPAPI) so a
+  // settings.json copied off this user profile yields nothing. Without the
+  // key (dev/standalone), keys stay plaintext with a one-time warning.
+  private static SECRET_SETTING_FIELDS = [
+    "gemini_api_key",
+    "openai_api_key",
+    "groq_api_key",
+    "openrouter_api_key",
+    "anthropic_api_key",
+    "local_openai_api_key",
+  ] as const;
+
+  private settingsKeyBuf(): Buffer | null {
+    const b64 = process.env.INDEXARC_SETTINGS_KEY;
+    if (!b64) return null;
+    try {
+      const k = Buffer.from(b64, "base64");
+      return k.length === 32 ? k : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private wrapSettingSecret(value: unknown): unknown {
+    if (typeof value !== "string" || value === "" || value.startsWith("enc:v1:")) return value;
+    const key = this.settingsKeyBuf();
+    if (!key) return value;
+    return "enc:v1:" + JSON.stringify(envelopePayload(value, key, crypto.randomBytes(16).toString("hex"), 1));
+  }
+
+  private unwrapSettingSecret(value: unknown): unknown {
+    if (typeof value !== "string" || !value.startsWith("enc:v1:")) return value;
+    const key = this.settingsKeyBuf();
+    if (!key) return ""; // ciphertext we can no longer unwrap — never leak the blob
+    try {
+      const env = JSON.parse(value.slice(7));
+      return decryptString(env.ciphertext, key, env.iv, env.authTag);
+    } catch {
+      return "";
+    }
+  }
+
   getSettings(): AppSettings {
     if (this._settingsCache) return this._settingsCache;
     const raw = readJsonOrQuarantine<Partial<AppSettings>>(this.paths.settingsFile, {}, "settings.json");
     // Prefer env keys if settings keys are empty
     const settings: AppSettings = { ...DEFAULT_SETTINGS, ...raw };
+    for (const f of VaultStore.SECRET_SETTING_FIELDS) {
+      const v = (raw as Record<string, unknown>)[f];
+      if (typeof v === "string" && v.startsWith("enc:v1:")) {
+        (settings as unknown as Record<string, unknown>)[f] = this.unwrapSettingSecret(v);
+      }
+    }
     if (!settings.gemini_api_key && process.env.GEMINI_API_KEY) {
       settings.gemini_api_key = process.env.GEMINI_API_KEY;
     }
@@ -245,9 +478,31 @@ export class VaultStore {
 
   saveSettings(partial: Partial<AppSettings>): AppSettings {
     const next = { ...this.getSettings(), ...partial };
-    atomicWrite(this.paths.settingsFile, JSON.stringify(next, null, 2));
+    // At-rest form: secret fields wrapped under the OS-bound key; the
+    // in-memory cache keeps decrypted values for this process only.
+    const atRest: Record<string, unknown> = { ...next };
+    if (this.settingsKeyBuf()) {
+      for (const f of VaultStore.SECRET_SETTING_FIELDS) {
+        atRest[f] = this.wrapSettingSecret((next as Record<string, unknown>)[f]);
+      }
+    }
+    atomicWrite(this.paths.settingsFile, JSON.stringify(atRest, null, 2));
     this._settingsCache = null;
+    this.touchEmergencySnapshot();
     return next;
+  }
+
+  /** True when settings.json holds plaintext API keys while a wrap key exists. */
+  settingsNeedsSecretMigration(): boolean {
+    if (!this.settingsKeyBuf()) return false;
+    try {
+      const raw = readJsonOrQuarantine<Record<string, unknown>>(this.paths.settingsFile, {}, "settings.json");
+      return VaultStore.SECRET_SETTING_FIELDS.some(
+        (f) => typeof raw[f] === "string" && (raw[f] as string) !== "" && !(raw[f] as string).startsWith("enc:v1:")
+      );
+    } catch {
+      return false;
+    }
   }
 
   // --- Vault ---
@@ -282,15 +537,7 @@ export class VaultStore {
       // The stored salt MUST be the one the key was derived from.
       const salt = this.encryptionSaltHex || rawDisk?.salt || generateSalt();
       const text = JSON.stringify(vault, null, 2);
-      const encrypted = encryptString(text, this.encryptionKey);
-      
-      const payload = {
-        version: 1,
-        encrypted: true as const,
-        salt,
-        ...encrypted
-      };
-      atomicWrite(this.paths.vaultFile, JSON.stringify(payload, null, 2));
+      atomicWrite(this.paths.vaultFile, JSON.stringify(envelopePayload(text, this.encryptionKey, salt, 1), null, 2));
     } else {
       atomicWrite(this.paths.vaultFile, JSON.stringify(vault, null, 2));
     }
@@ -298,6 +545,7 @@ export class VaultStore {
     // the cache and silently resurrect the previous disk state.
     this._entriesCache = null;
     this.recordIntegrity(this.paths.vaultFile);
+    this.touchEmergencySnapshot();
   }
 
   listEntries(filter?: { status?: EntryStatus | EntryStatus[]; family?: string }): VaultEntry[] {
@@ -397,19 +645,29 @@ export class VaultStore {
 
   // --- Vectors ---
   private readVectors(): VectorsFile {
-    const raw = readJson<any>(this.paths.vectorsFile, { version: 1, chunks: [] });
+    const parse = (raw: any): VectorsFile => {
+      if (!raw || typeof raw !== "object" || raw.version !== VECTOR_SCHEMA || !Array.isArray(raw.chunks)) {
+        if (raw && Array.isArray(raw.chunks) && raw.chunks.length) {
+          addLog("DATA", `Legacy vector index dropped (${raw.chunks.length} chunk(s) embedded from secret-bearing text) — entries re-embed on next save.`);
+        }
+        return { version: VECTOR_SCHEMA, chunks: [] };
+      }
+      return raw as VectorsFile;
+    };
+    const raw = readJson<any>(this.paths.vectorsFile, null);
+    if (!raw) return { version: VECTOR_SCHEMA, chunks: [] };
     if (raw.encrypted) {
       if (!this.encryptionKey) {
         throw new Error("Vault is locked");
       }
       try {
         const decrypted = decryptString(raw.ciphertext, this.encryptionKey, raw.iv, raw.authTag);
-        return JSON.parse(decrypted) as VectorsFile;
+        return parse(JSON.parse(decrypted));
       } catch (e: any) {
         throw new Error("Failed to decrypt vectors");
       }
     }
-    return raw as VectorsFile;
+    return parse(raw);
   }
 
   private writeVectors(v: VectorsFile) {
@@ -422,15 +680,7 @@ export class VaultStore {
       }
       const salt = this.encryptionSaltHex || rawDisk?.salt || generateSalt();
       const text = JSON.stringify(v);
-      const encrypted = encryptString(text, this.encryptionKey);
-      
-      const payload = {
-        version: 1,
-        encrypted: true as const,
-        salt,
-        ...encrypted
-      };
-      atomicWrite(this.paths.vectorsFile, JSON.stringify(payload));
+      atomicWrite(this.paths.vectorsFile, JSON.stringify(envelopePayload(text, this.encryptionKey, salt, 1)));
     } else {
       atomicWrite(this.paths.vectorsFile, JSON.stringify(v));
     }
@@ -475,15 +725,12 @@ export class VaultStore {
         rawDisk?.salt ||
         readJson<any>(this.paths.vaultFile, null)?.salt ||
         generateSalt();
-      const encrypted = encryptString(JSON.stringify(obj), this.encryptionKey);
-      atomicWrite(
-        file,
-        JSON.stringify({ version: 2, encrypted: true as const, salt, ...encrypted }, null, 2)
-      );
+      atomicWrite(file, JSON.stringify(envelopePayload(JSON.stringify(obj), this.encryptionKey, salt, 2), null, 2));
     } else {
       atomicWrite(file, JSON.stringify(obj, null, 2));
     }
     this.recordIntegrity(file);
+    this.touchEmergencySnapshot();
   }
 
   private readProtectedJson<T>(file: string, fallback: T): T {
@@ -750,7 +997,7 @@ export class VaultStore {
     const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
     if (!raw || !raw.encrypted) return false;
     try {
-      const key = await deriveKeyAsync(password, raw.salt);
+      const key = await deriveKeyAsync(password, raw.salt, kdfFromEnvelope(raw));
       decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
       return true;
     } catch {
@@ -1135,7 +1382,10 @@ export class VaultStore {
 
   // --- Scan review sessions (portable) ---
   private readSessions(): FolderScanSession[] {
-    return readJson<{ sessions: FolderScanSession[] }>(this.paths.scanSessionsFile, {
+    // Scan sessions carry extracted secret values and raw file fragments —
+    // they belong INSIDE the encryption envelope (audit finding C1), never on
+    // disk as plaintext.
+    return this.readProtectedJson<{ sessions: FolderScanSession[] }>(this.paths.scanSessionsFile, {
       sessions: [],
     }).sessions;
   }
@@ -1143,10 +1393,7 @@ export class VaultStore {
   private writeSessions(sessions: FolderScanSession[]) {
     // keep last 20 sessions only
     const trimmed = sessions.slice(0, 20);
-    atomicWrite(
-      this.paths.scanSessionsFile,
-      JSON.stringify({ version: 1, sessions: trimmed }, null, 2)
-    );
+    this.writeProtectedJson(this.paths.scanSessionsFile, { version: 1, sessions: trimmed });
   }
 
   listScanSessions(): FolderScanSession[] {
@@ -1313,11 +1560,13 @@ export class VaultStore {
     size: number;
     created_at: string;
     encrypted: boolean;
+    has_vault: boolean;
+    has_notes: boolean;
     locations: string[];
   }[] {
     const byName = new Map<
       string,
-      { name: string; size: number; created_at: string; encrypted: boolean; locations: string[] }
+      { name: string; size: number; created_at: string; encrypted: boolean; has_vault: boolean; has_notes: boolean; locations: string[] }
     >();
     for (const dir of this.emergencyDirs()) {
       try {
@@ -1328,10 +1577,17 @@ export class VaultStore {
           const st = fs.statSync(full);
           let created_at = st.mtime.toISOString();
           let encrypted = false;
+          let has_vault = false;
+          let has_notes = false;
           try {
             const parsed = JSON.parse(fs.readFileSync(full, "utf-8"));
             if (parsed?.created_at) created_at = parsed.created_at;
             encrypted = !!parsed?.encrypted;
+            // Lets the UI badge snapshots that contain no vault/notes at all
+            // ("empty" — restoring one is a no-op), so users don't pick the
+            // newest entry blindly when it holds nothing.
+            has_vault = !!parsed?.files?.vault;
+            has_notes = !!parsed?.files?.scratchpad;
           } catch {}
           const prev = byName.get(f);
           if (prev) {
@@ -1342,6 +1598,8 @@ export class VaultStore {
               size: st.size,
               created_at,
               encrypted,
+              has_vault,
+              has_notes,
               locations: [dir],
             });
           }
@@ -1400,9 +1658,20 @@ export class VaultStore {
     writeB64(this.paths.scratchpadFile, snapshot.files.scratchpad);
     writeB64(this.paths.settingsFile, snapshot.files.settings);
 
-    // The restored vault may be encrypted; drop any in-memory key so the user
-    // is prompted to unlock with the restored vault's password.
-    this.encryptionKey = null;
+    // Critical: drop ALL in-memory state. The store caches entries, settings,
+    // folders and notes — without this, the running server keeps serving the
+    // PRE-restore data and the app looks unrestored until a full server
+    // restart (this exact bug made restores appear to do nothing).
+    // Locking as well: the restored vault may carry a different salt, so a
+    // stale key must never be reused — the user unlocks fresh afterwards
+    // (lock is a no-op gate when the vault is unencrypted).
+    this.lock();
+    this.clearCache();
+    // Re-baseline integrity HMACs so the next startup check doesn't flag the
+    // restored files as "unexpectedly modified".
+    for (const f of [this.paths.vaultFile, this.paths.vectorsFile, this.paths.scratchpadFile, this.paths.settingsFile]) {
+      this.recordIntegrity(f);
+    }
     return true;
   }
 }

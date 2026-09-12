@@ -27,7 +27,7 @@ function maskSettings(s: object): Record<string, unknown> {
 
 export function settingsRoutes(ctx: RouteContext) {
   const r = Router();
-  const { store } = ctx;
+  const { store, audit } = ctx;
 
   r.get("/logs", (_req, res) => res.json(getLogs()));
 
@@ -64,6 +64,8 @@ export function settingsRoutes(ctx: RouteContext) {
       "enable_ai_proofreader",
       "auto_lock_minutes",
       "lock_on_minimize",
+      "ai_cloud_consent",
+      "languagetool_enabled",
       "llm_provider_override",
       "embed_provider_override",
     ];
@@ -75,6 +77,10 @@ export function settingsRoutes(ctx: RouteContext) {
       // never wipe a saved key.
       if ((KEY_FIELDS as readonly string[]).includes(k) && String(body[k]).trim() === "") continue;
       patch[k] = body[k];
+    }
+    // Egress flags are strictly boolean — never trust whatever shape arrives.
+    for (const k of ["ai_cloud_consent", "languagetool_enabled", "enable_live_spellcheck", "enable_ai_proofreader", "lock_on_minimize"] as const) {
+      if (patch[k] !== undefined) patch[k] = Boolean(patch[k]);
     }
     if (patch.auto_lock_minutes !== undefined) {
       const n = Number(patch.auto_lock_minutes);
@@ -107,6 +113,14 @@ export function settingsRoutes(ctx: RouteContext) {
       }
     }
     const next = store.saveSettings(patch as Partial<ReturnType<typeof store.getSettings>>);
+    // Keep the LanguageTool egress gate in sync with the setting (the shared
+    // engine reads the env var, both in this process and in Electron main).
+    process.env.INDEXARC_LT_PUBLIC = next.languagetool_enabled ? "1" : "";
+    if (patch.ai_cloud_consent !== undefined) {
+      addLog("SECURITY", `Cloud AI egress consent ${next.ai_cloud_consent ? "GRANTED" : "REVOKED"}.`);
+      audit?.log("settings.egress_consent", next.ai_cloud_consent ? "granted" : "revoked");
+    }
+    audit?.log("settings.update", `fields=${Object.keys(patch).join(",")}`);
     addLog("SETTINGS", `Updated AI provider mode: ${next.ai_provider}`);
     sendSSE("settings-changed", { ai_provider: next.ai_provider });
     res.json(maskSettings(next));

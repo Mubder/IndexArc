@@ -2,8 +2,9 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { ensurePortableLayout } from "./server/paths.js";
+import { ensurePortableLayout, findAlternateVaultRoots } from "./server/paths.js";
 import { VaultStore } from "./server/store.js";
+import { AuditLog } from "./server/audit.js";
 import { addLog } from "./server/logs.js";
 import { FolderWatcherManager } from "./server/services/folderWatcher.js";
 import { apiAuthMiddleware, getLastActivity } from "./server/auth.js";
@@ -20,6 +21,32 @@ import type { RouteContext } from "./server/routes/types.js";
 
 const paths = ensurePortableLayout();
 const store = new VaultStore(paths);
+const audit = new AuditLog(paths);
+audit.log("server.start", `root=${paths.root}`);
+// Egress gate for the shared LanguageTool engine: public API is opt-in.
+try {
+  process.env.INDEXARC_LT_PUBLIC = store.getSettings().languagetool_enabled ? "1" : "";
+} catch {
+  process.env.INDEXARC_LT_PUBLIC = "";
+}
+// Settings secrets: with an OS-keychain key present (packaged builds), wrap
+// any legacy plaintext API keys immediately. Without one (dev/standalone),
+// say so once — plaintext keys on disk are a known dev-mode limitation.
+try {
+  if (store.settingsNeedsSecretMigration()) {
+    store.saveSettings({});
+    addLog("SECURITY", "Settings API keys migrated to OS-keychain-wrapped storage.");
+  } else if (!process.env.INDEXARC_SETTINGS_KEY) {
+    addLog("SECURITY", "No OS keychain key available — settings API keys remain plaintext at rest (dev/standalone mode).");
+  }
+} catch {
+  /* best-effort */
+}
+// Electron's will-quit calls this (the server runs inside the main process)
+// so a pending debounced emergency snapshot is flushed to the machine-level
+// locations before the process dies — e.g. when the user quits to run a
+// reinstall that would wipe the install folder.
+(globalThis as any).__indexarcFlushEmergency = () => store.flushEmergencySnapshot();
 const watchers = new FolderWatcherManager(store, () => store.getSettings());
 const app = express();
 
@@ -47,7 +74,7 @@ app.get("/favicon.ico", (_req, res) => {
 });
 
 // Shared context for all route modules
-const ctx: RouteContext = { store, watchers, paths, spellcheck: createSpellcheckEngines() };
+const ctx: RouteContext = { store, watchers, paths, spellcheck: createSpellcheckEngines(), audit };
 
 // --- Vault routes (lock/unlock/setup — no auth required) ---
 app.use("/api/vault", vaultRoutes(ctx));
@@ -62,7 +89,9 @@ for (const p of protectedPaths) {
 app.post("/api/analyze", async (req, res) => {
   try {
     const settings = ctx.store.getSettings();
-    const paste = String(req.body?.paste ?? "");
+    // Clients send the pasted text as `content` (Scratchpad detect, Home and
+    // Analyze tabs); `paste` is accepted as a legacy alias.
+    const paste = String(req.body?.paste ?? req.body?.content ?? "");
     if (!paste.trim()) return res.status(400).json({ error: "paste is required" });
     const { runAnalyze } = await import("./server/services/vault.js");
     const result = await runAnalyze(ctx.store, settings, paste);
@@ -97,6 +126,74 @@ app.use("/api", sseRoutes(ctx));
 
 addLog("SYSTEM", `IndexArc Vault portable root: ${paths.root}`);
 addLog("SYSTEM", `Data → ${paths.dataDir} | Config → ${paths.configDir}`);
+
+// Startup census: which folder is actually serving, and how much is in it.
+// When the app "comes back empty", this line (plus GET /api/health) tells us
+// whether the server is pointed at a fresh/empty folder instead of the real
+// vault (dev sandbox vs project folder vs packaged exe folder).
+try {
+  const locked = store.isLocked();
+  const encrypted = store.isEncryptionEnabled();
+  let vaultTotal: number | string = "?";
+  try {
+    vaultTotal = locked ? "locked" : store.stats().total;
+  } catch {
+    vaultTotal = "unreadable";
+  }
+  let tabs: number | string = "?";
+  try {
+    tabs = locked ? "locked" : store.getScratchpad().length;
+  } catch {
+    tabs = "unreadable";
+  }
+  addLog("SYSTEM", `Startup census: vault entries=${vaultTotal} scratchpad tabs=${tabs} encrypted=${encrypted} locked=${locked}`);
+  if (!locked && vaultTotal === 0) {
+    const alts = findAlternateVaultRoots(paths.root).filter((a) => (a.vaultEntries ?? 0) > 0);
+    for (const a of alts) {
+      addLog("DATA", `Empty vault here, but ${a.vaultEntries} entries exist at ${a.root} — relaunch from that folder/build or restore from Settings → Emergency Plan.`);
+    }
+    if (!alts.length) {
+      // The classic post-reinstall wipe: the install folder was deleted (its
+      // data/ went with it), but machine-level emergency snapshots survived.
+      const snaps = store.listEmergencySnapshots().filter((s) => s.has_vault || s.has_notes);
+      if (snaps.length) {
+        addLog("DATA", `Empty vault here. ${snaps.length} emergency snapshot(s) survived (newest: ${snaps[0].created_at}) — restore from Settings → Emergency Plan to get your data back.`);
+      }
+    }
+  }
+} catch {
+  /* best-effort */
+}
+
+// Startup sweep: atomicWrite stages `.<name>.<pid>.tmp` files that a crash
+// between write and rename would leave behind — with full vault/note
+// payloads. Anything older than 5 minutes is guaranteed stale (a live
+// concurrent instance rewrites its staging file within milliseconds).
+try {
+  const staleCutoff = Date.now() - 5 * 60_000;
+  let swept = 0;
+  for (const dir of [paths.dataDir, paths.configDir, paths.backupsDir]) {
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const f of names) {
+      if (!/^\..+\.\d+\.tmp$/.test(f)) continue;
+      try {
+        const full = path.join(dir, f);
+        if (fs.statSync(full).mtimeMs < staleCutoff) {
+          fs.unlinkSync(full);
+          swept++;
+        }
+      } catch {}
+    }
+  }
+  if (swept) addLog("DATA", `Swept ${swept} stale atomic-write temp file(s) holding pre-crash payloads.`);
+} catch {
+  /* best-effort */
+}
 
 // Automatic timestamped backup on every startup (keeps the last 10 copies).
 try {
@@ -184,9 +281,10 @@ async function startServer() {
     });
   }
 
-  // Always JSON for unknown /api routes (dev + prod)
-  app.use("/api", (req, res) => {
-    res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });
+  // Always JSON for unknown /api routes (dev + prod). No method/path echo —
+  // a prober gets a bare 404 and nothing to fingerprint with.
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ error: "Not found" });
   });
 
   // JSON error handler: Express 4 rejections wrapped with wrapAsync land here.
@@ -199,16 +297,45 @@ async function startServer() {
     }
   );
 
-  app.listen(PORT, HOST, () => {
-    addLog("SYSTEM", `Vault server listening on http://${HOST}:${PORT}`);
-    console.log(`IndexArc Vault → http://${HOST}:${PORT}`);
+  // Bind with conflict recovery: another app squatting the preferred port
+  // must neither crash us nor (worse) let the shell load the squatter's UI.
+  // Walk up to +20 ports, then fall back to an OS-assigned ephemeral port.
+  // The ACTUAL port is exported via env for the Electron shell, which also
+  // verifies this server's identity before loading it (see /api/ping).
+  const listenReady = (server: import("http").Server) => {
+    const addr = server.address() as { port: number };
+    process.env.INDEXARC_ACTUAL_PORT = String(addr.port);
+    addLog("SYSTEM", `Vault server listening on http://${HOST}:${addr.port}`);
+    console.log(`IndexArc Vault → http://${HOST}:${addr.port}`);
     console.log(`Portable root → ${paths.root}`);
     try {
       watchers.restoreFromStore();
     } catch (e: any) {
       addLog("WATCH", `Restore watchers failed: ${e.message}`);
     }
-  });
+  };
+
+  const listenWithRetry = (port: number, attempt: number): void => {
+    const server = app.listen(port, HOST, () => listenReady(server));
+    server.on("error", (err: any) => {
+      if (err?.code === "EADDRINUSE" && attempt < 20) {
+        addLog("SYSTEM", `Port ${port} is already in use — trying ${port + 1}`);
+        listenWithRetry(port + 1, attempt + 1);
+      } else if (err?.code === "EADDRINUSE") {
+        addLog("SYSTEM", "All preferred ports busy — binding to an OS-assigned ephemeral port.");
+        const ephemeral = app.listen(0, HOST, () => listenReady(ephemeral));
+        ephemeral.on("error", (fatal: any) => {
+          console.error("Vault server failed to bind:", fatal);
+          process.exit(1);
+        });
+      } else {
+        console.error("Vault server failed to start:", err);
+        process.exit(1);
+      }
+    });
+  };
+
+  listenWithRetry(PORT, 0);
 }
 
 process.on("exit", () => watchers.stopAll());

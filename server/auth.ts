@@ -13,6 +13,15 @@ import type { Request, Response, NextFunction } from "express";
 // GET /api/auth/bootstrap for plain-browser use (same-origin + loopback only).
 const token = crypto.randomBytes(32).toString("hex");
 
+// Non-reversible proof-of-identity for the readiness probe: the Electron
+// shell computes the same value from the token it holds and refuses to load
+// any window content from a server that doesn't match. A port squatter can
+// answer 200 on /api/ping but cannot know this value. (SHA-256 of a
+// 256-bit random token — not a secret leak; it IS the token's fingerprint.)
+export function serverIdentity(): string {
+  return crypto.createHash("sha256").update(token).digest("hex").slice(0, 16);
+}
+
 // Exported for the embedded Electron main process (same Node process) to hand
 // to the renderer through IPC.
 (process.env as Record<string, string | undefined>).INDEXARC_API_TOKEN = token;
@@ -65,9 +74,20 @@ export function apiAuthMiddleware(req: Request, res: Response, next: NextFunctio
     return;
   }
 
-  // 4) Token bootstrap for plain-browser clients. Only same-origin/non-browser
-  //    callers may read it (Host is already validated above).
+  // 4) Token bootstrap for plain-browser clients (dev workflow only).
+  //    Production/packaged builds never expose this: any local process can
+  //    send a request without Sec-Fetch-Site, so an open bootstrap here would
+  //    hand the full API token — and with it every secret — to local malware
+  //    (audit finding H1). The Electron renderer receives the token via the
+  //    preload IPC bridge instead. Dev (tsx/vite) or an explicit
+  //    INDEXARC_ALLOW_BOOTSTRAP=1 keeps the browser workflow available.
   if (req.path === "/auth/bootstrap") {
+    const allowed =
+      process.env.NODE_ENV !== "production" || process.env.INDEXARC_ALLOW_BOOTSTRAP === "1";
+    if (!allowed) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
     const sfs = req.headers["sec-fetch-site"];
     if (typeof sfs === "string" && sfs !== "same-origin" && sfs !== "same-site" && sfs !== "none") {
       res.status(403).json({ error: "Forbidden" });

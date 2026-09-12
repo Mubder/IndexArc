@@ -1,7 +1,7 @@
 import type { VaultStore } from "../store.js";
 import type { AppSettings, AskResultItem, VaultEntry } from "../types.js";
 import { expandQueryTerms } from "../ai/heuristics.js";
-import { cosineSimilarity, embedText, resolveActiveProvider, generateText } from "../ai/providers.js";
+import { cosineSimilarity, embedText, resolveActiveProvider, generateText, isLocalProvider } from "../ai/providers.js";
 import { addLog } from "../logs.js";
 
 function maskValue(v: string): string {
@@ -311,16 +311,21 @@ export async function askVault(
   if (active !== "heuristic" && results.length > 0) {
     try {
       const topMatches = results.slice(0, 5);
+      // EGRESS RULE (audit H2): secret values and note bodies are only ever
+      // placed in an LLM prompt when the active provider is LOCAL (loopback
+      // — the text stays on this machine). A cloud LLM receives metadata so
+      // it can still explain WHICH entry matches, never the secret itself.
+      const localLlm = isLocalProvider(settings, active);
       const matchesContext = topMatches
         .map(
           (r, index) =>
             `[Entry #${index + 1}]
 Name: ${r.entry.name}
 Type: ${r.entry.type}
-Family: ${r.entry.family}
-Value: ${r.entry.value.slice(0, 400)}${r.entry.value.length > 400 ? "…" : ""}
-Labels: ${(r.entry.labels || []).join(", ")}
-Notes: ${r.entry.notes || ""}`
+Family: ${r.entry.family}${localLlm ? `
+Value: ${r.entry.value.slice(0, 400)}${r.entry.value.length > 400 ? "…" : ""}` : ""}
+Labels: ${(r.entry.labels || []).join(", ")}${localLlm ? `
+Notes: ${r.entry.notes || ""}` : ""}`
         )
         .join("\n\n");
 

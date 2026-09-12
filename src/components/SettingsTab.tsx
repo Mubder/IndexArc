@@ -12,6 +12,7 @@ interface SettingsTabProps {
   vaultStatus: { is_locked: boolean; encryption_enabled: boolean } | null;
   onRefreshVaultStatus: () => void;
   logs: { time: string; type: string; message: string }[];
+  onOpenHealth?: () => void;
 }
 
 // API keys are write-only (the server never returns stored key material), so
@@ -62,6 +63,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   vaultStatus,
   onRefreshVaultStatus,
   logs,
+  onOpenHealth,
 }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
@@ -73,6 +75,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     size: number;
     created_at: string;
     encrypted: boolean;
+    has_vault?: boolean;
+    has_notes?: boolean;
     locations: string[];
   };
   const [snapshots, setSnapshots] = React.useState<EmergencySnapshot[]>([]);
@@ -124,7 +128,16 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       });
       const data = await res.json();
       if (data.ok) {
-        setEmgMsg(t("emergency_restored"));
+        const parts: string[] = [];
+        if (typeof data.vault_total === "number") parts.push(`${data.vault_total} entries`);
+        if (typeof data.scratchpad_tabs === "number") parts.push(`${data.scratchpad_tabs} notes`);
+        setEmgMsg(
+          parts.length
+            ? `Restored (${parts.join(" · ")}). Reloading...`
+            : data.locked
+              ? "Restored (encrypted — unlock to load). Reloading..."
+              : t("emergency_restored")
+        );
         onRefreshVaultStatus();
         await loadSnapshots();
         setTimeout(() => window.location.reload(), 1200);
@@ -347,6 +360,51 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             className="accent-blue-500"
           />
           <span className="text-xs" style={{ color: "var(--text)" }}>{t("autolock_minimize_label")}</span>
+        </label>
+      </div>
+
+      {/* Egress consent — audit H2: cloud AI and the public LanguageTool API
+          stay disabled until the user explicitly opts in. */}
+      <div
+        className="space-y-3 rounded-xl p-4"
+        style={{ background: "var(--amber-bg)", border: "1px solid rgba(251, 191, 36, 0.25)" }}
+      >
+        <h3 className="text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5" style={{ color: "var(--amber)" }}>
+          ⚠ {t("egress_title")}
+        </h3>
+        <label className="flex items-center gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            className="sr-only peer"
+            checked={settings.ai_cloud_consent === true}
+            onChange={(e) => onPatchSettings({ ai_cloud_consent: e.target.checked })}
+          />
+          <div
+            className="w-9 h-5 rounded-full transition-colors peer-focus:outline-none"
+            style={{ background: settings.ai_cloud_consent ? "var(--amber)" : "var(--bg-input)", border: "1px solid var(--border)" }}
+          >
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs font-medium" style={{ color: "var(--text)" }}>{t("egress_cloud_label")}</span>
+            <span className="text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{t("egress_cloud_desc")}</span>
+          </div>
+        </label>
+        <label className="flex items-center gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            className="sr-only peer"
+            checked={settings.languagetool_enabled === true}
+            onChange={(e) => onPatchSettings({ languagetool_enabled: e.target.checked })}
+          />
+          <div
+            className="w-9 h-5 rounded-full transition-colors peer-focus:outline-none"
+            style={{ background: settings.languagetool_enabled ? "var(--amber)" : "var(--bg-input)", border: "1px solid var(--border)" }}
+          >
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs font-medium" style={{ color: "var(--text)" }}>{t("egress_lt_label")}</span>
+            <span className="text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{t("egress_lt_desc")}</span>
+          </div>
         </label>
       </div>
 
@@ -935,13 +993,28 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   {s.encrypted && (
                     <Lock className="w-3 h-3 shrink-0" style={{ color: "var(--emerald)" }} />
                   )}
+                  {s.has_vault === false && s.has_notes === false && (
+                    <span
+                      className="text-[9px] px-1.5 py-0.5 rounded font-semibold shrink-0"
+                      style={{ color: "var(--amber)", background: "var(--amber-bg)", border: "1px solid rgba(251, 191, 36, 0.3)" }}
+                      title="This snapshot contains no vault entries and no notes — restoring it changes nothing. Pick an older, larger snapshot."
+                    >
+                      empty
+                    </span>
+                  )}
                 </div>
                 <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
                   {(s.size / 1024).toFixed(1)} KB · {s.locations.length} {t("emergency_copies")}
                 </div>
               </div>
               {confirmRestore === s.name ? (
-                <div className="flex gap-1.5 shrink-0">
+                <div className="flex flex-col gap-1.5 shrink-0 items-end">
+                  {s.has_vault === false && s.has_notes === false && (
+                    <span className="text-[10px] text-right" style={{ color: "var(--amber)" }}>
+                      Empty snapshot — restores nothing.
+                    </span>
+                  )}
+                  <div className="flex gap-1.5 shrink-0">
                   <button
                     type="button"
                     disabled={emgBusy}
@@ -959,6 +1032,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   >
                     {t("identify_cancel_btn")}
                   </button>
+                  </div>
                 </div>
               ) : (
                 <button
@@ -979,6 +1053,24 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
         {t("vault_data_location")}
       </p>
+      {status?.portable_root && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl px-3 py-2" style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}>
+          <span className="text-[11px] break-all" style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+            {status.portable_root}
+          </span>
+          <div className="flex-1" />
+          {onOpenHealth && (
+            <button
+              type="button"
+              onClick={onOpenHealth}
+              className="px-2.5 py-1 rounded-lg text-[11px] font-medium shrink-0"
+              style={{ background: "transparent", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
+            >
+              {t("health_open_btn")}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="space-y-3 pt-2" style={{ borderTop: "1px solid var(--border)" }}>
         <div className="flex items-center justify-between gap-2 pt-3">

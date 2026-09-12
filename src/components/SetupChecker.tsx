@@ -1,6 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, XCircle, AlertTriangle, Download, Play, Boxes, Cpu, ChevronDown, X, Info } from "lucide-react";
-import { SystemStatus, Settings } from "../types";
+import { CheckCircle2, XCircle, AlertTriangle, Download, Play, Boxes, Cpu, ChevronDown, X, Info, Database, Stethoscope } from "lucide-react";
+import { SystemStatus, Settings, HealthReport } from "../types";
 import { getTranslation } from "../utils/i18n";
 
 interface SetupCheckerProps {
@@ -8,6 +8,8 @@ interface SetupCheckerProps {
   settings: Settings | null;
   onConfigureAI: () => void;
   onRefresh: () => void;
+  health?: HealthReport | null;
+  onOpenHealth?: () => void;
 }
 
 const DISMISS_KEY = "indexarc-setup-dismissed";
@@ -21,6 +23,8 @@ export const SetupChecker: React.FC<SetupCheckerProps> = ({
   settings,
   onConfigureAI,
   onRefresh,
+  health,
+  onOpenHealth,
 }) => {
   const t = (key: Parameters<typeof getTranslation>[1], vars?: Record<string, string>) => {
     let s = getTranslation(settings, key);
@@ -75,8 +79,16 @@ export const SetupChecker: React.FC<SetupCheckerProps> = ({
     if (isElectron && ollamaInstalled === false) return true;
     if (isElectron && ollamaInstalled === true && !ollamaOnline) return true;
     if (ollamaOnline && !ollamaHasLlm) return true;
+    // Data health (from GET /api/health) also drives the header — an "all
+    // set" banner while the vault is locked/empty in the wrong folder is
+    // exactly the false-green that hid data loss. Only critical data checks
+    // count here; AI-only degradation stays green for data purposes.
+    if (health && health.overall === "attention") {
+      const criticalBad = (health.checks ?? []).some((c) => c.severity === "critical" && !c.ok);
+      if (criticalBad) return true;
+    }
     return false;
-  }, [aiReady, isElectron, ollamaInstalled, ollamaOnline, ollamaHasLlm]);
+  }, [aiReady, isElectron, ollamaInstalled, ollamaOnline, ollamaHasLlm, health]);
 
   useEffect(() => {
     if (needsAttention) setExpanded(true);
@@ -278,6 +290,36 @@ export const SetupChecker: React.FC<SetupCheckerProps> = ({
                 style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
               >
                 {t("setup_configure_ai")}
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="flex items-center gap-1.5" style={{ color: "var(--text)" }}>
+              <Database className="w-4 h-4" /> {t("health_vault_label")}
+            </span>
+            <span className="flex items-center gap-1">
+              <StatusDot ok={!needsAttention || aiReady} warn={!!health && health.overall === "degraded"} />
+              {health?.vault?.locked ? (
+                <span style={{ color: "var(--amber)" }}>Locked — unlock to load entries</span>
+              ) : health?.vault ? (
+                <span style={{ color: "var(--emerald)" }}>
+                  {health.vault.total ?? 0} entries · {health.scratchpad?.tabs ?? 0} notes
+                </span>
+              ) : (
+                <span style={{ color: "var(--text-muted)" }}>…</span>
+              )}
+            </span>
+            <div className="flex-1" />
+            {onOpenHealth && (
+              <button
+                type="button"
+                onClick={onOpenHealth}
+                className={btnBase}
+                style={{ background: "transparent", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
+              >
+                <Stethoscope className="w-3.5 h-3.5" />
+                {t("health_open_btn")}
               </button>
             )}
           </div>

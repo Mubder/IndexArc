@@ -1,3 +1,6 @@
+// @vitest-environment jsdom
+// The save queue sanitizes note HTML through DOMPurify before posting, so
+// these tests need a DOM.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   enqueueScratchpadSave,

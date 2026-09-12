@@ -5,7 +5,7 @@ import type {
   EntryStatus,
   VaultEntry,
 } from "../types.js";
-import { analyzePaste, embedText, resolveActiveProvider } from "../ai/providers.js";
+import { analyzePaste, embedText, resolveActiveProvider, isLocalProvider } from "../ai/providers.js";
 import { addLog } from "../logs.js";
 import { asString, asStringArray } from "../validate.js";
 import { randomUUID } from "crypto";
@@ -17,7 +17,22 @@ function statusFromCandidate(c: AnalyzeCandidate): EntryStatus {
   return "saved";
 }
 
-function indexText(entry: VaultEntry): string {
+/**
+ * Text used to build an entry's semantic-search embedding.
+ *
+ * EGRESS RULE (audit H2): the secret VALUE, its raw source fragment, and the
+ * free-form notes (where users paste secrets) NEVER enter cloud embedding
+ * input — not even with user consent. Local (loopback) providers embed the
+ * full context because the text never leaves the machine.
+ */
+function indexTextFor(entry: VaultEntry, cloudSafe: boolean): string {
+  const metadata = [
+    entry.name,
+    entry.type,
+    entry.labels.join(" "),
+    entry.type_aliases.join(" "),
+  ];
+  if (cloudSafe) return metadata.filter(Boolean).join("\n");
   return [
     entry.name,
     entry.type,
@@ -37,7 +52,7 @@ export async function indexEntry(
   entry: VaultEntry
 ) {
   const active = await resolveActiveProvider(settings);
-  const text = indexText(entry);
+  const text = indexTextFor(entry, !isLocalProvider(settings, active));
   const embedding = await embedText(settings, text, active);
   store.upsertVector({
     id: `entry_${entry.id}`,
@@ -135,20 +150,15 @@ export async function saveCandidate(
 
   if (status === "saved") {
     await indexEntry(store, settings, entry);
-    addLog("VAULT", `Saved "${entry.name}" (${entry.type})`);
+    // Logs never carry entry names or values — names are frequently the
+    // secret's own description ("Prod AWS root key") and masked fragments
+    // leak prefix+suffix characters (audit M2). Reference by id only.
+    addLog("VAULT", `Saved entry ${entry.id.slice(0, 8)} (${entry.type})`);
   } else {
-    addLog(
-      "VAULT",
-      `Parked incomplete entry → ${status} (${mask(entry.value)})`
-    );
+    addLog("VAULT", `Parked incomplete entry ${entry.id.slice(0, 8)} → ${status}`);
   }
 
   return entry;
-}
-
-function mask(v: string) {
-  if (v.length <= 6) return "***";
-  return `${v.slice(0, 3)}…${v.slice(-3)}`;
 }
 
 export async function clarifyEntry(

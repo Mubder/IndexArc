@@ -5,7 +5,8 @@ const http = require("http");
 const https = require("https");
 const fs = require("fs");
 const os = require("os");
-const { execSync } = require("child_process");
+const { execSync, execFileSync } = require("child_process");
+const crypto = require("crypto");
 
 // ── Note editor spellchecker ──
 // Chromium has no Arabic Hunspell dict, so the note editor keeps spellCheck
@@ -106,8 +107,20 @@ function isLatinWord(word) {
 
 function logCrash(tag, e) {
   try {
+    const f = path.join(os.tmpdir(), "indexarc-crash.log");
+    // Rotate at 1 MiB so a crash loop can never grow the file unbounded in
+    // shared temp; keep exactly one previous generation.
+    try {
+      if (fs.existsSync(f) && fs.statSync(f).size > 1024 * 1024) {
+        const old = f + ".1";
+        try {
+          fs.unlinkSync(old);
+        } catch {}
+        fs.renameSync(f, old);
+      }
+    } catch {}
     fs.appendFileSync(
-      path.join(os.tmpdir(), "indexarc-crash.log"),
+      f,
       `[${new Date().toISOString()}] [${tag}] ${e && e.stack ? e.stack : e}\n`
     );
   } catch {}
@@ -161,7 +174,9 @@ function findExistingVaultRoot(candidates) {
 function savePortableRoot(root) {
   try {
     // Persist to registry (preferred) and a marker file (fallback).
-    execSync(`reg add "${REG_KEY}" /v ${REG_VALUE} /t REG_SZ /d "${root}" /f`, {
+    // execFileSync with an argument array: no shell, so a root path can
+    // never break quoting and inject shell syntax.
+    execFileSync("reg", ["add", REG_KEY, "/v", REG_VALUE, "/t", "REG_SZ", "/d", root, "/f"], {
       windowsHide: true,
       stdio: "ignore",
     });
@@ -173,21 +188,27 @@ function savePortableRoot(root) {
   } catch {}
 }
 
-function loadPortableRoot() {
-  // A persisted root is only trustworthy if it still holds data — an empty
-  // (or dev-artifact) folder must never hijack the portable root.
+function regQuery(key, value) {
   try {
-    const out = execSync(`reg query "${REG_KEY}" /v ${REG_VALUE}`, {
+    return execFileSync("reg", ["query", key, "/v", value], {
       windowsHide: true,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
-    const m = out.match(/REG_SZ\s+(.+)$/m);
-    if (m) {
-      const r = m[1].trim();
-      if (r && fs.existsSync(r) && findExistingVaultRoot([r])) return r;
-    }
-  } catch {}
+  } catch {
+    return "";
+  }
+}
+
+function loadPortableRoot() {
+  // A persisted root is only trustworthy if it still holds data — an empty
+  // (or dev-artifact) folder must never hijack the portable root.
+  const out = regQuery(REG_KEY, REG_VALUE);
+  const m = out.match(/REG_SZ\s+(.+)$/m);
+  if (m) {
+    const r = m[1].trim();
+    if (r && fs.existsSync(r) && findExistingVaultRoot([r])) return r;
+  }
   try {
     const m = getMarkerPath();
     if (fs.existsSync(m)) {
@@ -231,24 +252,34 @@ function getPortableRoot() {
 
   const exeDir = path.dirname(process.execPath);
 
-  // 3) PORTABLE: if the exe folder already has a vault, it is the home. Period.
-  if (findExistingVaultRoot([exeDir])) {
-    savePortableRoot(exeDir);
-    return exeDir;
+  // The "portable" target is a self-extractor: it unpacks the real app into a
+  // TEMP dir (which its launcher RMDir /r's when the app exits) and sets
+  // PORTABLE_EXECUTABLE_DIR to the folder the user actually keeps the .exe
+  // in. The temp dir must NEVER become the vault root — data written there
+  // is destroyed on every exit.
+  const portableExeDir = process.env.PORTABLE_EXECUTABLE_DIR
+    ? path.resolve(process.env.PORTABLE_EXECUTABLE_DIR)
+    : null;
+
+  // 3) PORTABLE: if the real exe folder already has a vault, it is the home.
+  //    Period. (exeDir is still honored for unpacked/dir builds.)
+  const localHome = findExistingVaultRoot([portableExeDir, exeDir]);
+  if (localHome) {
+    savePortableRoot(localHome);
+    return localHome;
   }
 
   // 4) No data next to the exe yet. Before creating a fresh one, look for an
   //    existing vault anywhere we might have left it, so an update/reinstall or
   //    a moved exe never orphans the user's data. Portable-preferred order.
   let prevInstall = null;
-  try {
-    const out = execSync(`reg query "HKCU\\Software\\IndexArc" /v InstallLocation`, {
-      windowsHide: true, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-    });
+  {
+    const out = regQuery("HKCU\\Software\\IndexArc", "InstallLocation");
     const m = out.match(/REG_SZ\s+(.+)$/m);
     if (m) prevInstall = m[1].trim();
-  } catch {}
+  }
   const existing = findExistingVaultRoot([
+    portableExeDir,
     loadPortableRoot(),
     prevInstall,
     app.getPath("userData"),
@@ -260,9 +291,11 @@ function getPortableRoot() {
     return existing;
   }
 
-  // 5) Genuine first run: prefer the portable location (next to the exe) if it
-  //    is writable; otherwise fall back to a user-writable AppData folder.
-  const chosen = isWritableDir(exeDir) ? exeDir : app.getPath("userData");
+  // 5) Genuine first run: prefer the portable location (the folder holding
+  //    the .exe — NOT the self-extractor's temp dir) if it is writable;
+  //    otherwise fall back to a user-writable AppData folder.
+  const home = portableExeDir || exeDir;
+  const chosen = isWritableDir(home) ? home : app.getPath("userData");
   savePortableRoot(chosen);
   return chosen;
 }
@@ -345,7 +378,7 @@ function findOllamaPath() {
     } catch {}
   }
   try {
-    const found = execSync("where.exe ollama", { encoding: "utf-8" })
+    const found = execFileSync("where.exe", ["ollama"], { encoding: "utf-8", windowsHide: true })
       .trim()
       .split("\n")[0];
     if (found && fs.existsSync(found)) return found;
@@ -353,7 +386,7 @@ function findOllamaPath() {
   return null;
 }
 
-function downloadFile(url, dest) {
+function downloadFile(url, dest, maxBytes = 2 * 1024 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const request = (u) =>
       https
@@ -365,6 +398,20 @@ function downloadFile(url, dest) {
             reject(new Error("Download failed: " + res.statusCode));
             return;
           }
+          const declared = Number(res.headers["content-length"] || 0);
+          if (declared && declared > maxBytes) {
+            reject(new Error(`Download too large (${declared} bytes > cap ${maxBytes})`));
+            res.destroy();
+            return;
+          }
+          let received = 0;
+          res.on("data", (chunk) => {
+            received += chunk.length;
+            if (received > maxBytes) {
+              reject(new Error(`Download exceeded size cap (${maxBytes} bytes)`));
+              res.destroy();
+            }
+          });
           const file = fs.createWriteStream(dest);
           res.pipe(file);
           file.on("finish", () => file.close(() => resolve(undefined)));
@@ -375,11 +422,40 @@ function downloadFile(url, dest) {
   });
 }
 
+// Verify the downloaded installer's Authenticode signature BEFORE executing
+// it: status must be Valid and the signer must be Ollama. Executing
+// unverifiable code downloaded over the network is the one path in this app
+// that turns a network attacker into code execution — it stays gated.
+function verifyAuthenticode(file, expectedSubjectPart) {
+  const safePath = file.replace(/'/g, "''");
+  const script =
+    `$sig = Get-AuthenticodeSignature -FilePath '${safePath}'; ` +
+    `if ($sig.Status -ne 'Valid') { exit 2 }; ` +
+    `if ($sig.SignerCertificate.Subject -notlike '*${expectedSubjectPart}*') { exit 3 }; ` +
+    `exit 0`;
+  try {
+    execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function installOllama() {
   const url = "https://ollama.com/download/OllamaSetup.exe";
   const tmp = path.join(os.tmpdir(), `ollama-setup-${Date.now()}.exe`);
   try {
     await downloadFile(url, tmp);
+    if (!verifyAuthenticode(tmp, "Ollama")) {
+      return {
+        ok: false,
+        error: "Downloaded Ollama installer failed signature verification — execution blocked. Download manually from https://ollama.com/download",
+      };
+    }
     await new Promise((resolve, reject) => {
       const inst = spawn(tmp, ["/S"], { stdio: "ignore" });
       inst.on("exit", (code) => resolve(code));
@@ -493,7 +569,7 @@ async function startOllamaIfNeeded() {
   }
   if (!ollamaPath) {
     try {
-      ollamaPath = execSync("where.exe ollama", { encoding: "utf-8" })
+      ollamaPath = execFileSync("where.exe", ["ollama"], { encoding: "utf-8", windowsHide: true })
         .trim()
         .split("\n")[0];
     } catch {}
@@ -540,8 +616,38 @@ function getAppIcon() {
   return getTrayIcon();
 }
 
+// OS-keychain-bound key for encrypting API keys inside settings.json
+// (DPAPI on Windows, Keychain on macOS, libsecret on Linux). The key never
+// exists in plaintext on disk — only safeStorage can unwrap it, so the
+// settings file is unreadable off this user profile. Absent support (or a
+// dev run), the server falls back to plaintext with a log warning.
+function initSettingsSecretsKey(root) {
+  try {
+    if (!app.isPackaged) return; // dev sandbox: exercise the fallback path
+    const { safeStorage } = require("electron");
+    if (!safeStorage || !safeStorage.isEncryptionAvailable()) return;
+    const keyFile = path.join(root, "config", "settings.key.enc");
+    let key = null;
+    if (fs.existsSync(keyFile)) {
+      try {
+        const candidate = safeStorage.decryptString(fs.readFileSync(keyFile));
+        if (candidate && Buffer.from(candidate, "base64").length === 32) key = candidate;
+      } catch {}
+    }
+    if (!key) {
+      key = crypto.randomBytes(32).toString("base64");
+      fs.mkdirSync(path.join(root, "config"), { recursive: true });
+      fs.writeFileSync(keyFile, safeStorage.encryptString(key));
+    }
+    process.env.INDEXARC_SETTINGS_KEY = key;
+  } catch (e) {
+    logCrash("settings-key", e);
+  }
+}
+
 function startBackendServer() {
   const portableRoot = getPortableRoot();
+  initSettingsSecretsKey(portableRoot);
 
   const candidateServerPaths = [
     path.join(process.resourcesPath, "app.asar.unpacked", "dist", "server.cjs"),
@@ -607,6 +713,28 @@ function startBackendServer() {
   }
 }
 
+// The embedded server publishes its ACTUAL bound port via env — it walks off
+// the preferred port when something already squats it, so the shell must
+// never assume 3000.
+function waitForServerPort(window, attempts = 0) {
+  const port = Number(process.env.INDEXARC_ACTUAL_PORT) || 0;
+  if (port) {
+    pollServerAndLoad(`http://127.0.0.1:${port}`, window);
+    return;
+  }
+  if (attempts > 150) {
+    console.error("Backend never reported its listening port.");
+    app.quit();
+    return;
+  }
+  setTimeout(() => waitForServerPort(window, attempts + 1), 100);
+}
+
+function expectedServerId() {
+  const t = process.env.INDEXARC_API_TOKEN;
+  return t ? crypto.createHash("sha256").update(t).digest("hex").slice(0, 16) : null;
+}
+
 function pollServerAndLoad(url, window, attempts = 0) {
   if (attempts > 120) {
     console.error("Server failed to start.");
@@ -614,12 +742,33 @@ function pollServerAndLoad(url, window, attempts = 0) {
     return;
   }
   http
-    .get(`http://127.0.0.1:${PORT}/api/ping`, (res) => {
+    .get(`${url}/api/ping`, (res) => {
       if (res.statusCode === 200) {
-        window.loadURL(url);
-        if (!app.isPackaged) {
-          window.webContents.openDevTools({ mode: "detach" });
-        }
+        let body = "";
+        res.on("data", (c) => (body += c));
+        res.on("end", () => {
+          // Identity check: a bare 200 proves nothing — whatever squatted
+          // the port could have answered. Only load content from a server
+          // that proves it holds OUR per-process token.
+          let serverId = null;
+          try {
+            serverId = JSON.parse(body).server_id;
+          } catch {}
+          const expected = expectedServerId();
+          if (!expected || serverId !== expected) {
+            console.error(`[security] Server identity mismatch on ${url} — refusing to load window content.`);
+            dialog.showErrorBox(
+              "IndexArc — server verification failed",
+              "The local vault server could not be verified (another application may be interfering with local ports). The application will close."
+            );
+            app.quit();
+            return;
+          }
+          window.loadURL(url);
+          if (!app.isPackaged) {
+            window.webContents.openDevTools({ mode: "detach" });
+          }
+        });
       } else {
         setTimeout(() => pollServerAndLoad(url, window, attempts + 1), 400);
       }
@@ -649,12 +798,46 @@ function createWindow() {
 
   Menu.setApplicationMenu(null);
 
-  // Open any external link (e.g. target="_blank") in the OS default browser
-  // instead of spawning a new Electron window.
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url && /^https?:\/\//.test(url)) {
-      shell.openExternal(url);
+  // The main window may ONLY ever display the embedded local server. Any
+  // other navigation (compromised renderer, crafted link, redirect) is
+  // vetoed outright — this is the last line between a web page and the
+  // preload bridge.
+  mainWindow.webContents.on("will-navigate", (e, url) => {
+    try {
+      const u = new URL(url);
+      const ok =
+        u.protocol === "http:" &&
+        (u.hostname === "127.0.0.1" || u.hostname === "localhost") &&
+        u.port === String(Number(process.env.INDEXARC_ACTUAL_PORT) || PORT);
+      if (!ok) {
+        console.log(`[security] Blocked navigation to ${url}`);
+        e.preventDefault();
+      }
+    } catch {
+      e.preventDefault();
     }
+  });
+
+  // A secrets vault has no legitimate use for media, geolocation,
+  // notifications, or any other web permission — deny everything by default.
+  try {
+    mainWindow.webContents.session.setPermissionRequestHandler(
+      (_webContents, _permission, callback) => callback(false)
+    );
+  } catch (_) {
+    /* permission handler is best-effort */
+  }
+
+  // Open any external link (e.g. target="_blank") in the OS default browser
+  // instead of spawning a new Electron window. Same parsed-URL scheme
+  // allowlist as the open-external IPC — no regex shortcuts.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = new URL(url);
+      if (["http:", "https:", "mailto:"].includes(parsed.protocol)) {
+        shell.openExternal(url);
+      }
+    } catch {}
     return { action: "deny" };
   });
 
@@ -777,10 +960,14 @@ function createWindow() {
   });
 
   mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-    console.log(`[RENDERER ${level}] ${message} (${sourceId}:${line})`);
+    // Dev-only: in packaged builds renderer output must not be forwarded to
+    // stdout, where redirected logs previously captured full note bodies.
+    if (!app.isPackaged) {
+      console.log(`[RENDERER ${level}] ${message} (${sourceId}:${line})`);
+    }
   });
 
-  pollServerAndLoad(`http://127.0.0.1:${PORT}`, mainWindow);
+  waitForServerPort(mainWindow);
 
   // Closing the window sends the app to the tray instead of quitting.
   mainWindow.on("close", (e) => {
@@ -828,6 +1015,15 @@ app.on("activate", () => {
 });
 
 app.on("will-quit", () => {
+  // Flush any pending emergency snapshot before the process dies. The vault
+  // may live in the install folder, which the next reinstall's uninstaller
+  // deletes — this keeps the machine-level copy (%APPDATA%) current so a
+  // restore never loses the last few minutes of changes.
+  try {
+    if (typeof globalThis.__indexarcFlushEmergency === "function") {
+      globalThis.__indexarcFlushEmergency();
+    }
+  } catch {}
   if (tray) {
     try {
       tray.destroy();

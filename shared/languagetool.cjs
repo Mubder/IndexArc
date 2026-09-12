@@ -10,6 +10,14 @@ const LT_JAR_NAME = "languagetool.jar";
 const LT_PORT = 8081;
 const LT_PUBLIC_API = "https://languagetool.org/api/v2";
 
+// EGRESS GATE (audit H2): the public LanguageTool API posts note words to
+// languagetool.org. Disabled unless the embedded server explicitly opts in
+// via INDEXARC_LT_PUBLIC=1 (bound to the languagetool_enabled setting,
+// default OFF). The local jar on localhost needs no gate.
+function publicApiAllowed() {
+  return process.env.INDEXARC_LT_PUBLIC === "1";
+}
+
 class LanguageToolService {
   constructor() {
     this.serverProcess = null;
@@ -208,11 +216,13 @@ class LanguageToolService {
     const started = await this.startLocalServer();
     if (started) return true;
 
-    const reachable = await this._pingPublicApi();
-    if (reachable) {
-      this.mode = "public";
-      console.log("[langtool] Using public API fallback");
-      return true;
+    if (publicApiAllowed()) {
+      const reachable = await this._pingPublicApi();
+      if (reachable) {
+        this.mode = "public";
+        console.log("[langtool] Using public API fallback (opted in)");
+        return true;
+      }
     }
 
     this.mode = "none";
@@ -245,12 +255,14 @@ class LanguageToolService {
     try {
       if (this.mode === "local") {
         result = await this._post(`${this.localUrl}/v2/check`, { text, language });
-      } else {
+      } else if (this.mode === "public") {
         result = await this._post(`${LT_PUBLIC_API}/check`, { text, language });
+      } else {
+        return [];
       }
     } catch (e) {
       console.log(`[langtool] Check failed: ${e.message}`);
-      if (this.mode === "local") {
+      if (this.mode === "local" && publicApiAllowed()) {
         this.mode = "public";
         try {
           result = await this._post(`${LT_PUBLIC_API}/check`, { text, language });

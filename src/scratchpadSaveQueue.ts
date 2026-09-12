@@ -1,4 +1,5 @@
 import type { ScratchTab } from "./types";
+import { sanitizeNoteHtmlForStorage } from "./sanitize";
 
 // Module-level scratchpad save queue — per-tab content saves (PR-12).
 //
@@ -41,7 +42,9 @@ async function postTabContent(t: ScratchTab, baseRev?: number, force?: boolean):
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      content: t.content,
+      // Sanitize-on-write: the durable store only ever receives allowlisted
+      // rich text — no scripts, handlers, or foreign elements can persist.
+      content: sanitizeNoteHtmlForStorage(t.content ?? ""),
       base_rev: baseRev,
       force: force || undefined,
     }),

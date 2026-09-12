@@ -102,3 +102,96 @@ export function ensurePortableLayout(root: string = getAppRoot()) {
 }
 
 export type PortablePaths = ReturnType<typeof ensurePortableLayout>;
+
+export interface AlternateRootInfo {
+  root: string;
+  vaultExists: boolean;
+  vaultEntries: number | null;
+  vaultEncrypted: boolean;
+  scratchpadTabs: number | null;
+}
+
+function countEntriesLenient(root: string): { entries: number | null; encrypted: boolean; exists: boolean } {
+  try {
+    const f = path.join(root, "data", "vault.json");
+    if (!fs.existsSync(f) || fs.statSync(f).size === 0) return { entries: null, encrypted: false, exists: false };
+    const raw = JSON.parse(fs.readFileSync(f, "utf-8"));
+    if (raw && raw.encrypted) return { entries: null, encrypted: true, exists: true };
+    const entries = Array.isArray(raw?.entries) ? raw.entries.length : 0;
+    return { entries, encrypted: false, exists: true };
+  } catch {
+    return { entries: null, encrypted: false, exists: true };
+  }
+}
+
+function countScratchTabsLenient(root: string): number | null {
+  try {
+    const f = path.join(root, "data", "scratchpad.json");
+    if (!fs.existsSync(f) || fs.statSync(f).size === 0) return null;
+    const raw = JSON.parse(fs.readFileSync(f, "utf-8"));
+    const tabs = Array.isArray(raw) ? raw : Array.isArray(raw?.tabs) ? raw.tabs : null;
+    return tabs ? tabs.length : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Other places on this machine where a vault may already exist. Used by the
+ * /api/health diagnostics endpoint (and startup logs) to detect the classic
+ * "empty app after relaunch" situation: the server is serving a fresh/empty
+ * root while the user's real data sits in a different folder (dev sandbox vs
+ * project folder vs packaged exe folder vs AppData).
+ *
+ * Never switches roots automatically — it only REPORTS, so the dev sandbox
+ * isolation guarantee is preserved.
+ */
+export function findAlternateVaultRoots(currentRoot: string): AlternateRootInfo[] {
+  const norm = (p: string) => {
+    try {
+      return path.resolve(p);
+    } catch {
+      return p;
+    }
+  };
+  const current = norm(currentRoot);
+  const candidates: (string | null | undefined)[] = [
+    process.cwd(),
+    path.join(process.cwd(), ".desktop-sandbox"),
+    process.env.INDEXARC_DIST_DIR ? path.dirname(path.resolve(process.env.INDEXARC_DIST_DIR)) : null,
+    loadPersistedRoot(),
+    path.join(process.env.APPDATA || os.homedir(), "IndexArc"),
+    path.join(os.homedir(), ".IndexArc"),
+  ];
+  const seen = new Set<string>([current.toLowerCase()]);
+  const out: AlternateRootInfo[] = [];
+  for (const c of candidates) {
+    if (!c) continue;
+    let r: string;
+    try {
+      r = norm(c);
+    } catch {
+      continue;
+    }
+    const key = r.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      if (!fs.existsSync(path.join(r, "data"))) continue;
+    } catch {
+      continue;
+    }
+    const v = countEntriesLenient(r);
+    const tabs = countScratchTabsLenient(r);
+    if (!v.exists && tabs === null) continue;
+    out.push({
+      root: r,
+      vaultExists: v.exists,
+      vaultEntries: v.entries,
+      vaultEncrypted: v.encrypted,
+      scratchpadTabs: tabs,
+    });
+    if (out.length >= 5) break;
+  }
+  return out;
+}

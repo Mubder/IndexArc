@@ -38,6 +38,8 @@ export interface SystemStatus {
   is_ollama_online: boolean;
   ollama_models: string[];
   is_gemini_configured: boolean;
+  is_locked?: boolean;
+  encryption_enabled?: boolean;
   stats: {
     total_saved: number;
     needs_attention: number;
@@ -45,7 +47,64 @@ export interface SystemStatus {
     total_notes: number;
     total_secrets: number;
     total_unknown: number;
+    total?: number;
   };
+}
+
+export interface HealthCheckRow {
+  id: string;
+  label: string;
+  severity: "critical" | "info";
+  ok: boolean;
+  detail: string;
+}
+
+export interface AlternateRootInfo {
+  root: string;
+  vaultExists: boolean;
+  vaultEntries: number | null;
+  vaultEncrypted: boolean;
+  scratchpadTabs: number | null;
+}
+
+export interface HealthReport {
+  ok: boolean;
+  now?: string;
+  overall: "healthy" | "degraded" | "attention";
+  error?: string;
+  server?: {
+    portable_root: string;
+    data_dir: string;
+    config_dir: string;
+    node_env: string;
+  };
+  vault?: {
+    path: string;
+    exists: boolean;
+    size: number | null;
+    encrypted: boolean;
+    locked: boolean;
+    total: number | null;
+    saved: number | null;
+    needs_attention: number | null;
+    error: string | null;
+  };
+  scratchpad?: {
+    path: string;
+    exists: boolean;
+    size: number | null;
+    tabs: number | null;
+    archived: number | null;
+  };
+  vectors?: { path: string; exists: boolean; size: number | null };
+  settings?: { path: string; exists: boolean };
+  storage?: { writable: boolean; dir: string };
+  integrity?: { warnings: string[] };
+  backups?: { count: number; dir: string };
+  emergency?: { count: number };
+  ollama?: { online: boolean; models: string[] };
+  alternates?: AlternateRootInfo[];
+  checks?: HealthCheckRow[];
 }
 
 export interface Settings {
@@ -77,6 +136,8 @@ export interface Settings {
   font_size_ar: number;
   enable_live_spellcheck?: boolean;
   enable_ai_proofreader?: boolean;
+  ai_cloud_consent?: boolean;
+  languagetool_enabled?: boolean;
   auto_lock_minutes?: number;
   lock_on_minimize?: boolean;
   // Write-only key fields: GET /api/settings never returns key material — it

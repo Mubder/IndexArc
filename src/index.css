@@ -370,9 +370,27 @@ body {
   background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
   animation: scanMove 6s ease-in-out infinite;
   pointer-events: none; opacity: 0.3;
+  /* Transform-only animation: runs as a GPU-composited layer with zero
+     layout/paint cost. The previous `top: 0 → 100%` keyframes relaid out and
+     repainted the entire viewport every frame — constant GPU load that
+     produced audible coil whine and UI jank whenever the window was visible
+     (Electron throttles hidden windows, so the noise appeared exactly on
+     bringing the app back to the foreground). */
+  will-change: transform;
 }
 [data-theme="light"] .scanline { opacity: 0.15; }
-@keyframes scanMove { 0% { top: 0; opacity: 0; } 10% { opacity: 0.3; } 90% { opacity: 0.3; } 100% { top: 100%; opacity: 0; } }
+@keyframes scanMove {
+  0%   { transform: translate3d(0, 0, 0); opacity: 0; }
+  10%  { opacity: 0.3; }
+  90%  { opacity: 0.3; }
+  100% { transform: translate3d(0, 100vh, 0); opacity: 0; }
+}
+
+/* Decorative animations respect the OS motion preference — accessibility,
+   and one less source of continuous GPU work. */
+@media (prefers-reduced-motion: reduce) {
+  .scanline, .skeleton, .toast, .duplicate-alert { animation: none !important; }
+}
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 10px; height: 10px; }

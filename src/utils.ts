@@ -35,3 +35,47 @@ export function isArabicText(text?: string): boolean {
   if (!text) return false;
   return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(text);
 }
+
+export interface DuplicateHit {
+  index: number;
+  name: string;
+  match_type: string;
+  existing_name: string;
+}
+
+/**
+ * Ask the server (POST /api/entries/check-duplicate) which of the given
+ * values already exist in the vault. Fail-open: any network/lock error
+ * yields [] so saving keeps its old behavior instead of breaking.
+ */
+export async function findDuplicateHits(
+  items: { value?: string; name?: string }[]
+): Promise<DuplicateHit[]> {
+  const hits: DuplicateHit[] = [];
+  await Promise.all(
+    items.map(async (item, index) => {
+      const value = String(item.value ?? "");
+      if (!value.trim()) return;
+      try {
+        const res = await fetch("/api/entries/check-duplicate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ value, name: item.name ?? "" }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data?.is_duplicate) {
+          hits.push({
+            index,
+            name: String(item.name || "unnamed"),
+            match_type: String(data.match_type || "exact_value"),
+            existing_name: String(data.existing_entry?.name || "?"),
+          });
+        }
+      } catch {
+        /* fail open — duplicates are advisory, never blocking on errors */
+      }
+    })
+  );
+  return hits.sort((a, b) => a.index - b.index);
+}

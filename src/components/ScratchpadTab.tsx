@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEditor, EditorContent } from "@tiptap/react";
+import { DOMParser } from "@tiptap/pm/model";
 import StarterKit from "@tiptap/starter-kit";
 import Highlight from "@tiptap/extension-highlight";
 import TiptapUnderline from "@tiptap/extension-underline";
@@ -61,7 +62,7 @@ import { enqueueScratchpadSave, drainScratchpadSaves, setScratchpadConflictHandl
 import { takeHandoffNote, REOPEN_NOTE_EVENT } from "../noteHandoff";
 import { ensureHtmlParagraphs, htmlToPlainText } from "../lib/noteHtml";
 import { normalizeServerTab } from "../lib/serverTabs";
-import { isArabicText } from "../utils";
+import { isArabicText, findDuplicateHits } from "../utils";
 
 export interface NoteRevision {
   id: string;
@@ -577,6 +578,9 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [ghostCompletion, setGhostCompletion] = useState<string>("");
   const [caretPos, setCaretPos] = useState<{ top: number; left: number } | null>(null);
   const [pastePlain, setPastePlain] = useState(true);
+  // Read inside ProseMirror's handlePaste (bound once at editor creation).
+  const pastePlainRef = useRef(true);
+  pastePlainRef.current = pastePlain;
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [rephraseUndo, setRephraseUndo] = useState<Record<string, string[]>>({});
@@ -776,6 +780,31 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       attributes: {
         class: "note-editor prose max-w-none",
         spellcheck: "false",
+      },
+      // Plain-text paste MUST be intercepted here, at the ProseMirror level.
+      // The React onPaste on the wrapper div runs at bubble phase — AFTER
+      // ProseMirror's own target-phase paste handler has already inserted the
+      // clipboard slice. preventDefault() there could no longer stop it, so
+      // the manual insertContent() ran on top and every paste appeared TWICE.
+      // Returning true here tells ProseMirror the event is fully handled.
+      handlePaste: (view, event) => {
+        if (!pastePlainRef.current) return false;
+        event.preventDefault();
+        try {
+          const text = event.clipboardData?.getData("text/plain") ?? "";
+          if (!text) return true;
+          const esc = (s: string) =>
+            s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          const div = document.createElement("div");
+          div.innerHTML = text
+            .replace(/\r\n/g, "\n")
+            .split("\n")
+            .map((l) => `<p>${l ? esc(l) : ""}</p>`)
+            .join("");
+          const slice = DOMParser.fromSchema(view.state.schema).parseSlice(div);
+          view.dispatch(view.state.tr.replaceSelection(slice));
+        } catch {}
+        return true;
       },
     },
     onUpdate: ({ editor }) => {
@@ -1791,6 +1820,33 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setRenameValue(cur?.title || "");
   };
 
+  // Two-click force-save for duplicates: the first save attempt only warns
+  // (remembering the items' signature); an immediate second attempt with the
+  // same items proceeds. Re-save on purpose without needing a modal.
+  const dupAckRef = useRef<string | null>(null);
+  const checkDupAck = async (items: { value?: string; name?: string }[]): Promise<boolean> => {
+    const sig = JSON.stringify(items.map((i) => String(i.value ?? "")));
+    let hits: Awaited<ReturnType<typeof findDuplicateHits>> = [];
+    try {
+      hits = await findDuplicateHits(items);
+    } catch {
+      return true;
+    }
+    if (!hits.length) return true;
+    if (dupAckRef.current === sig) {
+      dupAckRef.current = null;
+      return true;
+    }
+    dupAckRef.current = sig;
+    const names = hits
+      .map((h) => `"${h.existing_name}"`)
+      .slice(0, 3)
+      .join(", ");
+    const more = hits.length > 3 ? ` +${hits.length - 3}` : "";
+    setStatus(`Already in vault: ${names}${more} — click Save again to save anyway / موجود مسبقاً في الخزنة`);
+    return false;
+  };
+
   const handleSaveNote = async () => {
     const plainText = htmlToPlainText(active?.content || "").trim();
     if (!plainText) return;
@@ -1806,6 +1862,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         notes: plainText,
       },
     ];
+    // Duplicate screen: warn on first attempt, save on repeat (two-click force).
+    if (!(await checkDupAck(items))) return;
     setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], save: true } }));
     setStatus(t("scratchpad_saving"));
     try {
@@ -1860,6 +1918,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               source_file: "scratchpad",
             },
           ];
+    // Duplicate screen: warn on first attempt, save on repeat (two-click force).
+    if (!(await checkDupAck(items))) return;
     setBusy((prev) => ({ ...prev, [activeId]: { ...prev[activeId], save: true } }));
     setStatus(t("scratchpad_saving"));
     try {
@@ -2393,17 +2453,9 @@ className="scratchpad-tab group cursor-pointer"
                 onKeyDown={onKeyDown}
                 onPaste={(e) => {
                   pasteFlag.current[activeId] = true;
-                  if (pastePlain) {
-                    // Plain-text paste: strip rich HTML from the clipboard.
-                    e.preventDefault();
-                    const text = e.clipboardData.getData("text/plain");
-                    if (text && !tiptap.isDestroyed) {
-                      const paras = text.replace(/\r\n/g, "\n").split("\n")
-                        .map((l) => `<p>${l ? l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : ""}</p>`)
-                        .join("");
-                      try { tiptap.commands.insertContent(paras); } catch {}
-                    }
-                  }
+                  // Insertion itself is handled by ProseMirror (see
+                  // editorProps.handlePaste for plain-text mode) — this only
+                  // triggers AI detection after the paste lands.
                   setTimeout(() => { try { analyze(activeId, safeGetHTML(tiptap)); } catch {} }, 80);
                 }}
                 className="relative w-full"

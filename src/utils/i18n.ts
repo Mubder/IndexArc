@@ -247,6 +247,20 @@ export interface TranslationDict {
   sec_setup_subtitle: string;
   sec_setup_btn: string;
   sec_remove_btn: string;
+  sec_first_setup_title: string;
+  sec_first_setup_subtitle: string;
+  sec_first_setup_hint: string;
+  sec_confirm_label: string;
+  sec_first_setup_btn: string;
+  sec_error_mismatch: string;
+  sec_encrypt_banner_title: string;
+  sec_encrypt_banner_text: string;
+  sec_encrypt_banner_btn: string;
+  egress_title: string;
+  egress_cloud_label: string;
+  egress_cloud_desc: string;
+  egress_lt_label: string;
+  egress_lt_desc: string;
   sec_error_incorrect: string;
   sec_error_length: string;
   sec_status_enabled: string;
@@ -354,6 +368,20 @@ export interface TranslationDict {
   setup_installer_note: string;
   setup_dismiss: string;
   setup_pull_done: string;
+
+  health_title: string;
+  health_subtitle: string;
+  health_open_btn: string;
+  health_refresh_btn: string;
+  health_copy_btn: string;
+  health_copied: string;
+  health_healthy: string;
+  health_degraded: string;
+  health_attention: string;
+  health_data_label: string;
+  health_vault_label: string;
+  health_go_emergency: string;
+  health_banner_action: string;
 }
 
 export const translations: Record<UiLanguage, TranslationDict> = {
@@ -602,6 +630,20 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     sec_setup_subtitle: "Set a master password to encrypt your vault on disk with AES-256-GCM.",
     sec_setup_btn: "Enable Encryption",
     sec_remove_btn: "Disable Encryption",
+    sec_first_setup_title: "Create Your Master Password",
+    sec_first_setup_subtitle: "IndexArc encrypts everything at rest by default. This password is the only key to your vault — it never leaves this device and cannot be recovered if lost.",
+    sec_first_setup_hint: "Minimum 8 characters; a passphrase of four or more words is ideal.",
+    sec_confirm_label: "Confirm Password",
+    sec_first_setup_btn: "Create Encrypted Vault",
+    sec_error_mismatch: "Passwords do not match",
+    sec_encrypt_banner_title: "Your vault is not encrypted",
+    sec_encrypt_banner_text: "Entries and notes are currently stored as plain JSON. Enable encryption in Settings → Security.",
+    sec_encrypt_banner_btn: "Encrypt Now",
+    egress_title: "Data Egress Control",
+    egress_cloud_label: "Allow cloud AI providers",
+    egress_cloud_desc: "OFF by default. When ON, cloud providers (Gemini/OpenAI/Groq/OpenRouter/Anthropic) receive vault-derived text for search and answers — secret values are never included, only names/types/labels.",
+    egress_lt_label: "Allow public LanguageTool API",
+    egress_lt_desc: "OFF by default. When ON, note words are sent to languagetool.org for proofreading when the local engine is unavailable.",
     sec_error_incorrect: "Incorrect master password",
     sec_error_length: "Password must be at least 8 characters",
     sec_status_enabled: "Encrypted (AES-256-GCM)",
@@ -709,6 +751,20 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     setup_installer_note: "Installer: installs to your PC, data stored in AppData.",
     setup_dismiss: "Dismiss",
     setup_pull_done: "Model pulled — local AI is ready",
+
+    health_title: "App health",
+    health_subtitle: "Server, data folder, vault, notes, backups & AI — one check.",
+    health_open_btn: "Check app health",
+    health_refresh_btn: "Re-check",
+    health_copy_btn: "Copy diagnostics",
+    health_copied: "Diagnostics copied",
+    health_healthy: "Healthy",
+    health_degraded: "Degraded",
+    health_attention: "Needs attention",
+    health_data_label: "Data folder",
+    health_vault_label: "Vault data",
+    health_go_emergency: "Open Emergency Plan (Settings)",
+    health_banner_action: "Check health",
   },
   ar: {
     tab_home: "الرئيسية",
@@ -955,6 +1011,20 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     sec_setup_subtitle: "قم بتعيين كلمة مرور رئيسية لتشفير خزنتك على القرص باستخدام AES-256-GCM.",
     sec_setup_btn: "تفعيل التشفير",
     sec_remove_btn: "إلغاء التشفير",
+    sec_first_setup_title: "أنشئ كلمة المرور الرئيسية",
+    sec_first_setup_subtitle: "يقوم IndexArc بتشفير كل شيء افتراضيًا. كلمة المرور هذه هي المفتاح الوحيد لخزنتك — لا تخرج من هذا الجهاز ولا يمكن استعادتها إذا فُقدت.",
+    sec_first_setup_hint: "8 أحرف على الأقل؛ وعبارة من أربع كلمات أو أكثر هي الخيار الأفضل.",
+    sec_confirm_label: "تأكيد كلمة المرور",
+    sec_first_setup_btn: "إنشاء خزنة مشفرة",
+    sec_error_mismatch: "كلمتا المرور غير متطابقتين",
+    sec_encrypt_banner_title: "خزنتك غير مشفرة",
+    sec_encrypt_banner_text: "المدخلات والملاحظات محفوظة حاليًا كملفات JSON نصية. فعّل التشفير من الإعدادات ← الأمان.",
+    sec_encrypt_banner_btn: "شفّر الآن",
+    egress_title: "التحكم في خروج البيانات",
+    egress_cloud_label: "السماح بمزودي الذكاء الاصطناعي السحابيين",
+    egress_cloud_desc: "معطّل افتراضيًا. عند التفعيل، تستقبل المزودات السحابية (Gemini/OpenAI/Groq/OpenRouter/Anthropic) نصوصًا مشتقة من الخزنة للبحث والإجابات — دون تضمين قيم الأسرار مطلقًا، فقط الأسماء والأنواع والوسوم.",
+    egress_lt_label: "السماح بواجهة LanguageTool العامة",
+    egress_lt_desc: "معطّل افتراضيًا. عند التفعيل، تُرسل كلمات الملاحظات إلى languagetool.org للتدقيق اللغوي عند عدم توفر المحرك المحلي.",
     sec_error_incorrect: "كلمة المرور الرئيسية غير صحيحة",
     sec_error_length: "يجب أن تكون كلمة المرور 8 أحرف على الأقل",
     sec_status_enabled: "مشفرة (AES-256-GCM)",
@@ -1062,6 +1132,20 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     setup_installer_note: "المثبّت: يثبّت على جهازك، والبيانات في AppData.",
     setup_dismiss: "تجاهل",
     setup_pull_done: "تم تنزيل النموذج — الذكاء المحلي جاهز",
+
+    health_title: "صحة التطبيق",
+    health_subtitle: "الخادم ومجلد البيانات والخزنة والملاحظات والنسخ والذكاء — فحص واحد.",
+    health_open_btn: "فحص صحة التطبيق",
+    health_refresh_btn: "إعادة الفحص",
+    health_copy_btn: "نسخ التشخيص",
+    health_copied: "تم نسخ التشخيص",
+    health_healthy: "سليم",
+    health_degraded: "متدهور",
+    health_attention: "يحتاج اهتماماً",
+    health_data_label: "مجلد البيانات",
+    health_vault_label: "بيانات الخزنة",
+    health_go_emergency: "فتح خطة الطوارئ (الإعدادات)",
+    health_banner_action: "فحص الصحة",
   },
 };
 
