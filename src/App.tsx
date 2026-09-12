@@ -901,7 +901,15 @@ return (
           <span className="font-semibold">{t("sec_encrypt_banner_title")}</span>
           <span className="opacity-80 hidden sm:inline">{t("sec_encrypt_banner_text")}</span>
           <button
-            onClick={() => setTab("settings")}
+            onClick={() => {
+              setTab("settings");
+              // Jump STRAIGHT to the Security & Encryption card — the button
+              // previously only switched tabs, leaving users to find the
+              // master-password UI (or mistake the egress toggles for it).
+              requestAnimationFrame(() => {
+                document.getElementById("security-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              });
+            }}
             className="ml-auto shrink-0 font-semibold px-3 py-1 rounded-lg border cursor-pointer"
             style={{ borderColor: "rgba(251, 191, 36, 0.35)", background: "transparent", color: "var(--amber)" }}
           >

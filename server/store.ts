@@ -1453,6 +1453,13 @@ export class VaultStore {
   // ==========================================================================
 
   private emergencyDirs(): string[] {
+    // Tests redirect the machine-level fan-out via INDEXARC_EMERGENCY_DIR —
+    // without this, test-created snapshots land in the REAL %APPDATA% and
+    // their pruning evicts the user's genuine snapshot history (this exact
+    // accident destroyed pre-existing snapshots once; never again).
+    if (process.env.INDEXARC_EMERGENCY_DIR) {
+      return [path.join(this.paths.backupsDir, "emergency"), process.env.INDEXARC_EMERGENCY_DIR];
+    }
     const dirs = [
       path.join(this.paths.backupsDir, "emergency"),
       path.join(process.env.APPDATA || os.homedir(), "IndexArc", "emergency"),

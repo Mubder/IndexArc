@@ -870,7 +870,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         </p>
       </div>
 
-      <div className="space-y-4 rounded-xl p-5 mt-4" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+      <div id="security-section" className="space-y-4 rounded-xl p-5 mt-4 scroll-mt-4" style={{ background: "var(--bg-surface)", border: vaultStatus?.encryption_enabled ? "1px solid var(--border)" : "1px solid rgba(251, 191, 36, 0.35)" }}>
         <h3 className="text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5 pb-2" style={{ color: "var(--accent-bright)", borderBottom: "1px solid var(--border)" }}>
           <Shield className="w-4 h-4" /> {t("sec_title")}
         </h3>
@@ -878,10 +878,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         <div className="flex items-center justify-between text-xs">
           <span style={{ color: "var(--text-dim)" }}>Vault Encryption Status:</span>
           <span
-            className="px-2 py-0.5 rounded text-[10px]"
+            className="px-2 py-0.5 rounded text-[10px] font-semibold"
             style={vaultStatus?.encryption_enabled
               ? { color: "var(--emerald)", background: "var(--emerald-bg)", border: "1px solid rgba(52, 211, 153, 0.2)" }
-              : { color: "var(--text-muted)", background: "var(--bg-input)", border: "1px solid var(--border)" }
+              : { color: "var(--amber)", background: "var(--amber-bg)", border: "1px solid rgba(251, 191, 36, 0.35)" }
             }
           >
             {vaultStatus?.encryption_enabled ? t("sec_status_enabled") : t("sec_status_disabled")}
