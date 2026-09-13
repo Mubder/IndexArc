@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { copyTextToClipboard } from "../lib/clipboard";
 import {
   X,
   Edit3,
@@ -64,7 +65,7 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
   const readingTime = Math.max(1, Math.ceil(wordCount / 200));
 
   const handleCopy = (text: string, typeLabel: string) => {
-    navigator.clipboard?.writeText(text);
+    void copyTextToClipboard(text);
     setCopiedType(typeLabel);
     setTimeout(() => setCopiedType(null), 2000);
   };

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { copyTextToClipboard } from "./lib/clipboard";
 import {
   Layers,
   Search,
@@ -1540,7 +1541,7 @@ return (
             setTab("library");
             setLibraryQuery(entry.name);
           } else {
-            navigator.clipboard?.writeText(entry.value);
+            void copyTextToClipboard(entry.value);
             showToast(`Copied ${entry.name}`, "success");
           }
         }}

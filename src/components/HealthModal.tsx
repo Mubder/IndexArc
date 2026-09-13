@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { CheckCircle2, XCircle, AlertTriangle, Copy, RefreshCw, X, HardDrive, Database } from "lucide-react";
 import { HealthReport, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
@@ -65,7 +66,7 @@ export const HealthModal: React.FC<HealthModalProps> = ({
 
   const copyDiagnostics = async () => {
     try {
-      await navigator.clipboard?.writeText(JSON.stringify(report ?? { error }, null, 2));
+      await copyTextToClipboard(JSON.stringify(report ?? { error }, null, 2));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {

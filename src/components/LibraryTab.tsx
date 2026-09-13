@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { HelpCircle, KeyRound, LayoutGrid, List, RefreshCw, Search, StickyNote, Terminal, Inbox, Copy, AlertTriangle, Eye, EyeOff, Maximize2, Check, Edit3, Trash2 } from "lucide-react";
 import { LibraryFilter, VaultEntry, Settings } from "../types";
 import { EntryCard } from "./EntryCard";
@@ -435,10 +436,9 @@ const LibraryTableRow: React.FC<{
   const isCmd = entry.family === "command";
   const noteBody = entry.notes && entry.notes.trim() ? entry.notes : entry.value;
 
-  const handleCopy = (e: React.MouseEvent) => {
+  const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard?.writeText(isNote ? noteBody : entry.value);
-    setCopied(true);
+    setCopied(await copyTextToClipboard(isNote ? noteBody : entry.value));
     setTimeout(() => setCopied(false), 1500);
   };
 

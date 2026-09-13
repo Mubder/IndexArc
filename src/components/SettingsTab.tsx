@@ -1,4 +1,5 @@
 import React from "react";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { Server, Sparkles, Shield, Lock, Unlock, LifeBuoy, Save, RotateCcw, HardDriveDownload, Terminal } from "lucide-react";
 import { Settings, SystemStatus } from "../types";
 import { getTranslation } from "../utils/i18n";
@@ -1085,7 +1086,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             disabled={!logs.length}
             onClick={() => {
               const text = logs.map((l) => `${l.time}\t${l.type}\t${l.message}`).join("\n");
-              navigator.clipboard?.writeText(text);
+              void copyTextToClipboard(text);
             }}
             className="px-2.5 py-1 rounded-lg text-[10px] font-medium disabled:opacity-40"
             style={{ background: "transparent", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}

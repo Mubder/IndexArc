@@ -6,6 +6,7 @@ interface ElectronAPI {
   startOllama: () => Promise<boolean>;
   openExternal: (url: string) => Promise<boolean>;
   getApiToken: () => Promise<string | null>;
+  copyText: (text: string) => Promise<boolean>;
   spellcheckWords: (words: string[]) => Promise<string[]>;
 }
 

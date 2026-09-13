@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { createPortal } from "react-dom";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { DOMParser } from "@tiptap/pm/model";
@@ -2038,7 +2039,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
    const handleCopy = async () => {
      try {
-       await navigator.clipboard.writeText(htmlToPlainText(active?.content || ""));
+       await copyTextToClipboard(htmlToPlainText(active?.content || ""));
        setCopied(true);
        setTimeout(() => setCopied(false), 1500);
      } catch {}
@@ -3133,7 +3134,7 @@ className="scratchpad-tab group cursor-pointer"
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard.writeText(htmlToPlainText(previewArchivedTab.content || ""));
+                    void copyTextToClipboard(htmlToPlainText(previewArchivedTab.content || ""));
                     setStatus("Copied to clipboard");
                   }}
                   className="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-zinc-300 transition-colors flex items-center gap-1.5"

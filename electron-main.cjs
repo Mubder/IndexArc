@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, MenuItem, dialog, ipcMain, Tray, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, Menu, MenuItem, dialog, ipcMain, Tray, nativeImage, shell, clipboard } = require("electron");
 const { fork, spawn } = require("child_process");
 const path = require("path");
 const http = require("http");
@@ -525,6 +525,20 @@ ipcMain.handle("open-external", async (_e, url) => {
 // presents it as the X-IndexArc-Token header on every /api call — a plain
 // web page can never obtain it, which is what blocks rebinding/CSRF.
 ipcMain.handle("get-api-token", () => process.env.INDEXARC_API_TOKEN || null);
+
+// Copy via the OS clipboard in the MAIN process. navigator.clipboard in a
+// packaged Electron window rejects silently on focus changes (the click
+// itself can unfocus the document), which made every Copy button lie about
+// succeeding. The text is never logged.
+ipcMain.handle("copy-text", (_e, text) => {
+  if (typeof text !== "string" || text.length === 0 || text.length > 1024 * 1024) return false;
+  try {
+    clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+});
 
 // Check a batch of words (English and/or Arabic, mixed-language notes are
 // the whole point) and return the ones that are misspelled.

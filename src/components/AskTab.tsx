@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { Sparkles, Wand2, Copy, Check, RotateCcw } from "lucide-react";
 import { VaultEntry, Settings, RewriteStyle } from "../types";
 import { EntryCard } from "./EntryCard";
@@ -73,7 +74,7 @@ export const AskTab: React.FC<AskTabProps> = ({
 
   const copyRewrite = () => {
     if (rewriteResult) {
-      navigator.clipboard?.writeText(rewriteResult).catch(() => {});
+      void copyTextToClipboard(rewriteResult);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }
@@ -278,7 +279,7 @@ export const AskTab: React.FC<AskTabProps> = ({
               </div>
               <div className="flex gap-2 pt-2">
                 <button
-                  onClick={() => { navigator.clipboard?.writeText(rewriteResult); }}
+                  onClick={() => { void copyTextToClipboard(rewriteResult); }}
                   className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all border"
                   style={{ borderColor: "var(--border)", color: "var(--text-dim)", background: "transparent" }}
                 >

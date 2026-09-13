@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { Trash2, Edit3, Copy, Check, Maximize2, FileText, KeyRound, Terminal, Compass, Eye, EyeOff } from "lucide-react";
 import { VaultEntry, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
@@ -42,10 +43,11 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const charCount = noteBody.length;
   const wordCount = noteBody.trim().split(/\s+/).filter(Boolean).length;
 
-  const handleCopy = (e: React.MouseEvent) => {
+  const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard?.writeText(isNote ? noteBody : entry.value);
-    setCopied(true);
+    // copied reflects REAL success — a silent clipboard failure must not
+    // show a checkmark (this button used to lie in packaged builds).
+    setCopied(await copyTextToClipboard(isNote ? noteBody : entry.value));
     setTimeout(() => setCopied(false), 1500);
   };
 
