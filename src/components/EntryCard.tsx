@@ -209,13 +209,12 @@ export const EntryCard: React.FC<EntryCardProps> = ({
           </div>
         ) : (
           <div
-            className={`text-[11px] truncate max-w-md ${isArVal ? "font-arabic ar-text" : ""}`}
+            className={`text-[11px] whitespace-pre-wrap break-all select-text ${isArVal ? "font-arabic ar-text" : ""}`}
             dir={isArVal ? "rtl" : "auto"}
             lang={isArVal ? "ar" : undefined}
             style={{ color: isSecret ? "var(--amber)" : isCmd ? "var(--cyan)" : "var(--emerald)", fontFamily: isArVal ? "var(--font-arabic)" : "var(--font-mono)" }}
           >
-            {entry.value.slice(0, 80)}
-            {entry.value.length > 80 ? "…" : ""}
+            {entry.value}
           </div>
         )}
       </div>

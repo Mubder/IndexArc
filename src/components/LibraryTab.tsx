@@ -261,7 +261,7 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
                     }}
                   />
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-mono text-rose-400 break-all">{d.entry.value.slice(0, 80)}{d.entry.value.length > 80 ? "…" : ""}</div>
+                    <div className="text-xs font-mono text-rose-400 break-all select-text">{d.entry.value}</div>
                     <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>
                       Duplicate of: <strong>{d.match.name}</strong> ({d.match.id.slice(0, 8)})
                     </div>
@@ -493,8 +493,11 @@ const LibraryTableRow: React.FC<{
             ••••••••••••••••••••••••
           </div>
         ) : (
-          <div className="text-xs font-mono truncate max-w-md" style={{ color: isSecret ? "var(--amber)" : isCmd ? "var(--cyan)" : "var(--emerald)" }}>
-            {entry.value.slice(0, 80)}
+          <div
+            className="text-xs font-mono whitespace-pre-wrap break-all select-text"
+            style={{ color: isSecret ? "var(--amber)" : isCmd ? "var(--cyan)" : "var(--emerald)" }}
+          >
+            {entry.value}
           </div>
         )}
       </td>
