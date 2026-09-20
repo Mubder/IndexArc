@@ -676,6 +676,12 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const serverLoaded = useRef(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<Record<string, string>>({});
+  // Last html the EDITOR itself held for each tab (written by onUpdate and by
+  // every explicit setContent). The tabs-sync effect compares against this to
+  // decide whether incoming state content is an EXTERNAL write that must be
+  // applied, or the editor's own output echoed back — re-applying the editor's
+  // own html replaces the whole doc and yanks the caret to the end.
+  const editorHtmlRef = useRef<Record<string, string>>({});
   const activeIdRef = useRef<string>(activeId);
   activeIdRef.current = activeId;
   const editorRef = useRef<HTMLDivElement>(null);
@@ -792,7 +798,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         if (!pastePlainRef.current) return false;
         event.preventDefault();
         try {
-          const text = event.clipboardData?.getData("text/plain") ?? "";
+          // Clipboards very often carry a trailing newline (copied links,
+          // rows, chat lines). Keeping it appended an empty <p> after every
+          // paste and left the caret parked on that blank line.
+          const text = (event.clipboardData?.getData("text/plain") ?? "").replace(/[\r\n]+$/, "");
           if (!text) return true;
           const esc = (s: string) =>
             s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -812,6 +821,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       const html = safeGetHTML(editor);
       const id = activeIdRef.current;
       contentRef.current[id] = html;
+      editorHtmlRef.current[id] = html;
 
       const plainText = html.replace(/<[^>]+>/g, "").trim();
       const prevNonEmpty = lastNonEmptyContentRef.current[id] || "";
@@ -844,14 +854,27 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           return prev.map((x) => (x.id === id ? { ...x, content: html } : x));
         });
       }, 280);
-      const d = document.createElement("div");
-      d.innerHTML = html.replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n</$1>");
-      const t2 = d.textContent || d.innerText || "";
-      const plain = t2.replace(/[\u00A0\u1680\u180E\u2000-\u200B\u202F\u205F\u3000]/g, " ");
-      if (plain.trim() && !titleTouched.current[id]) {
-        const firstLine = plain.split("\n").map((l) => l.trim()).find(Boolean) || "";
-        const auto = firstLine.slice(0, 40) || "Scratch";
-        setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, title: auto } : x)));
+      // Auto-title from the first non-empty line. Read it straight off the
+      // ProseMirror doc (the old detached-div innerHTML parse re-parsed the
+      // WHOLE note on every keystroke) and — critically — return `prev`
+      // unchanged when the title already matches: an unconditional new
+      // object here turned setEditable's re-emitted "update" into an
+      // infinite setTabs → effect → setEditable → update render loop.
+      if (!titleTouched.current[id]) {
+        let firstBlock = "";
+        editor.state.doc.forEach((node) => {
+          if (firstBlock) return;
+          const t = node.textContent;
+          if (t.trim()) firstBlock = t;
+        });
+        if (firstBlock) {
+          const auto = firstBlock.trim().slice(0, 40) || "Scratch";
+          setTabs((prev) => {
+            const cur = prev.find((x) => x.id === id);
+            if (cur && cur.title === auto) return prev;
+            return prev.map((x) => (x.id === id ? { ...x, title: auto } : x));
+          });
+        }
       }
       // Slash palette trigger — show when line ends with "/"
       try {
@@ -867,7 +890,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     if (!tiptap || tiptap.isDestroyed) return;
     const rawContent = contentRef.current[activeId] ?? tabs.find((x) => x.id === activeId)?.content ?? "";
     const html = ensureHtmlParagraphs(rawContent);
-    const current = safeGetHTML(tiptap);
     const isTabSwitch = lastActiveTabId.current !== activeId;
 
     if (isTabSwitch) {
@@ -876,12 +898,22 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       // Note: clearHistory() was removed — TipTap v3 UndoRedo extension no longer exposes it,
       // and the custom history stack (historyRef) already handles per-tab undo scoping.
       tiptap.commands.setContent(html || "<p></p>", { emitUpdate: false });
+      contentRef.current[activeId] = html;
+      editorHtmlRef.current[activeId] = html;
       if (html && html !== "<p></p>") {
         lastNonEmptyContentRef.current[activeId] = html;
         recordSnapshot(activeId, html, "Opened snapshot");
       }
-    } else if (current !== html && html !== "<p></p>") {
-      tiptap.commands.setContent(html || "<p></p>");
+    } else if (html !== "<p></p>" && rawContent !== editorHtmlRef.current[activeId]) {
+      // EXTERNAL write only (conflict resolution, handoff, first server sync):
+      // state holds content the editor never produced. The editor's own html
+      // echoed back through tabs must NEVER be re-applied — setContent
+      // replaces the whole document and throws the caret to the end of the
+      // note (the "cursor always jumps to the last line" bug). emitUpdate
+      // stays false so this can't re-fire onUpdate and feed back into tabs.
+      tiptap.commands.setContent(html || "<p></p>", { emitUpdate: false });
+      contentRef.current[activeId] = html;
+      editorHtmlRef.current[activeId] = html;
       lastNonEmptyContentRef.current[activeId] = html;
     }
     // BIDI sync
@@ -985,6 +1017,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     (rawContent: string) => {
       const html = ensureHtmlParagraphs(rawContent);
       contentRef.current[activeIdRef.current] = html;
+      editorHtmlRef.current[activeIdRef.current] = html;
       setTabs((prev) =>
         prev.map((x) => (x.id === activeIdRef.current ? { ...x, content: html } : x))
       );
@@ -1018,34 +1051,41 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       // These are declared later in the component; call through refs to avoid
       // stale closures without creating a TDZ crash in the deps array.
       (onScroll as any)._up?.();
-      (onScroll as any)._rec?.();
+      // The spell-rect walk segments every text node and measures a Range per
+      // misspelling — expensive on large link-heavy notes (URL tokens read as
+      // misspelled words). Trailing-throttle instead of per-scroll-frame.
+      if ((onScroll as any)._t) return;
+      (onScroll as any)._t = window.setTimeout(() => {
+        (onScroll as any)._t = null;
+        (onScroll as any)._rec?.();
+      }, 120);
     };
     (onScroll as any)._up = updateScrollAffordancesRef.current;
     (onScroll as any)._rec = recomputeSpellRectsRef.current;
     dom.addEventListener("scroll", onScroll);
-    return () => dom.removeEventListener("scroll", onScroll);
+    return () => {
+      if ((onScroll as any)._t) window.clearTimeout((onScroll as any)._t);
+      dom.removeEventListener("scroll", onScroll);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tiptap]);
 
-  // Seed the editor DOM imperatively on mount and on every tab switch (the
-  // editor has key={activeId}, so it remounts). After this, React NEVER
-  // re-applies innerHTML while editing — the editor is uncontrolled, which
+  // Seed the editor content imperatively on every tab switch (the TipTap
+  // setContent in the tabs-sync effect above). After this, React NEVER
+  // re-applies content while editing — the editor is uncontrolled, which
   // is what keeps the selection and undo stack intact.
   // Protected notes are read-only at the editor level (server still enforces).
   useEffect(() => {
     if (!tiptap || tiptap.isDestroyed) return;
     try {
-      tiptap.setEditable(!protectedIdsRef.current.has(activeId));
+      // setEditable() re-emits "update" even when the flag didn't change
+      // (TipTap v3), so calling it on every tabs change fed an infinite
+      // setEditable → onUpdate → setTabs → setEditable render loop that
+      // pegged the CPU on large notes. Only touch it on an actual change.
+      const want = !protectedIdsRef.current.has(activeId);
+      if (tiptap.isEditable !== want) tiptap.setEditable(want, false);
     } catch {}
   }, [tiptap, activeId, tabs]);
-
-  useLayoutEffect(() => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const html = contentRef.current[activeId] ?? active?.content ?? "";
-    editor.innerHTML = html;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId]);
 
   const checkWords = useCallback(async (words: string[]): Promise<string[]> => {
     if (settings?.enable_live_spellcheck === false) return [];
@@ -1447,9 +1487,15 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
 
 
+  // Analyze runs the WHOLE note through the detection pipeline (LLM-backed
+  // server-side). Pasting several items in quick succession used to fire one
+  // full-note request per paste — collapse bursts: while a request for a tab
+  // is in flight, remember only the latest content and analyze that once.
+  const analyzePendingRef = useRef<Record<string, string | null>>({});
   const analyze = useCallback(async (id: string, content: string) => {
     const text = content.trim();
     if (!text) {
+      analyzePendingRef.current[id] = null;
       setDetections((d) => {
         const n = { ...d };
         delete n[id];
@@ -1457,6 +1503,11 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       });
       return;
     }
+    if (analyzePendingRef.current[id]) {
+      analyzePendingRef.current[id] = content;
+      return;
+    }
+    analyzePendingRef.current[id] = content;
     setBusy((prev) => ({ ...prev, [id]: { ...prev[id], analyze: true } }));
     try {
       const res = await fetch("/api/analyze", {
@@ -1474,6 +1525,11 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       /* ignore analysis errors */
     } finally {
       setBusy((prev) => ({ ...prev, [id]: { ...prev[id], analyze: false } }));
+      const queued = analyzePendingRef.current[id];
+      analyzePendingRef.current[id] = null;
+      if (typeof queued === "string" && queued.trim() && queued !== content) {
+        analyze(id, queued);
+      }
     }
   }, []);
 
@@ -2088,12 +2144,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     [updateScrollAffordances, recomputeSpellRects]
   );
 
-  const onEditorScroll = useCallback(() => {
-    updateScrollAffordances();
-    // Underlines are viewport-relative to the editor box — must refresh on scroll.
-    recomputeSpellRects();
-  }, [updateScrollAffordances, recomputeSpellRects]);
-
   // Re-measure scroll affordances + spell rects after content/tab/layout change.
   useLayoutEffect(() => {
     updateScrollAffordances();
@@ -2113,8 +2163,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   // Effective dir attribute for the editor + overlay.
   const noteDir: "auto" | "ltr" | "rtl" = bidiMode === "auto" ? "auto" : bidiMode;
-  const detectedDir = detectBaseDir(htmlToPlainText(active?.content || ""));
   const activePlainText = useMemo(() => htmlToPlainText(active?.content || ""), [active?.content]);
+  // htmlToPlainText sanitizes + DOM-parses the whole note — memoize it and the
+  // direction scan instead of re-running both on every render.
+  const detectedDir = useMemo(() => detectBaseDir(activePlainText), [activePlainText]);
   const activeCharCount = activePlainText.length;
   const activeWordCount = useMemo(() => activePlainText.trim().split(/\s+/).filter(Boolean).length, [activePlainText]);
   const activeReadingTime = Math.max(1, Math.ceil(activeWordCount / 200));
