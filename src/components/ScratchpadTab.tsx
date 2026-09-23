@@ -3,6 +3,7 @@ import { copyTextToClipboard } from "../lib/clipboard";
 import { createPortal } from "react-dom";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { DOMParser } from "@tiptap/pm/model";
+import { TextSelection } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
 import Highlight from "@tiptap/extension-highlight";
 import TiptapUnderline from "@tiptap/extension-underline";
@@ -672,7 +673,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const shellRef = useRef<HTMLDivElement>(null);
   const scratchRootRef = useRef<HTMLDivElement>(null);
   const titleTouched = useRef<Record<string, boolean>>({});
-  const pasteFlag = useRef<Record<string, boolean>>({});
   const serverLoaded = useRef(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<Record<string, string>>({});
@@ -694,7 +694,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const misspelledRef = useRef(misspelledWords);
   misspelledRef.current = misspelledWords;
   const autocompleteTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const debouncedTabsSync = useRef<number | null>(null);
 
   const recordSnapshot = useCallback(
     async (tabId: string, content: string, reason?: string) => {
@@ -1352,18 +1351,35 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       return;
     }
     const { range } = contextMenu;
-    range.deleteContents();
-    const textNode = document.createTextNode(replacement);
-    range.insertNode(textNode);
-    range.setStartAfter(textNode);
-    range.setEndAfter(textNode);
-    const sel = window.getSelection();
-    if (sel) {
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }
     setContextMenu(null);
-    onEditorInput();
+    // Apply through a ProseMirror transaction. The old code did raw Range
+    // surgery (deleteContents + insertNode) directly on the editor DOM;
+    // ProseMirror's DOM observer then re-read the split text nodes as a
+    // plain insertion and duplicated the replacement plus the node's tail
+    // ("I want a rotation botrotation bot"). posAtDOM maps the captured
+    // word range to doc positions and insertText replaces them in one step.
+    const view = tiptap && !tiptap.isDestroyed ? tiptap.view : null;
+    if (!view || !range.startContainer || !view.dom.contains(range.startContainer)) return;
+    try {
+      view.focus();
+      const from = view.posAtDOM(range.startContainer, range.startOffset);
+      const to = view.posAtDOM(range.endContainer, range.endOffset);
+      // insertText only MAPS the existing selection through the step — with the
+      // caret resting elsewhere (e.g. end of the note) it stayed there and the
+      // caret visibly jumped a few lines down. Place it right after the fix.
+      const tr = view.state.tr.insertText(replacement, from, to);
+      tr.setSelection(TextSelection.create(tr.doc, from + replacement.length));
+      tr.scrollIntoView();
+      view.dispatch(tr);
+      // PM's onUpdate (fired by dispatch) already synced content/tabs/saves.
+      // Do NOT call the legacy onEditorInput here: it stores raw innerHTML,
+      // where every empty paragraph carries a <br class="ProseMirror-
+      // trailingBreak">. That diverges from getHTML() and makes the tabs-sync
+      // effect treat the editor's own output as an EXTERNAL write — the
+      // setContent() re-parse then injects a hard break into each empty
+      // paragraph (blank lines multiply) and throws the caret to the end.
+      triggerAutocomplete(tiptap.getText());
+    } catch {}
   };
 
   const handleAddToDictionary = async (word: string) => {
@@ -1593,41 +1609,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setClearedAlert(null);
     setStatus("Note content restored!");
   }, [clearedAlert, setStatus, tiptap]);
-  const onEditorInput = useCallback(() => {
-    if (ghostCompletion) {
-      setGhostCompletion("");
-      setCaretPos(null);
-    }
-    const editor = editorRef.current;
-    if (!editor) return;
-    const html = editor.innerHTML;
-    const id = activeIdRef.current;
-    contentRef.current[id] = html;
-    if (pasteFlag.current[id]) {
-      pasteFlag.current[id] = false;
-      analyze(id, html);
-    }
-    const plainText = htmlToPlainText(html);
-    if (plainText.trim() && !titleTouched.current[id]) {
-      const firstLine = plainText.split("\n").map((l) => l.trim()).find(Boolean) || "";
-      const auto = firstLine.slice(0, 40) || (active?.title || "Scratch");
-      setTabs((prev) => {
-        const cur = prev.find((x) => x.id === id);
-        if (cur && cur.title === auto) return prev;
-        return prev.map((x) => (x.id === id ? { ...x, title: auto } : x));
-      });
-    }
-    triggerAutocomplete(plainText);
-    // Debounce React state sync — keeps typing at 60fps, contentRef is source of truth
-    if (debouncedTabsSync.current) window.clearTimeout(debouncedTabsSync.current);
-    debouncedTabsSync.current = window.setTimeout(() => {
-      setTabs((prev) => {
-        const cur = prev.find((x) => x.id === id);
-        if (cur && cur.content === html) return prev;
-        return prev.map((x) => (x.id === id ? { ...x, content: html } : x));
-      });
-    }, 320);
-  }, [active?.title, analyze, ghostCompletion, triggerAutocomplete, htmlToPlainText]);
 
   // Intercept Tab / ArrowRight to accept inline ghost text auto-complete,
   // and Ctrl/Cmd+Z/Y for undo/redo history.
@@ -1635,23 +1616,19 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if ((e.key === "Tab" || e.key === "ArrowRight") && ghostCompletion && enablePredictions) {
         e.preventDefault();
-        const editor = editorRef.current;
-        if (editor) {
-          const textNode = document.createTextNode(" " + ghostCompletion);
-          const sel = window.getSelection();
-          if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
-            const range = sel.getRangeAt(0);
-            range.insertNode(textNode);
-            range.setStartAfter(textNode);
-            range.setEndAfter(textNode);
-            sel.removeAllRanges();
-            sel.addRange(range);
-          } else {
-            editor.appendChild(textNode);
-          }
+        // Insert as a ProseMirror text transaction — raw DOM insertNode on the
+        // editor fights the DOM observer and can duplicate text. No legacy
+        // onEditorInput afterwards: raw innerHTML into contentRef diverges
+        // from getHTML() on empty paragraphs and triggers a destructive
+        // setContent() re-parse (see handleApplySuggestion).
+        const view = tiptap && !tiptap.isDestroyed ? tiptap.view : null;
+        if (view) {
+          try {
+            view.dispatch(view.state.tr.insertText(" " + ghostCompletion));
+            triggerAutocomplete(tiptap.getText());
+          } catch {}
           setGhostCompletion("");
           setCaretPos(null);
-          onEditorInput();
         }
         return;
       }
@@ -1672,7 +1649,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         historyRedo();
       }
     },
-    [ghostCompletion, historyUndo, historyRedo, onEditorInput]
+    [ghostCompletion, enablePredictions, tiptap, historyUndo, historyRedo]
   );
 
   const nextTitle = useCallback((prev: ScratchTab[]) => {
@@ -2504,8 +2481,7 @@ className="scratchpad-tab group cursor-pointer"
               <div
                 onContextMenu={onContextMenu}
                 onKeyDown={onKeyDown}
-                onPaste={(e) => {
-                  pasteFlag.current[activeId] = true;
+                onPaste={() => {
                   // Insertion itself is handled by ProseMirror (see
                   // editorProps.handlePaste for plain-text mode) — this only
                   // triggers AI detection after the paste lands.
@@ -2583,22 +2559,16 @@ className="scratchpad-tab group cursor-pointer"
                 <button
                   type="button"
                   onClick={() => {
-                    const editor = editorRef.current;
-                    if (editor) {
-                      const textNode = document.createTextNode(" " + ghostCompletion);
-                      const sel = window.getSelection();
-                      if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
-                        const range = sel.getRangeAt(0);
-                        range.insertNode(textNode);
-                        range.setStartAfter(textNode);
-                        range.setEndAfter(textNode);
-                        sel.removeAllRanges();
-                        sel.addRange(range);
-                      } else {
-                        editor.appendChild(textNode);
-                      }
+                    // ProseMirror transaction, not raw DOM insertNode — see
+                    // handleApplySuggestion for why that duplicates text and
+                    // why the legacy onEditorInput must not run afterwards.
+                    const view = tiptap && !tiptap.isDestroyed ? tiptap.view : null;
+                    if (view) {
+                      try {
+                        view.dispatch(view.state.tr.insertText(" " + ghostCompletion));
+                        triggerAutocomplete(tiptap.getText());
+                      } catch {}
                       setGhostCompletion("");
-                      onEditorInput();
                     }
                   }}
                   className="ml-1 px-2 py-0.5 rounded font-mono text-[10px] font-bold hover:brightness-125 transition-all cursor-pointer"
