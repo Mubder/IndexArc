@@ -14,11 +14,15 @@ backups/
 .env
 .env.*
 
-# OS / editor / agent
+# OS / editor / agent (per-developer tooling — not project code)
 .DS_Store
 Thumbs.db
 *.log
 *.tgz
 .vs/
 .zcode/
+.zcodeignore
 /.zed
+/.agents/
+/.commandcode/
+skills-lock.json
