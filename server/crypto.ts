@@ -71,6 +71,52 @@ export function kdfNeedsUpgrade(kdf: KdfParams): boolean {
   );
 }
 
+// ── Enforced parameter bounds (RESIDUAL-3) ─────────────────────────────────
+// kdfFromEnvelope parses whatever the file says (required to READ legacy
+// envelopes), but deriveKeyAsync REFUSES anything outside these bounds: a
+// tampered envelope must not silently downgrade derivation to a fast KDF,
+// and absurd values must not hang the process for minutes or OOM it.
+// Floors are set at (or below) every parameter this app ever WROTE, so all
+// legitimate legacy vaults still derive; ceilings are pure DoS guards.
+export const KDF_BOUNDS = {
+  argon2id: {
+    minMemoryKiB: 16_384, // ≥ 16 MiB
+    minIterations: 2,
+    minParallelism: 1,
+    maxMemoryKiB: 524_288, // ≤ 512 MiB
+    maxIterations: 64,
+    maxParallelism: 16,
+  },
+  pbkdf2: {
+    minIterations: 100_000, // the legacy (pre-2.1) strength — the floor
+    maxIterations: 10_000_000,
+    digest: "sha256" as const,
+  },
+};
+
+/** Minimum salt length accepted for derivation (all writers used 16B+). */
+export const MIN_SALT_BYTES = 16;
+
+export function kdfWithinBounds(kdf: KdfParams): boolean {
+  if (kdf.algo === "argon2id") {
+    const b = KDF_BOUNDS.argon2id;
+    return (
+      kdf.memorySize >= b.minMemoryKiB &&
+      kdf.iterations >= b.minIterations &&
+      kdf.parallelism >= b.minParallelism &&
+      kdf.memorySize <= b.maxMemoryKiB &&
+      kdf.iterations <= b.maxIterations &&
+      kdf.parallelism <= b.maxParallelism
+    );
+  }
+  const b = KDF_BOUNDS.pbkdf2;
+  return (
+    kdf.iterations >= b.minIterations &&
+    kdf.iterations <= b.maxIterations &&
+    kdf.digest === b.digest
+  );
+}
+
 /**
  * Derives the 256-bit AES key from the master password and salt using the
  * envelope's KDF. Argon2id runs in WASM and is async-only by design — all
@@ -83,6 +129,14 @@ export async function deriveKeyAsync(
 ): Promise<Buffer> {
   const salt = Buffer.from(saltHex, "hex");
   if (salt.length === 0) throw new Error("empty salt");
+  // Fail closed on weakened envelopes (RESIDUAL-3): a 1-byte salt or an
+  // envelope-controlled iteration count of 1 used to derive happily.
+  if (salt.length < MIN_SALT_BYTES) {
+    throw new Error(`salt too short (${salt.length}B < ${MIN_SALT_BYTES}B) — refusing weakened envelope`);
+  }
+  if (!kdfWithinBounds(kdf)) {
+    throw new Error("KDF parameters outside enforced bounds — refusing weakened envelope");
+  }
   if (kdf.algo === "argon2id") {
     const hash = await argon2id({
       password,

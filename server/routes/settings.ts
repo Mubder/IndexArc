@@ -112,6 +112,34 @@ export function settingsRoutes(ctx: RouteContext) {
         return res.status(400).json({ error: `${k} must be a valid http(s) URL` });
       }
     }
+    // Typed/enum validation for the remaining fields (AUD brief): a bogus
+    // value here used to persist and break every client on next load.
+    if (patch.ui_language !== undefined && !["en", "ar"].includes(patch.ui_language as string)) {
+      return res.status(400).json({ error: "ui_language must be 'en' or 'ar'" });
+    }
+    for (const k of ["font_size_en", "font_size_ar"] as const) {
+      const v = patch[k];
+      if (v !== undefined) {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 8 || n > 32) {
+          return res.status(400).json({ error: `${k} must be a number between 8 and 32` });
+        }
+        patch[k] = Math.round(n);
+      }
+    }
+    const PROVIDER_OVERRIDES = ["local", "api", "auto", "openai", "groq", "openrouter", "anthropic", "local_openai", "heuristic", ""];
+    for (const k of ["llm_provider_override", "embed_provider_override"] as const) {
+      const v = patch[k];
+      if (v !== undefined && !PROVIDER_OVERRIDES.includes(String(v))) {
+        return res.status(400).json({ error: `${k} must be a known provider or ""` });
+      }
+    }
+    for (const k of ["ai_provider", "ollama_llm_model", "ollama_embed_model", "gemini_llm_model", "gemini_embed_model", "openai_llm_model", "groq_llm_model", "openrouter_llm_model", "anthropic_llm_model", "local_openai_llm_model", "local_openai_embed_model"] as const) {
+      const v = patch[k];
+      if (v !== undefined && typeof v !== "string") {
+        patch[k] = String(v);
+      }
+    }
     const next = store.saveSettings(patch as Partial<ReturnType<typeof store.getSettings>>);
     // Keep the LanguageTool egress gate in sync with the setting (the shared
     // engine reads the env var, both in this process and in Electron main).
@@ -121,7 +149,11 @@ export function settingsRoutes(ctx: RouteContext) {
       audit?.log("settings.egress_consent", next.ai_cloud_consent ? "granted" : "revoked");
     }
     audit?.log("settings.update", `fields=${Object.keys(patch).join(",")}`);
-    addLog("SETTINGS", `Updated AI provider mode: ${next.ai_provider}`);
+    // Log the provider mode ONLY when the patch actually changed it — an
+    // unconditional line made every font-size save read as a provider switch.
+    if (patch.ai_provider !== undefined) {
+      addLog("SETTINGS", `Updated AI provider mode: ${next.ai_provider}`);
+    }
     sendSSE("settings-changed", { ai_provider: next.ai_provider });
     res.json(maskSettings(next));
   });

@@ -1,0 +1,25 @@
+# Never send vault data, secrets, or build artifacts into the Docker build
+# context — `COPY . .` in the builder stage would otherwise bake the real
+# vault (data/), API keys (.env*), logs, backups, node_modules and desktop
+# build trees into image layers (audit AUD-018).
+.git
+.github
+.zcode
+.zed
+.desktop-sandbox
+.env
+.env.*
+*.log
+data/
+config/
+logs/
+tmp/
+backups/
+dist/
+dist-desktop/
+dist-desktop2/
+dist-desktop-release/
+node_modules/
+cspell-dict-ar-1.1.7.tgz
+newlogo*.png
+dictionaries/ar_trie/cspell-dict-ar-1.1.7.tgz

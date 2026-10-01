@@ -9,7 +9,10 @@ export function asString(v: unknown, fallback = ""): string {
 }
 
 export function asStringArray(v: unknown): string[] {
-  if (Array.isArray(v)) return v.map((x) => asString(x)).filter((x) => x.length > 0);
+  // Both paths trim: `[" admin ", ""]` used to keep padded entries while the
+  // scalar path produced "admin" — near-duplicate labels defeated exact-match
+  // dedupe depending on input shape.
+  if (Array.isArray(v)) return v.map((x) => asString(x).trim()).filter((x) => x.length > 0);
   if (typeof v === "string" && v.trim()) return [v.trim()];
   return [];
 }

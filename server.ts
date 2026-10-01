@@ -51,7 +51,27 @@ const watchers = new FolderWatcherManager(store, () => store.getSettings());
 const app = express();
 
 // --- Security Headers ---
+// CSP header mirrors the <meta http-equiv="Content-Security-Policy"> in
+// index.html EXACTLY (both apply — the stricter intersection wins; keeping
+// them identical avoids drift) and adds frame-ancestors, which a meta tag
+// cannot express. SSE uses same-origin http (EventSource), so connect-src
+// needs no ws:.
+const CSP_DIRECTIVES = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'", // React inline style attributes
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "frame-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+app.disable("x-powered-by");
 app.use((_req, res, next) => {
+  res.setHeader("Content-Security-Policy", CSP_DIRECTIVES);
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("X-XSS-Protection", "1; mode=block");
@@ -74,7 +94,7 @@ app.get("/favicon.ico", (_req, res) => {
 });
 
 // Shared context for all route modules
-const ctx: RouteContext = { store, watchers, paths, spellcheck: createSpellcheckEngines(), audit };
+const ctx: RouteContext = { store, watchers, paths, spellcheck: createSpellcheckEngines(paths), audit };
 
 // --- Vault routes (lock/unlock/setup — no auth required) ---
 app.use("/api/vault", vaultRoutes(ctx));
@@ -84,6 +104,20 @@ const protectedPaths = ["/api/entries", "/api/analyze", "/api/folders", "/api/as
 for (const p of protectedPaths) {
   app.use(p, checkVaultUnlocked(ctx));
 }
+
+// GATING MATRIX (documented by design — audited):
+//   • EVERY /api route (incl. /api/vault) requires the pairing token
+//     (apiAuthMiddleware) except /api/ping, opt-in /api/auth/bootstrap, and
+//     /api/events with a one-time ticket.
+//   • The paths above ADDITIONALLY require the vault to be unlocked.
+//   • Deliberately token-gated but reachable while LOCKED (needed by the
+//     pre-unlock UI, and safe by construction):
+//       /api/status, /api/settings (GET returns *_configured booleans only —
+//       keys are masked; POST is sticky-write-only), /api/logs (entries are
+//       redacted by policy — ids, never values), /api/health (read-only
+//       diagnostics), /api/backups + /api/emergency* (metadata only; restore
+//       re-locks), /api/audit (hash-chained, ids only), spellcheck routes.
+//     A token holder while locked learns vault METADATA, never secret values.
 
 // --- Analyze (Paste & Analyze — standalone) ---
 app.post("/api/analyze", async (req, res) => {
@@ -98,7 +132,7 @@ app.post("/api/analyze", async (req, res) => {
     sendSSE("entries-changed", { action: "analyze" });
     res.json(result);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -288,12 +322,17 @@ async function startServer() {
   });
 
   // JSON error handler: Express 4 rejections wrapped with wrapAsync land here.
-  // Returns JSON (never an HTML stack trace with absolute paths).
+  // Returns JSON (never an HTML stack trace with absolute paths). Internal
+  // errors get a GENERIC message — detail (which can embed absolute paths and
+  // library internals) goes to the server log only.
   app.use(
     (err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
       const status = Number(err?.status || err?.statusCode) || 500;
-      if (status >= 500) addLog("ERROR", `${req.method} ${req.path} → ${err?.message || err}`);
-      res.status(status).json({ error: err?.message || "Internal server error" });
+      if (status >= 500) {
+        addLog("ERROR", `${req.method} ${req.path} → ${err?.message || err}`);
+        return res.status(500).json({ error: "Internal server error" });
+      }
+      res.status(status).json({ error: err?.message || "Request failed" });
     }
   );
 

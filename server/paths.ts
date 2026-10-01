@@ -107,20 +107,22 @@ export interface AlternateRootInfo {
   root: string;
   vaultExists: boolean;
   vaultEntries: number | null;
-  vaultEncrypted: boolean;
+  vaultEncrypted: boolean | null; // null = unreadable/corrupt (unknown)
   scratchpadTabs: number | null;
 }
 
-function countEntriesLenient(root: string): { entries: number | null; encrypted: boolean; exists: boolean } {
+function countEntriesLenient(root: string): { entries: number | null; encrypted: boolean | null; exists: boolean } {
   try {
     const f = path.join(root, "data", "vault.json");
-    if (!fs.existsSync(f) || fs.statSync(f).size === 0) return { entries: null, encrypted: false, exists: false };
+    if (!fs.existsSync(f) || fs.statSync(f).size === 0) return { entries: null, encrypted: null, exists: false };
     const raw = JSON.parse(fs.readFileSync(f, "utf-8"));
     if (raw && raw.encrypted) return { entries: null, encrypted: true, exists: true };
     const entries = Array.isArray(raw?.entries) ? raw.entries.length : 0;
     return { entries, encrypted: false, exists: true };
   } catch {
-    return { entries: null, encrypted: false, exists: true };
+    // Unreadable/corrupt: encrypted state is UNKNOWN (null), not "plaintext" —
+    // health advice used to tell users a corrupt file was a plaintext vault.
+    return { entries: null, encrypted: null, exists: true };
   }
 }
 

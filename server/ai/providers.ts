@@ -20,6 +20,24 @@ function safeBaseUrl(url: string | undefined, label: string): string | null {
   return raw.replace(/\/$/, "");
 }
 
+/**
+ * Validated Ollama base URL. Falls back to the loopback default when unset
+ * or malformed — every ollama_base_url use must go through this (a raw
+ * string used to produce confusing fetch errors, and an attacker-edited
+ * non-loopback URL silently became an egress endpoint).
+ * Note: consent for a non-loopback URL is still governed by isLocalProvider
+ * + cloudEgressAllowed at each call site.
+ */
+function ollamaBase(settings: { ollama_base_url?: string }, label: string): string {
+  const raw = String(settings.ollama_base_url || "").trim();
+  if (!raw) return "http://127.0.0.1:11434";
+  if (!isHttpUrl(raw)) {
+    addLog("AI", `${label}: invalid ollama_base_url "${raw.slice(0, 60)}" — using loopback default`);
+    return "http://127.0.0.1:11434";
+  }
+  return raw.replace(/\/$/, "");
+}
+
 // ── Egress consent & locality (audit H2) ──────────────────────────────────
 // A vault must never leak secret-derived text off the machine by default.
 // Cloud providers (Gemini/OpenAI/Groq/OpenRouter/Anthropic, or a "local"
@@ -63,7 +81,7 @@ export async function checkOllama(baseUrl: string, force = false): Promise<{ onl
   if (!force && lastOllamaCheck && (now - lastOllamaCheckTime < 10000)) {
     return lastOllamaCheck;
   }
-  const cleanBase = baseUrl ? baseUrl.replace(/\/$/, "") : "http://127.0.0.1:11434";
+  const cleanBase = ollamaBase({ ollama_base_url: baseUrl }, "checkOllama");
   const candidates = [cleanBase];
   if (cleanBase.includes("localhost")) candidates.push(cleanBase.replace("localhost", "127.0.0.1"));
   else if (cleanBase.includes("127.0.0.1")) candidates.push(cleanBase.replace("127.0.0.1", "localhost"));
@@ -158,7 +176,7 @@ async function ollamaGenerate(
   prompt: string,
   system: string
 ): Promise<string | null> {
-  const base = settings.ollama_base_url.replace(/\/$/, "");
+  const base = ollamaBase(settings, "ollama");
   const model = settings.ollama_llm_model;
   // Cold load of 7B can exceed 20s — give the model time, then keep it resident
   const timeoutMs = 180_000;
@@ -210,7 +228,7 @@ async function ollamaGenerate(
 
 /** Load LLM into memory so analyze isn't embed-only */
 export async function warmOllamaLlm(settings: AppSettings): Promise<boolean> {
-  const base = settings.ollama_base_url.replace(/\/$/, "");
+  const base = ollamaBase(settings, "ollama");
   try {
     addLog("OLLAMA", `Warming LLM ${settings.ollama_llm_model}…`);
     const res = await fetch(`${base}/api/generate`, {
@@ -240,7 +258,7 @@ export async function warmOllamaLlm(settings: AppSettings): Promise<boolean> {
 
 /** Load the embed model into memory so scan/analyze doesn't pull it on demand */
 export async function warmOllamaEmbed(settings: AppSettings): Promise<boolean> {
-  const base = settings.ollama_base_url.replace(/\/$/, "");
+  const base = ollamaBase(settings, "ollama");
   try {
     addLog("OLLAMA", `Warming embed model ${settings.ollama_embed_model}…`);
     const res = await fetch(`${base}/api/embed`, {
@@ -281,7 +299,7 @@ export async function ollamaEmbed(
   settings: AppSettings,
   text: string
 ): Promise<number[] | null> {
-  const base = settings.ollama_base_url.replace(/\/$/, "");
+  const base = ollamaBase(settings, "ollama");
   const cleaned = text.slice(0, 8000).trim();
   if (!cleaned) return null;
 
@@ -483,6 +501,9 @@ export async function embedText(
   const active = providerOverride || settings.embed_provider_override || (await resolveActiveProvider(settings));
   // Egress gate: cloud embeddings of vault-derived text need explicit consent.
   if (!cloudEgressAllowed(settings, active, "embeddings")) return null;
+  // The gate above checked `active`; the fallbacks below can reach DIFFERENT
+  // providers (e.g. a "heuristic" override with a Gemini key configured), so
+  // each fallback re-checks consent instead of silently egressing.
   if (active === "local") return ollamaEmbed(settings, text);
   if (active === "api") return geminiEmbed(settings, text);
   if (active === "openai") {
@@ -505,10 +526,14 @@ export async function embedText(
       text
     );
   }
-  // Fallbacks
-  if (settings.gemini_api_key) return geminiEmbed(settings, text);
-  const o = await checkOllama(settings.ollama_base_url);
-  if (o.online) return ollamaEmbed(settings, text);
+  // Fallbacks (consent re-checked per provider — see gate comment above).
+  if (settings.gemini_api_key && cloudEgressAllowed(settings, "api", "embeddings fallback")) {
+    return geminiEmbed(settings, text);
+  }
+  if (cloudEgressAllowed(settings, "local", "embeddings fallback")) {
+    const o = await checkOllama(settings.ollama_base_url);
+    if (o.online) return ollamaEmbed(settings, text);
+  }
   return null;
 }
 
@@ -697,6 +722,13 @@ export async function analyzePaste(
     return { candidates: heuristic, provider_used: "heuristic" };
   }
 
+  // Egress gate: the paste is RAW secret material — the single most sensitive
+  // text in the app. Cloud classification is blocked until ai_cloud_consent
+  // is explicitly ON; loopback providers (Ollama/LM Studio) always pass.
+  if (!cloudEgressAllowed(settings, active, "paste analysis")) {
+    return { candidates: heuristic, provider_used: "heuristic" };
+  }
+
   const userPrompt = `Paste to analyze:\n"""\n${paste.slice(0, 12000)}\n"""\nReturn JSON candidates only.`;
 
   try {
@@ -794,17 +826,19 @@ export async function analyzePaste(
       usedLabel = "anthropic+heuristic";
     } else if (active === "local_openai") {
       addLog("ANALYZE", `Local OpenAI compatible classify via ${settings.local_openai_llm_model}`);
-      const baseUrl = settings.local_openai_base_url.replace(/\/$/, "");
-      text = await fetchOpenAiCompatible(
-        `${baseUrl}/chat/completions`,
-        settings.local_openai_api_key,
-        settings.local_openai_llm_model,
-        userPrompt,
-        ANALYZE_SYSTEM,
-        {},
-        true
-      );
-      usedLabel = "local_openai+heuristic";
+      const baseUrl = safeBaseUrl(settings.local_openai_base_url, "local_openai analyze");
+      if (baseUrl) {
+        text = await fetchOpenAiCompatible(
+          `${baseUrl}/chat/completions`,
+          settings.local_openai_api_key,
+          settings.local_openai_llm_model,
+          userPrompt,
+          ANALYZE_SYSTEM,
+          {},
+          true
+        );
+        usedLabel = "local_openai+heuristic";
+      }
     }
 
     if (text) {
@@ -889,7 +923,7 @@ export async function pullOllamaModel(
   onProgress?: (msg: string) => void
 ): Promise<boolean> {
   try {
-    const res = await fetch(`${settings.ollama_base_url.replace(/\/$/, "")}/api/pull`, {
+    const res = await fetch(`${ollamaBase(settings, "ollama pull")}/api/pull`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: modelName }),
@@ -1008,7 +1042,7 @@ async function ollamaGenerateText(
   prompt: string,
   system: string
 ): Promise<string | null> {
-  const base = settings.ollama_base_url.replace(/\/$/, "");
+  const base = ollamaBase(settings, "ollama");
   const model = settings.ollama_llm_model;
   // Long documents need generous context and output budget. Scale with input:
   // rough token estimate (~4 chars/token) plus headroom for the rewritten text.
@@ -1170,13 +1204,19 @@ export async function autoComplete(
     return null;
   }
 
+  // Egress gate: the prefix is live note content — frequently the beginning
+  // of a secret being typed. Un-consented cloud autocomplete is blocked.
+  if (!cloudEgressAllowed(settings, active, "autocomplete")) {
+    return null;
+  }
+
   const prompt = `${AUTO_COMPLETION_SYSTEM}\n\nUser Text:\n${text}`;
 
   try {
     let raw: string | null = null;
 
     if (active === "local") {
-      const base = settings.ollama_base_url.replace(/\/$/, "");
+      const base = safeBaseUrl(settings.ollama_base_url, "ollama autocomplete") || "http://127.0.0.1:11434";
       const res = await fetch(`${base}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

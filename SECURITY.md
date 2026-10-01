@@ -79,6 +79,63 @@ addLog("API", `Sending request with key: ${apiKey}`); // NEVER DO THIS
 
 ---
 
+## 3b. Cloud Egress Gates (enforced in code)
+
+Every path that sends vault-derived text to an AI provider passes through
+`cloudEgressAllowed()` in `server/ai/providers.ts`:
+
+- **Loopback providers (Ollama / LM Studio on 127.0.0.1)** are always allowed — data stays on the machine.
+- **Cloud providers** (Gemini/OpenAI/Groq/OpenRouter/Anthropic, or a "local" provider pointed at a non-loopback host) are **blocked until the user explicitly enables `ai_cloud_consent` in Settings → AI**.
+
+Gated paths (regression-tested in `server/ai/providers.test.ts`): paste/note
+classification (`analyzePaste`), embeddings (`embedText` incl. its cloud
+fallbacks), text generation (`generateText`), and live-note autocomplete
+(`autoComplete`). With consent OFF, all of them degrade to heuristics/local
+without a single cloud request.
+
+**Encryption grace period (ransom recoverability).** When a master password
+is set, every pre-existing plaintext backup/snapshot/rollback copy is MOVED
+(not deleted) to `backups/plaintext-grace/`, and deleted only after the vault
+is next successfully unlocked **≥24h after** encryption. A hostile or fumbled
+one-call encryption therefore cannot destroy its own recovery path: the
+staged snapshots stay listed in Settings → Emergency Plan (flagged as
+pre-encryption copies) and restore the plaintext vault by name. Honest
+scope: an attacker with *sustained* token access can wait out the window and
+unlock with their own password — but that attacker can already read every
+secret, so lockout adds nothing for them.
+
+Additionally: secret **values** never enter cloud embedding input at all (see
+`indexTextFor` in `server/services/vault.ts` — metadata only), and
+`POST /api/vault/setup-password` requires the interactive ceremony word
+(`confirm_word: "ENCRYPT"`) so a hostile token-holder cannot one-call-encrypt
+the vault under an attacker password.
+
+---
+
+## 3c. Endpoint Gating Matrix
+
+Every `/api` route requires the per-process pairing token (`server/auth.ts`;
+exemptions: `/api/ping`, opt-in `/api/auth/bootstrap`, `/api/events` with a
+one-time ticket). Secret-bearing paths (`/api/entries`, `/api/analyze`,
+`/api/folders`, `/api/ask`, `/api/snippets`, `/api/scratchpad`, `/api/fs`)
+additionally require the vault to be **unlocked**.
+
+Deliberately reachable while locked (needed by the pre-unlock UI; safe by
+construction — a token holder learns vault *metadata*, never secret values):
+`/api/status`, `/api/settings` (GET returns `*_configured` booleans only;
+POST is sticky write-only — an empty key field means "keep stored"),
+`/api/logs` (redaction policy: ids, never values), `/api/health`,
+`/api/backups` + `/api/emergency*` (metadata only; restore re-locks),
+`/api/audit` (hash-chained, ids only), and the spellcheck routes.
+
+Provider API keys may be supplied via environment variables instead of
+`config/settings.json` (recommended for dev — keeps secrets out of a file
+that gets copied into `backups/`): `GEMINI_API_KEY`, `OPENAI_API_KEY`,
+`GROQ_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`,
+`LOCAL_OPENAI_API_KEY`.
+
+---
+
 ## 4. Reporting a Security Vulnerability
 
 If you discover a security vulnerability or security-related bug in IndexArc, please do not open a public issue. Instead, report it privately by contacting the maintainers directly or emailing [b.alfaris@gmail.com](mailto:b.alfaris@gmail.com). We will address all verified vulnerability reports promptly.

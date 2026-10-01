@@ -17,6 +17,16 @@ function statusFromCandidate(c: AnalyzeCandidate): EntryStatus {
   return "saved";
 }
 
+const VALID_FAMILIES: readonly VaultEntry["family"][] = ["secret", "command", "note", "unknown"];
+
+/** Whitelist the family — an arbitrary string here corrupts every consumer
+ *  that switches on the union (Library filters, stats, AI gating). */
+function asFamily(v: unknown, fallback: VaultEntry["family"]): VaultEntry["family"] {
+  return VALID_FAMILIES.includes(v as VaultEntry["family"])
+    ? (v as VaultEntry["family"])
+    : fallback;
+}
+
 /**
  * Text used to build an entry's semantic-search embedding.
  *
@@ -54,6 +64,14 @@ export async function indexEntry(
   const active = await resolveActiveProvider(settings);
   const text = indexTextFor(entry, !isLocalProvider(settings, active));
   const embedding = await embedText(settings, text, active);
+  // A null embedding means "provider unavailable/consent-blocked" — upserting
+  // it would REPLACE a previously working vector, permanently degrading
+  // semantic search for this entry until the next successful save. Skip and
+  // keep the old vector instead.
+  if (!embedding) {
+    addLog("AI_EMBED", `No embedding for entry ${entry.id.slice(0, 8)} — keeping existing vector`);
+    return;
+  }
   store.upsertVector({
     id: `entry_${entry.id}`,
     entry_id: entry.id,
@@ -117,9 +135,12 @@ export async function saveCandidate(
 
   const isSecretLike = family === "secret" || family === "unknown";
   if (isSecretLike) {
-    if (!type && !name) status = "needs_review";
-    else if (!type) status = "needs_type";
-    else if (!name) status = "needs_name";
+    // Single source of status derivation (statusFromCandidate) — the inline
+    // copy here used to drift from it.
+    status = statusFromCandidate({
+      needs_type: !type,
+      needs_name: !name,
+    } as AnalyzeCandidate);
     if (!type) finalFamily = "unknown";
   } else if (family === "command") {
     status = "saved";
@@ -130,7 +151,8 @@ export async function saveCandidate(
   }
 
   if (!input.allow_incomplete && status !== "saved" && isSecretLike) {
-    // still save as incomplete for Unidentified inbox
+    // Incomplete secrets are parked into the Unidentified inbox instead of
+    // being rejected — the user reviews them there (see status above).
   }
 
   // duplicate name warning handled by caller; we allow save
@@ -139,7 +161,7 @@ export async function saveCandidate(
     type: type || "unidentified",
     name: name || "unnamed",
     raw_fragment: asString(input.raw_fragment) || value,
-    paste_id: input.paste_id,
+    paste_id: input.paste_id === undefined ? undefined : asString(input.paste_id),
     labels,
     type_aliases: aliasesIn.length ? aliasesIn : type ? [type] : [],
     status,
@@ -149,7 +171,13 @@ export async function saveCandidate(
   });
 
   if (status === "saved") {
-    await indexEntry(store, settings, entry);
+    // The entry is already durable — an embedding/provider failure must not
+    // turn the save into a client-visible 500 (retries would duplicate it).
+    try {
+      await indexEntry(store, settings, entry);
+    } catch (e: any) {
+      addLog("AI_EMBED", `Indexing failed for entry ${entry.id.slice(0, 8)} (saved, searchable by text): ${e?.message || e}`);
+    }
     // Logs never carry entry names or values — names are frequently the
     // secret's own description ("Prod AWS root key") and masked fragments
     // leak prefix+suffix characters (audit M2). Reference by id only.
@@ -179,8 +207,11 @@ export async function clarifyEntry(
 
   const type = asString(patch.type ?? existing.type).trim();
   const name = asString(patch.name ?? existing.name).trim();
-  let status: EntryStatus = "saved";
-  let family = patch.family ?? existing.family;
+  let status: EntryStatus;
+  // Whitelist the family (AUD-020): a raw body value here flows into every
+  // consumer that switches on the union.
+  let family = asFamily(patch.family ?? existing.family, (existing.family || "unknown") as VaultEntry["family"]);
+  const labels = asStringArray(patch.labels ?? existing.labels);
 
   const isSecretLike = family === "secret" || family === "unknown";
   if (isSecretLike) {
@@ -188,7 +219,9 @@ export async function clarifyEntry(
     else if (!name || name === "unnamed") status = "needs_name";
     else status = "saved";
 
-    if (status === "saved" && (family === "unknown" || !family)) {
+    // A fully-classified "unknown" entry is promoted to secret (original
+    // behavior, preserved).
+    if (status === "saved" && family === "unknown") {
       family = "secret";
     }
   } else {
@@ -203,22 +236,30 @@ export async function clarifyEntry(
   ]);
 
   // Preserve value verbatim — whatever pasted is what is saved (including leading _ , http, special chars)
-  const verbatimValue = patch.value !== undefined ? String(patch.value) : existing.value;
+  const verbatimValue = patch.value !== undefined ? asString(patch.value) : existing.value;
 
   const updated = store.updateEntry(id, {
     value: verbatimValue,
     type: type || existing.type,
     name: name || existing.name,
-    notes: patch.notes ?? existing.notes,
-    labels: patch.labels ?? existing.labels,
+    notes: patch.notes === undefined ? existing.notes : asString(patch.notes),
+    labels,
     type_aliases: [...aliases],
     status,
     family,
   });
 
   if (updated && updated.status === "saved") {
-    await indexEntry(store, settings, updated);
-    addLog("VAULT", `Clarified → saved "${updated.name}" (${updated.type})`);
+    // Same rule as saveCandidate: the update is durable — indexing failures
+    // are logged, not surfaced as a 500 that implies nothing was saved.
+    try {
+      await indexEntry(store, settings, updated);
+    } catch (e: any) {
+      addLog("AI_EMBED", `Indexing failed for entry ${updated.id.slice(0, 8)} after clarify: ${e?.message || e}`);
+    }
+    // Redaction rule (audit M2 / AUD-020): log by id, never by name — names
+    // are frequently the secret's own description.
+    addLog("VAULT", `Clarified entry ${updated.id.slice(0, 8)} (${updated.type})`);
   }
   return updated;
 }

@@ -37,12 +37,21 @@ export function getLastActivity(): number {
 }
 
 // One-time, short-lived tickets for EventSource, which cannot send headers.
+// Expired-but-unconsumed tickets are swept on every issue so the map can't
+// grow without bound (a client that grabs a ticket and never connects used
+// to leak its entry forever).
 const sseTickets = new Map<string, number>();
 const TICKET_TTL_MS = 30_000;
 
 export function issueSseTicket(): string {
+  const now = Date.now();
+  if (sseTickets.size > 64) {
+    for (const [t, exp] of sseTickets) {
+      if (exp <= now) sseTickets.delete(t);
+    }
+  }
   const t = crypto.randomBytes(16).toString("hex");
-  sseTickets.set(t, Date.now() + TICKET_TTL_MS);
+  sseTickets.set(t, now + TICKET_TTL_MS);
   return t;
 }
 
@@ -51,6 +60,15 @@ function consumeSseTicket(t: unknown): boolean {
   const exp = sseTickets.get(t);
   sseTickets.delete(t); // one-time use
   return exp !== undefined && exp > Date.now();
+}
+
+// Constant-time token comparison (RESIDUAL-4): comparing sha256 digests of
+// both sides gives equal-length buffers — timingSafeEqual then leaks neither
+// content nor length of the presented value.
+function tokenMatches(presented: string): boolean {
+  const a = crypto.createHash("sha256").update(presented).digest();
+  const b = crypto.createHash("sha256").update(token).digest();
+  return crypto.timingSafeEqual(a, b);
 }
 
 export function apiAuthMiddleware(req: Request, res: Response, next: NextFunction): void {
@@ -104,7 +122,7 @@ export function apiAuthMiddleware(req: Request, res: Response, next: NextFunctio
   }
 
   // 6) Everything else requires the pairing token.
-  if (req.header("x-indexarc-token") !== token) {
+  if (!tokenMatches(String(req.header("x-indexarc-token") ?? ""))) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

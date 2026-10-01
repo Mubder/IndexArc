@@ -31,6 +31,13 @@ export function vaultRoutes(ctx: RouteContext) {
       return res.status(400).json({ error: "Password is required" });
     }
 
+    if (!store.isEncryptionEnabled()) {
+      // Unencrypted vault: nothing to verify — any password "unlocks" it.
+      // Audit the truth instead of recording a phony verified unlock.
+      audit?.log("vault.unlock", "skipped — vault not encrypted");
+      return res.json({ success: true, encryption_enabled: false });
+    }
+
     const ok = await store.unlock(password);
     if (ok) {
       recordSuccess(req);
@@ -58,13 +65,20 @@ export function vaultRoutes(ctx: RouteContext) {
 
   r.post("/setup-password", async (req, res) => {
     // Setting a master password encrypts the whole vault — a hostile or
-    // accidental call here is a lockout/ransom attack, so it is throttled.
+    // accidental call here is a lockout/ransom attack, so it is throttled AND
+    // requires the interactive ceremony word (same pattern as unprotect's
+    // "UNPROTECT"): a script holding only the pairing token must replicate
+    // the user-confirmed flow, not just POST a password.
     const gate = throttle(req, res, { max: 5 });
     if (!gate) return;
 
-    const { password } = req.body;
+    const { password, confirm_word } = req.body;
     if (!password || String(password).length < 8) {
       return res.status(400).json({ error: "Password must be at least 8 characters long" });
+    }
+    if (String(confirm_word ?? "").trim().toUpperCase() !== "ENCRYPT") {
+      recordFailure(req);
+      return res.status(403).json({ error: "Confirmation failed — type ENCRYPT to encrypt the vault" });
     }
     try {
       await store.setupPassword(password);
