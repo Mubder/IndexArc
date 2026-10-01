@@ -59,11 +59,12 @@ import { CommandPaletteModal } from "./components/CommandPaletteModal";
 import Starfield from "./components/Starfield";
 
 export default function App() {
+  // All valid Tab values (write and read sides must be symmetric — "analyze"
+  // used to be dropped on restore).
+  const TAB_VALUES = ["home", "scratchpad", "analyze", "folders", "library", "ask", "settings"] as const;
   const [tab, setTab] = useState<Tab>(() => {
     const saved = localStorage.getItem("indexarc-tab");
-    return (saved === "home" || saved === "scratchpad" || saved === "folders" || saved === "library" || saved === "ask" || saved === "settings")
-      ? (saved as Tab)
-      : "home";
+    return (TAB_VALUES as readonly string[]).includes(saved || "") ? (saved as Tab) : "home";
   });
   useEffect(() => {
     localStorage.setItem("indexarc-tab", tab);
@@ -236,34 +237,7 @@ export default function App() {
 
   /** Prevent poll/refresh from wiping in-progress Settings form edits */
   const settingsDirtyRef = useRef(false);
-  const patchTimerRef = useRef<any>(null);
-
-  const toggleLanguage = useCallback(() => {
-    setSettings((prev) => {
-      if (!prev) return prev;
-      const current = prev.ui_language || "en";
-      const next = (current === "en" ? "ar" : "en") as "ar" | "en";
-      const updated = { ...prev, ui_language: next };
-      // Persist immediately so the background poll doesn't revert the change
-      settingsDirtyRef.current = true;
-      fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updated),
-      })
-        .then((r) => r.json())
-        .then((saved) => {
-          settingsDirtyRef.current = false;
-          if (saved && typeof saved === "object" && (saved as Settings).ai_provider) {
-            setSettings(saved as Settings);
-          }
-        })
-        .catch(() => {
-          settingsDirtyRef.current = false;
-        });
-      return updated;
-    });
-  }, []);
+  const patchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchVaultStatus = useCallback(async () => {
     try {
@@ -298,6 +272,15 @@ export default function App() {
         setVaultStatus((prev) => prev ? { ...prev, is_locked: true } : null);
         setEntries([]);
         setAttention([]);
+        // Purge secret-bearing working state from renderer memory — pasted
+        // tokens, unsaved candidates and ask results must not survive the
+        // lock in React state (heap-scrape exposure).
+        setPaste("");
+        setCandidates([]);
+        setAskResults([]);
+        setAskAnswer(null);
+        setAskAnswerProvider("");
+        setScanSession(null);
       }
     } catch (e) {
       console.error(e);
@@ -328,7 +311,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       })
-        .then((r) => r.json())
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((saved) => {
           settingsDirtyRef.current = false;
           if (saved && typeof saved === "object" && (saved as Settings).ai_provider) {
@@ -337,34 +320,53 @@ export default function App() {
         })
         .catch(() => {
           settingsDirtyRef.current = false;
+          showToast("Settings change may not have saved / قد لا يكون الحفظ قد تم", "error");
         });
     }, 300);
   }, []);
+
+  // Language toggle routes through patchSettings: pure state update + the
+  // debounced persist path (the old version POSTed inside a setState updater,
+  // which StrictMode double-invokes).
+  const toggleLanguage = useCallback(() => {
+    const current = settings?.ui_language || "en";
+    const next = (current === "en" ? "ar" : "en") as "ar" | "en";
+    patchSettings({ ui_language: next });
+  }, [settings, patchSettings]);
 
   useEffect(() => {
     scanSessionIdRef.current = scanSession?.id ?? null;
   }, [scanSession?.id]);
 
+  // fetchAll sequencing (AUD-008): the 30s poll, SSE events, and post-mutation
+  // calls fire it concurrently; an older, slower response could resolve last
+  // and overwrite fresher state (resurrected deleted entries / stale flash).
+  // A generation counter makes stale responses no-ops.
+  const fetchAllGenRef = useRef(0);
   const fetchAll = useCallback(async () => {
+    const gen = ++fetchAllGenRef.current;
+    const isStale = () => gen !== fetchAllGenRef.current;
     try {
       // First, fetch the vault status
       const vRes = await fetch("/api/vault/status");
       if (vRes.ok) {
         const vStatus = await vRes.json();
-        setVaultStatus(vStatus);
-        
+
         if (vStatus.is_locked) {
           // Locked: Only logs and settings can be fetched
           const [lg, se] = await Promise.all([
             fetch("/api/logs").then((r) => r.json()),
             fetch("/api/settings").then((r) => r.json()),
           ]);
+          if (isStale()) return;
+          setVaultStatus(vStatus);
           setLogs(lg);
           if (!settingsDirtyRef.current) {
             setSettings(se);
           }
           return;
         }
+        if (!isStale()) setVaultStatus(vStatus);
       }
 
       const [st, en, att, lg, se, folders] = await Promise.all([
@@ -375,6 +377,7 @@ export default function App() {
         fetch("/api/settings").then((r) => r.json()).catch(() => null),
         fetch("/api/folders").then((r) => r.json()).catch(() => ({ folders: [] })),
       ]);
+      if (isStale()) return; // a newer fetchAll started — discard this batch
       setStatus(st);
       if (Array.isArray(en)) setEntries(en);
       if (Array.isArray(att)) setAttention(att);
@@ -389,11 +392,11 @@ export default function App() {
       const sid = scanSessionIdRef.current;
       if (sid) {
         const sres = await fetch(`/api/folders/sessions/${sid}`);
-        if (sres.ok) {
+        if (sres.ok && !isStale()) {
           const s = await sres.json();
           if (s.status === "review") setScanSession(s);
         }
-      } else {
+      } else if (!isStale()) {
         const active = await fetch("/api/folders/sessions/active");
         if (active.ok) setScanSession(await active.json());
       }
@@ -581,15 +584,20 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      if (!res.ok || data?.error) {
+        // Server/network failures must not masquerade as "no results".
+        throw new Error(data?.error || "Ask failed");
+      }
       setAskResults(data.results || []);
       setAskAnswer(data.answer || null);
       setAskAnswerProvider(data.provider_used || "");
       setTab("ask");
-    } catch {
+    } catch (e: any) {
       setAskResults([]);
       setAskAnswer(null);
       setAskAnswerProvider("");
+      showToast(e?.message || "Ask failed / فشل البحث", "error");
     } finally {
       setAsking(false);
       fetchAll();
@@ -612,19 +620,49 @@ export default function App() {
       return;
     }
     const value = clarifyValue.trim() || clarify.value;
-    const res = await fetch(`/api/entries/${clarify.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: clarifyType.trim(),
-        name: clarifyName.trim(),
-        value,
-        family: clarifyFamily,
-      }),
-    });
-    if (res.ok) {
-      setClarify(null);
-      fetchAll();
+    try {
+      const res = await fetch(`/api/entries/${clarify.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: clarifyType.trim(),
+          name: clarifyName.trim(),
+          value,
+          family: clarifyFamily,
+        }),
+      });
+      if (res.ok) {
+        setClarify(null);
+        fetchAll();
+      } else {
+        // Surface the refusal — a silent no-op left the modal open with no
+        // explanation (locked vault, validation error, network…).
+        const err = await res.json().catch(() => null);
+        showToast(err?.error || "Save failed / فشل الحفظ", "error");
+      }
+    } catch {
+      showToast("Network error / خطأ في الاتصال", "error");
+    }
+  };
+
+  /** PATCH an entry (NoteDetailModal edit path). Returns success. */
+  const saveEntryUpdate = async (id: string, updates: Partial<VaultEntry>): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/entries/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        fetchAll();
+        return true;
+      }
+      const err = await res.json().catch(() => null);
+      showToast(err?.error || "Save failed / فشل الحفظ", "error");
+      return false;
+    } catch {
+      showToast("Network error / خطأ في الاتصال", "error");
+      return false;
     }
   };
 
@@ -636,10 +674,14 @@ export default function App() {
 
   const deleteEntry = async (id: string) => {
     showConfirm("Delete Entry", "Delete this entry permanently?", async () => {
-      await fetch(`/api/entries/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/entries/${id}`, { method: "DELETE" });
+      if (!res.ok && res.status !== 404) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error || `Delete failed (HTTP ${res.status})`);
+      }
       removeEntriesLocally([id]);
       await fetchAll();
-    }, "Delete").catch((e) => console.error("delete failed:", e?.message || e));
+    }, "Delete").catch((e) => showToast(e?.message || "Delete failed", "error"));
   };
 
   const bulkDeleteEntries = async (ids: string[]) => {
@@ -663,26 +705,36 @@ export default function App() {
 
   const saveSettings = async () => {
     if (!settings) return;
-    const res = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(settings),
-    });
-    const saved = await res.json().catch(() => settings);
-    settingsDirtyRef.current = false;
-    if (saved && typeof saved === "object" && saved.ai_provider) {
-      setSettings(saved as Settings);
-    }
-    // When using local/auto, ensure models exist and warm the LLM into memory
-    if (settings.ai_provider === "local" || settings.ai_provider === "auto") {
-      try {
-        await fetch("/api/ollama/ensure", { method: "POST" });
-      } catch {
-        /* optional */
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
+      if (!res.ok) {
+        // Never claim success on a refused save — the user believes API keys
+        // and model picks persisted when they didn't.
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error || `Save failed (HTTP ${res.status})`);
       }
+      const saved = await res.json().catch(() => settings);
+      settingsDirtyRef.current = false;
+      if (saved && typeof saved === "object" && saved.ai_provider) {
+        setSettings(saved as Settings);
+      }
+      // When using local/auto, ensure models exist and warm the LLM into memory
+      if (settings.ai_provider === "local" || settings.ai_provider === "auto") {
+        try {
+          await fetch("/api/ollama/ensure", { method: "POST" });
+        } catch {
+          /* optional */
+        }
+      }
+      fetchAll();
+      showToast("Settings saved · تم الحفظ", "success");
+    } catch (e: any) {
+      showToast(e?.message || "Settings save failed / فشل حفظ الإعدادات", "error");
     }
-    fetchAll();
-    showToast("Settings saved · تم الحفظ", "success");
   };
 
   const warmOllama = async () => {
@@ -781,6 +833,12 @@ export default function App() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ candidates: [{ temp_id: tempId, ...patch }] }),
+    }).then(async (res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    }).catch(() => {
+      // The optimistic UI now disagrees with the server — re-fetch the
+      // session so the review shows what is actually persisted.
+      fetchAll();
     });
   };
 
@@ -798,6 +856,10 @@ export default function App() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ candidates: candidatesPayload }),
+    }).then(async (res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    }).catch(() => {
+      fetchAll();
     });
   };
 
@@ -902,7 +964,6 @@ return (
           <span className="opacity-80 hidden sm:inline">{t("sec_encrypt_banner_text")}</span>
           <button
             onClick={() => {
-              setTab("settings");
               // Jump STRAIGHT to the Security & Encryption card — the button
               // previously only switched tabs, leaving users to find the
               // master-password UI (or mistake the egress toggles for it).
@@ -1405,7 +1466,12 @@ return (
                 watchedFolders={watchedFolders}
                 scanSession={scanSession}
                 onRemoveWatchedFolder={async (id) => {
-                  await fetch(`/api/folders/${id}`, { method: "DELETE" });
+                  try {
+                    const res = await fetch(`/api/folders/${id}`, { method: "DELETE" });
+                    if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);
+                  } catch {
+                    showToast("Failed to remove watched folder / فشل إزالة المجلد", "error");
+                  }
                   fetchAll();
                 }}
                 onSetAllDecisions={setAllDecisions}
@@ -1444,6 +1510,7 @@ return (
                 onOpenClarify={openClarify}
                 onDeleteEntry={deleteEntry}
                 onBulkDeleteEntries={bulkDeleteEntries}
+                onSaveEntry={saveEntryUpdate}
                 onReopenInScratchpad={(title, html) => {
                   // In-memory handoff — note content must not touch browser storage.
                   offerNoteToScratchpad({ title, html });
@@ -1534,6 +1601,7 @@ return (
       {/* Global Command Palette Modal */}
       <CommandPaletteModal
         isOpen={cmdPaletteOpen}
+        onOpen={() => setCmdPaletteOpen(true)}
         onClose={() => setCmdPaletteOpen(false)}
         entries={entries}
         onSelectEntry={(entry) => {
@@ -1541,8 +1609,10 @@ return (
             setTab("library");
             setLibraryQuery(entry.name);
           } else {
-            void copyTextToClipboard(entry.value);
-            showToast(`Copied ${entry.name}`, "success");
+            void (async () => {
+              const ok = await copyTextToClipboard(entry.value);
+              showToast(ok ? `Copied ${entry.name}` : "Copy failed", ok ? "success" : "error");
+            })();
           }
         }}
         onNavigateTab={(t) => setTab(t)}

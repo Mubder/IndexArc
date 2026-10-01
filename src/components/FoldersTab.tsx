@@ -91,7 +91,7 @@ export const FoldersTab: React.FC<FoldersTabProps> = ({
         <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
           {t("folder_watch_disk_desc")}{" "}
           {isElectron
-            ? (t("ui_language_label") === "لغة الواجهة / UI Language" ? "(أو استخدم حوار Electron الأصلي)." : "(or use the Electron native dialog).")
+            ? (settings?.ui_language === "ar" ? "(أو استخدم حوار Electron الأصلي)." : "(or use the Electron native dialog).")
             : ""}
         </p>
         <div className="flex flex-wrap gap-4 text-xs" style={{ color: "var(--text-dim)" }}>
@@ -189,7 +189,7 @@ export const FoldersTab: React.FC<FoldersTabProps> = ({
           {scanSession.skipped_files.length > 0 && (
             <details className="rounded-xl p-4" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
               <summary className="text-xs font-semibold cursor-pointer" style={{ color: "var(--text-muted)" }}>
-                {t("ui_language_label") === "لغة الواجهة / UI Language"
+                {settings?.ui_language === "ar"
                   ? `غير مشمول (${scanSession.skipped_files.length} ملفات) — اضغط للتوسيع`
                   : `Not included (${scanSession.skipped_files.length} files) — click to expand`}
               </summary>
@@ -236,7 +236,7 @@ export const FoldersTab: React.FC<FoldersTabProps> = ({
 
           <div className="space-y-3">
             <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-              {t("ui_language_label") === "لغة الواجهة / UI Language"
+              {settings?.ui_language === "ar"
                 ? `المرشحون المستخرجون (${scanSession.candidates.length})`
                 : `Extracted candidates (${scanSession.candidates.length})`}
             </h3>

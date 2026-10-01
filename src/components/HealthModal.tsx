@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { CheckCircle2, XCircle, AlertTriangle, Copy, RefreshCw, X, HardDrive, Database } from "lucide-react";
 import { HealthReport, Settings } from "../types";
@@ -24,12 +24,18 @@ export const HealthModal: React.FC<HealthModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  // Read via ref: the effect must only fire on OPEN, not on every App-level
+  // health refresh (a 60s poll + SSE replacements used to trigger a full
+  // refetch while the modal was open).
+  const initialRef = useRef(initial);
+  initialRef.current = initial;
 
   const fetchHealth = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const res = await fetch("/api/health");
+      if (!res.ok) throw new Error(`Health check failed (HTTP ${res.status})`);
       const data = (await res.json()) as HealthReport;
       setReport(data);
     } catch (e: any) {
@@ -42,10 +48,10 @@ export const HealthModal: React.FC<HealthModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      if (initial) setReport(initial);
+      if (initialRef.current) setReport(initialRef.current);
       fetchHealth();
     }
-  }, [isOpen, fetchHealth, initial]);
+  }, [isOpen, fetchHealth]);
 
   useEffect(() => {
     if (!isOpen) return;

@@ -25,7 +25,7 @@ export default defineConfig(() => {
               "@tiptap/extension-placeholder",
               "@tiptap/extension-typography",
             ],
-            vendor: ["react", "react-dom", "lucide-react", "motion"],
+            vendor: ["react", "react-dom", "lucide-react"],
           },
         },
       },

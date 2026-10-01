@@ -136,7 +136,12 @@ async function isWordCorrect(word, lang = "en,ar") {
     const res = await cspell.spellCheckDocument(doc, { validate: true }, activeConfig);
     return res.issues.length === 0;
   } catch (e) {
-    return true;
+    // Fail THROUGH, not open: swallowing errors here marked every word as
+    // correctly spelled on any engine failure and made the callers' SymSpell
+    // fallbacks unreachable. Throw a typed error so callers engage them.
+    const err = new Error(`cspell check failed: ${e && e.message ? e.message : e}`);
+    err.engineFailure = true;
+    throw err;
   }
 }
 
@@ -186,6 +191,8 @@ async function batchFindMisspelled(words, lang = "en,ar") {
     if (!clean || clean.length <= 1 || seen.has(clean)) continue;
     seen.add(clean);
 
+    // isWordCorrect now THROWS on engine failure (fail-through) — let the
+    // caller's SymSpell fallback handle it instead of silently "passing".
     const ok = await isWordCorrect(clean, lang);
     if (!ok) {
       bad.push(clean);

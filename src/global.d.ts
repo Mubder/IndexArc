@@ -8,6 +8,10 @@ interface ElectronAPI {
   getApiToken: () => Promise<string | null>;
   copyText: (text: string) => Promise<boolean>;
   spellcheckWords: (words: string[]) => Promise<string[]>;
+  spellcheckSuggest: (word: string) => Promise<string[]>;
+  addCustomWord: (word: string) => Promise<void>;
+  onFlushRequest: (cb: () => void) => void;
+  flushComplete: () => void;
 }
 
 declare global {
@@ -24,9 +28,9 @@ declare module "pdf-parse" {
 
 declare module "./shared/spellcheck.cjs" {
   const spellcheck: {
-    findMisspelled: (words: string[], ar: unknown, en: unknown) => string[];
-    checkArabicWord: (w: string, ar: unknown) => boolean;
-    checkEnglishWord: (w: string, en: unknown) => boolean;
+    findMisspelled: (words: string[], ar: unknown, en: unknown) => Promise<string[]>;
+    checkArabicWord: (w: string, ar: unknown) => Promise<boolean>;
+    checkEnglishWord: (w: string, en: unknown) => Promise<boolean>;
     sanitizeToken: (t: string) => string;
     isArabicToken: (t: string) => boolean;
     isLatinToken: (t: string) => boolean;

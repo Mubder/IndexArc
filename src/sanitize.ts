@@ -51,5 +51,11 @@ function escapeHtml(s: string): string {
 // literal "<br>" strings when the model echoed tags).
 export function textToNoteHtml(text: string): string {
   const lines = String(text ?? "").replace(/\r\n/g, "\n").split("\n");
-  return lines.map((l) => `<p>${escapeHtml(l) || "<br>"}</p>`).join("");
+  // A blank line is one empty paragraph — NOT "<p><br></p>": a <br>-only
+  // paragraph is exactly what the load-path normalizer used to double into
+  // two blank lines on every round trip.
+  return lines.map((l) => {
+    const esc = escapeHtml(l);
+    return esc ? `<p>${esc}</p>` : "<p></p>";
+  }).join("");
 }

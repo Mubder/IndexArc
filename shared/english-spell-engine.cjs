@@ -63,7 +63,7 @@ class EnglishSpellEngine {
       if (slash >= 0) line = line.slice(0, slash);
       line = line.trim().toLowerCase();
       if (line.length < 2) continue;
-      if (!/^[a-z][a-z]*$|^\d+[a-z]*$|^\w+$/.test(line)) continue;
+      if (!/^[a-z][a-z'\d]*(?:[-'][a-z\d]+)*$/.test(line)) continue;
       this._addWord(line);
       dicWords.push(line);
       n++;
@@ -318,10 +318,6 @@ class EnglishSpellEngine {
         }
       }
     }
-  }
-
-  getDicPath() {
-    return this.dicPath;
   }
 }
 

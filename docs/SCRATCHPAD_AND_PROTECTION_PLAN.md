@@ -117,7 +117,7 @@ New granular endpoints (the client should stop using whole-array saves for every
 ### 2.4 Edge cases handled by design
 
 - Old clients / stale renders that still send whole-array saves: rule 2 means they can't hurt protected notes — the save 409s and the UI reloads server state.
-- Emergency restore: snapshots already capture scratchpad (with flags — they're plain JSON fields).
+- Emergency restore: snapshots capture scratchpad **and — since the AUD-003 fix — the archive (`scratchpad_archive.json`) and the full note revision history (`note_revisions.json`)**. Timestamped backups carry the same companions (`notes-archive-*`, `note-revisions-*`). A reinstall no longer loses archived notes.
 - Vault entries (`VaultEntry`) can adopt the same `pinned`/`protected` fields later for the Library — same store-level enforcement pattern in `createEntry`/`updateEntry`/`bulkDelete`.
 
 ### 2.5 Tier 3 — Lock (roadmap)

@@ -104,6 +104,12 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     setEmgMsg("");
     try {
       const res = await fetch("/api/emergency/create", { method: "POST" });
+      if (!res.ok) {
+        // A failed snapshot must never read as "nothing changed" — this UI
+        // matters most during data-recovery scenarios.
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error || `Snapshot failed (HTTP ${res.status})`);
+      }
       const data = await res.json();
       setEmgMsg(
         data.ok
@@ -171,7 +177,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       const res = await fetch("/api/vault/setup-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: secPassword }),
+        // Explicit button click is the confirmation; the ceremony word passes
+        // the server's anti-automation gate (see vault.ts setup-password).
+        body: JSON.stringify({ password: secPassword, confirm_word: "ENCRYPT" }),
       });
       const data = await res.json();
       if (res.ok) {

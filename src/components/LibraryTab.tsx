@@ -5,6 +5,7 @@ import { LibraryFilter, VaultEntry, Settings } from "../types";
 import { EntryCard } from "./EntryCard";
 import { NoteDetailModal } from "./NoteDetailModal";
 import { getTranslation } from "../utils/i18n";
+import { maskValue } from "../utils";
 
 interface LibraryTabProps {
   entries: VaultEntry[];
@@ -16,6 +17,8 @@ interface LibraryTabProps {
   onOpenClarify: (entry: VaultEntry) => void;
   onDeleteEntry: (id: string) => Promise<void>;
   onBulkDeleteEntries: (ids: string[]) => Promise<void>;
+  /** PATCH an entry — powers the NoteDetailModal edit path. */
+  onSaveEntry?: (id: string, updates: Partial<VaultEntry>) => Promise<boolean>;
   onReopenInScratchpad?: (title: string, contentHtml: string) => void;
   settings: Settings | null;
 }
@@ -30,6 +33,7 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
   onOpenClarify,
   onDeleteEntry,
   onBulkDeleteEntries,
+  onSaveEntry,
   onReopenInScratchpad,
   settings,
 }) => {
@@ -39,6 +43,8 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [selectedDuplicates, setSelectedDuplicates] = useState<string[]>([]);
   const [selectAllDuplicates, setSelectAllDuplicates] = useState(false);
+  // Per-row reveal for masked duplicate values (secret-family entries).
+  const [revealedDups, setRevealedDups] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<"list" | "grid">("grid");
   const [activeDetailEntry, setActiveDetailEntry] = useState<VaultEntry | null>(null);
 
@@ -62,6 +68,10 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
   const findDuplicates = async () => {
     setCheckingDuplicates(true);
     setDuplicates([]);
+    // Stale ids from a previous run could otherwise bulk-delete entries that
+    // are no longer flagged as duplicates.
+    setSelectedDuplicates([]);
+    setRevealedDups(new Set());
     try {
       // Check for exact value duplicates
       const valueMap = new Map<string, VaultEntry[]>();
@@ -183,7 +193,7 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
           <span style={{ color: "var(--text-muted)", fontWeight: "normal" }}>
             ({libraryFiltered.length}
             {libraryFilter !== "all" || libraryQuery.trim()
-              ? ` ${t("ui_language_label") === "لغة الواجهة / UI Language" ? "من أصل" : "of"} ${entries.length}`
+              ? ` ${settings?.ui_language === "ar" ? "من أصل" : "of"} ${entries.length}`
               : ""}
             )
           </span>
@@ -261,7 +271,30 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
                     }}
                   />
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-mono text-rose-400 break-all select-text">{d.entry.value}</div>
+                    {d.entry.family === "secret" || d.entry.family === "unknown" ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono text-rose-400 break-all select-text">
+                          {revealedDups.has(d.entry.id) ? d.entry.value : maskValue(d.entry.value)}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[10px] px-1.5 py-0.5 rounded shrink-0"
+                          style={{ background: "var(--bg-input)", color: "var(--text-muted)" }}
+                          onClick={() =>
+                            setRevealedDups((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(d.entry.id)) next.delete(d.entry.id);
+                              else next.add(d.entry.id);
+                              return next;
+                            })
+                          }
+                        >
+                          {revealedDups.has(d.entry.id) ? "hide" : "show"}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-xs font-mono text-rose-400 break-all select-text">{d.entry.value}</div>
+                    )}
                     <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>
                       Duplicate of: <strong>{d.match.name}</strong> ({d.match.id.slice(0, 8)})
                     </div>
@@ -413,6 +446,7 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
         isOpen={!!activeDetailEntry}
         onClose={() => setActiveDetailEntry(null)}
         onReopenInScratchpad={onReopenInScratchpad}
+        onSaveEntry={onSaveEntry}
         settings={settings}
       />
     </div>

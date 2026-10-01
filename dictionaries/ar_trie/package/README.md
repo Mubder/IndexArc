@@ -168,3 +168,11 @@ Brought to you by <a href="https://streetsidesoftware.com" title="Street Side So
 </p>
 
 <!--- @@inject-end: ../../static/footer.md --->
+
+## Provenance of `ar.trie.gz` (IndexArc note)
+
+The compressed trie (`package/ar.trie.gz`) shipped here was produced from the
+upstream cspell Arabic dictionary package tarball
+(`../cspell-dict-ar-1.1.7.tgz`, relocated here from the repo root so the
+build context stays clean). To rebuild or upgrade the trie, extract that
+tarball and run its package build, then replace `ar.trie.gz`.

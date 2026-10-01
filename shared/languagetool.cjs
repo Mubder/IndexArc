@@ -22,7 +22,14 @@ class LanguageToolService {
   constructor() {
     this.serverProcess = null;
     this.localUrl = null;
-    this.mode = "none";
+    // "auto"  = not yet determined — first _ensureAvailable() tries to start
+    //           the local jar, then the (opt-in) public API.
+    // "local" / "public" = available via that mode.
+    // "none"  = DETERMINED unavailable — terminal, don't retry per keystroke.
+    // The old code started at "none", so _ensureAvailable() returned false on
+    // the very first call and startLocalServer() was unreachable.
+    this.mode = "auto";
+    this._starting = null;
     this._checkCache = new Map();
     this._suggestCache = new Map();
     this.cacheTtl = 5 * 60 * 1000;
@@ -213,21 +220,28 @@ class LanguageToolService {
     if (this.mode === "public") return true;
     if (this.mode === "none") return false;
 
-    const started = await this.startLocalServer();
-    if (started) return true;
-
-    if (publicApiAllowed()) {
-      const reachable = await this._pingPublicApi();
-      if (reachable) {
-        this.mode = "public";
-        console.log("[langtool] Using public API fallback (opted in)");
-        return true;
-      }
+    // Single-flight: concurrent checks during startup must not spawn a jar
+    // each — memoize the determination attempt.
+    if (!this._starting) {
+      this._starting = (async () => {
+        const started = await this.startLocalServer();
+        if (started) return true;
+        if (publicApiAllowed()) {
+          const reachable = await this._pingPublicApi();
+          if (reachable) {
+            this.mode = "public";
+            console.log("[langtool] Using public API fallback (opted in)");
+            return true;
+          }
+        }
+        this.mode = "none";
+        console.log("[langtool] Local server unavailable — using local SymSpell engines");
+        return false;
+      })().finally(() => {
+        this._starting = null;
+      });
     }
-
-    this.mode = "none";
-    console.log("[langtool] Public API unreachable, using local SymSpell engines");
-    return false;
+    return this._starting;
   }
 
   async _post(url, body) {
@@ -283,19 +297,6 @@ class LanguageToolService {
     return result.matches || [];
   }
 
-  async checkWords(words, language) {
-    const text = words.join(" ");
-    const matches = await this.check(text, language);
-    const badSet = new Set();
-    for (const m of matches) {
-      const start = m.offset;
-      const end = m.offset + m.length;
-      const badWord = text.slice(start, end);
-      badSet.add(badWord);
-    }
-    return words.filter((w) => badSet.has(w));
-  }
-
   async suggest(word, language, limit) {
     const max = typeof limit === "number" && limit > 0 ? limit : 6;
     const cacheKey = `${language}:${word}:${max}`;
@@ -320,13 +321,8 @@ class LanguageToolService {
     return result;
   }
 
-  async isCorrect(word, language) {
-    const matches = await this.check(word, language);
-    return matches.length === 0;
-  }
-
   getAvailable() {
-    return this.mode !== "none";
+    return this.mode === "local" || this.mode === "public";
   }
 
   getMode() {

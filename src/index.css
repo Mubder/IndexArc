@@ -157,6 +157,15 @@
   border-color: var(--tab-inactive-border);
 }
 .scratchpad-tab[data-active="false"]:hover { background: var(--bg-hover); border-color: var(--border-hover); color: var(--text); }
+/* The rename input must stay typeable: Chromium propagates the chip's
+   user-select:none into descendant inputs and then REFUSES keyboard text
+   entry there (keydown fires, no text is ever inserted) — rename looked
+   "dead" or ate keystrokes. Force text selection back on. */
+.scratchpad-tab input, .scratchpad-tab-strip input {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
 
 /*
  * Spell underlines are painted from live Range#getClientRects() so they sit

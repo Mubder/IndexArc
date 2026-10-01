@@ -110,8 +110,6 @@ const AR_ENDINGS = [
   "ا",
 ];
 
-// Back-compat alias used by older call sites / tests
-const AR_SUFFIXES = [...AR_ENCLITICS, ...AR_ENDINGS];
 
 // Frequent modern / UI words that older Ayaspell packs miss even after stem
 // stripping. Kept small and high-precision — not a second dictionary.
@@ -1146,15 +1144,17 @@ function isArabicEngine(ar) {
 }
 
 /**
- * Arabic correctness. Uses ArabicSpellEngine (SymSpell).
+ * Arabic correctness. cspell trie first, ArabicSpellEngine (SymSpell) as the
+ * fallback. Async on purpose: the cspell call must be AWAITED for the catch
+ * to engage — an un-awaited rejection bypassed the fallback entirely.
  */
-function checkArabicWord(w, arSpell) {
+async function checkArabicWord(w, arSpell) {
   const clean = stripArabicDiacritics(sanitizeToken(w));
   if (!clean || clean.length <= 1) return true;
   if (USER_CUSTOM_WORDS.has(w) || USER_CUSTOM_WORDS.has(clean)) return true;
 
   try {
-    return cspellEngine.isWordCorrect(clean, "ar");
+    return await cspellEngine.isWordCorrect(clean, "ar");
   } catch {
     if (isArabicEngine(arSpell)) return arSpell.correct(w);
     return checkArabicCore(clean, arSpell);
@@ -1414,7 +1414,7 @@ function addCustomWord(word, dictPath, arSpell, enSpell) {
   }
 }
 
-function checkEnglishWord(w, enSpell) {
+async function checkEnglishWord(w, enSpell) {
   const clean = sanitizeToken(w);
   if (!clean || clean.length <= 1) return true;
 
@@ -1427,7 +1427,7 @@ function checkEnglishWord(w, enSpell) {
   }
 
   try {
-    return cspellEngine.isWordCorrect(clean, "en");
+    return await cspellEngine.isWordCorrect(clean, "en");
   } catch {
     if (enSpell && enSpell.correct(clean)) return true;
     if (enSpell && lower !== clean && enSpell.correct(lower)) return true;
@@ -1457,7 +1457,6 @@ const EN_CONTRACTIONS = {
   im: "I'm",
   ive: "I've",
   ill: "I'll",
-  id: "I'd",
   youre: "you're",
   youve: "you've",
   youll: "you'll",
@@ -1467,7 +1466,6 @@ const EN_CONTRACTIONS = {
   its: "it's",
   thats: "that's",
   whats: "what's",
-  there: "they're",
   theyre: "they're",
   whos: "who's",
   lets: "let's",
@@ -1511,7 +1509,8 @@ async function suggestEnglishWord(w, enSpell, limit) {
 
   if (enSpell && results.length < max) {
     try {
-      const hSugs = enSpell.suggest(lower) || enSpell.suggest(clean) || [];
+      const lowerSugs = enSpell.suggest(lower) || [];
+      const hSugs = lowerSugs.length ? lowerSugs : (enSpell.suggest(clean) || []);
       if (hSugs && hSugs.length > 0) results.push(...hSugs);
     } catch { }
   }
@@ -1560,8 +1559,11 @@ async function findMisspelled(words, arSpell, enSpell) {
       const bad = [];
       const seen = new Set();
       const ltWords = [];
-      for (const w of words) {
-        if (typeof w !== "string" || seen.has(w)) continue;
+      // Iterate CHECKABLE (user-dictionary words already excluded above) —
+      // the old loop iterated the raw list and re-flagged words the user
+      // explicitly added/ignored.
+      for (const w of checkable) {
+        if (seen.has(w)) continue;
         seen.add(w);
         const clean = sanitizeToken(w);
         if (!clean || clean.length <= 1) continue;
@@ -1576,7 +1578,14 @@ async function findMisspelled(words, arSpell, enSpell) {
           const matches = await ltService.check(word, lang);
           if (matches.length > 0) bad.push(word);
         } catch {
-          if (!await isWordCorrect(word, lang)) bad.push(word);
+          // LT failed for this word — fall back to the cspell/SymSpell
+          // pipeline. (The old code called an UNDEFINED isWordCorrect here —
+          // a ReferenceError swallowed by the outer catch, discarding the
+          // whole LT result set.)
+          const ok = lang === "ar"
+            ? await checkArabicWord(word, arSpell)
+            : await checkEnglishWord(word, enSpell);
+          if (!ok) bad.push(word);
         }
       }
       if (bad.length > 0) return bad;
@@ -1584,14 +1593,14 @@ async function findMisspelled(words, arSpell, enSpell) {
   }
 
   try {
-    return await cspellEngine.batchFindMisspelled(words);
+    return await cspellEngine.batchFindMisspelled(checkable);
   } catch {
     const bad = [];
-    for (const w of words) {
+    for (const w of checkable) {
       if (typeof w === "string" && w.trim().length > 1) {
         const clean = sanitizeToken(w);
-        if (isArabicToken(clean) && !checkArabicWord(clean, arSpell)) bad.push(clean);
-        if (isLatinToken(clean) && !checkEnglishWord(clean, enSpell)) bad.push(clean);
+        if (isArabicToken(clean) && !(await checkArabicWord(clean, arSpell))) bad.push(clean);
+        if (isLatinToken(clean) && !(await checkEnglishWord(clean, enSpell))) bad.push(clean);
       }
     }
     return bad;
@@ -1620,8 +1629,6 @@ module.exports = {
   initLanguageTool,
   isLanguageToolAvailable,
   getLanguageTool,
-  AR_PREFIXES,
-  AR_SUFFIXES,
   AR_ENCLITICS,
   AR_ENDINGS,
 };

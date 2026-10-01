@@ -63,7 +63,7 @@ export interface AlternateRootInfo {
   root: string;
   vaultExists: boolean;
   vaultEntries: number | null;
-  vaultEncrypted: boolean;
+  vaultEncrypted: boolean | null; // null = unreadable/corrupt (unknown)
   scratchpadTabs: number | null;
 }
 

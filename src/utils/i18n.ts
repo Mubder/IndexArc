@@ -328,6 +328,18 @@ export interface TranslationDict {
   scratchpad_history_empty: string;
   scratchpad_history_restore: string;
   scratchpad_history_restored: string;
+  scratchpad_compare: string;
+  scratchpad_compare_title: string;
+  scratchpad_compare_desc: string;
+  scratchpad_compare_identical: string;
+  scratchpad_compare_pick_two: string;
+  scratchpad_rescue: string;
+  scratchpad_rescue_title: string;
+  scratchpad_rescue_desc: string;
+  scratchpad_rescue_empty: string;
+  scratchpad_rescue_restore: string;
+  scratchpad_rescue_restored: string;
+  scratchpad_save_failed: string;
   scratchpad_content_cleared: string;
   scratchpad_restore_undo: string;
   highlight_yellow: string;
@@ -712,6 +724,18 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_history_empty: "No saved revisions for this note yet. Snapshots are recorded automatically as you write.",
     scratchpad_history_restore: "Restore this version",
     scratchpad_history_restored: "Version restored successfully!",
+    scratchpad_compare: "Compare",
+    scratchpad_compare_title: "Compare Two Notes",
+    scratchpad_compare_desc: "Red lines exist only in the left note, green lines only in the right one — highlighted words are the edits inside changed lines.",
+    scratchpad_compare_identical: "These two notes are identical.",
+    scratchpad_compare_pick_two: "Pick two different notes to compare them.",
+    scratchpad_rescue: "Rescue Notes",
+    scratchpad_rescue_title: "Rescue Unsaved Notes",
+    scratchpad_rescue_desc: "Snapshots recorded for notes that no longer exist — content that was typed but never saved. Restore any of them back as a note.",
+    scratchpad_rescue_empty: "No orphaned snapshots found — nothing to rescue.",
+    scratchpad_rescue_restore: "Restore as note",
+    scratchpad_rescue_restored: "Note restored!",
+    scratchpad_save_failed: "Notes are NOT saving — recent changes exist only in this window. Do NOT close the app; saving retries automatically.",
     scratchpad_content_cleared: "Note content was cleared.",
     scratchpad_restore_undo: "Undo / Restore",
     highlight_yellow: "Yellow",
@@ -1094,6 +1118,18 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     scratchpad_history_empty: "لا توجد نسخ سابقة مسجلة لهذه الملاحظة بعد. يتم حفظ النسخ تلقائياً أثناء الكتابة.",
     scratchpad_history_restore: "استعادة هذه النسخة",
     scratchpad_history_restored: "تمت استعادة النسخة بنجاح!",
+    scratchpad_compare: "مقارنة",
+    scratchpad_compare_title: "مقارنة ملاحظتين",
+    scratchpad_compare_desc: "الأسطر الحمراء موجودة فقط في الملاحظة اليسرى، والأسطر الخضراء موجودة فقط في اليمنى — والكلمات المظللة هي التعديلات داخل الأسطر المتغيرة.",
+    scratchpad_compare_identical: "الملاحظتان متطابقتان تماماً.",
+    scratchpad_compare_pick_two: "اختر ملاحظتين مختلفتين للمقارنة بينهما.",
+    scratchpad_rescue: "استعادة ملاحظات",
+    scratchpad_rescue_title: "استعادة الملاحظات غير المحفوظة",
+    scratchpad_rescue_desc: "نسخ محفوظة تلقائياً لملاحظات لم يعد لها أثر — محتوى تمت كتابته لكنه لم يُحفظ. يمكنك استعادة أي منها كملاحظة.",
+    scratchpad_rescue_empty: "لا توجد نسخ يتيمة يمكن استعادتها.",
+    scratchpad_rescue_restore: "استعادة كملاحظة",
+    scratchpad_rescue_restored: "تمت استعادة الملاحظة!",
+    scratchpad_save_failed: "الملاحظات لا تُحفظ — التعديلات الحديثة موجودة في هذه النافذة فقط. لا تغلق التطبيق؛ تُعاد المحاولة تلقائياً.",
     scratchpad_content_cleared: "تم مسح محتوى الملاحظة.",
     scratchpad_restore_undo: "تراجع / استعادة",
     highlight_yellow: "أصفر",

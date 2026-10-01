@@ -47,6 +47,8 @@ import {
   History,
   Clock,
   RotateCcw,
+  ArrowLeftRight,
+  LifeBuoy,
 } from "lucide-react";
 import {
   VaultEntry,
@@ -60,9 +62,11 @@ import {
 } from "../types";
 import { getTranslation } from "../utils/i18n";
 import { sanitizeNoteHtml, textToNoteHtml } from "../sanitize";
-import { enqueueScratchpadSave, drainScratchpadSaves, setScratchpadConflictHandler, setSyncedScratchpadTabs, forceSaveScratchpadTab } from "../scratchpadSaveQueue";
+import { enqueueScratchpadSave, drainScratchpadSaves, setScratchpadConflictHandler, setScratchpadFailureHandler, setSyncedScratchpadTabs, forceSaveScratchpadTab, mergeSyncedScratchpadTab } from "../scratchpadSaveQueue";
 import { takeHandoffNote, REOPEN_NOTE_EVENT } from "../noteHandoff";
 import { ensureHtmlParagraphs, htmlToPlainText } from "../lib/noteHtml";
+import { buildCompareRows, compareStats, noteToLines, type CompareSide } from "../lib/noteDiff";
+import { registerFlushHook, enqueueTabsSnapshot } from "../lib/flushOnExit";
 import { normalizeServerTab } from "../lib/serverTabs";
 import { isArabicText, findDuplicateHits } from "../utils";
 
@@ -78,7 +82,6 @@ export interface NoteRevision {
 }
 
 const STORAGE_KEY = "indexarc_scratchpad_tabs";
-const REVISIONS_KEY_PREFIX = "indexarc_note_revisions_";
 
 // Revisions live on the SERVER (data/note_revisions.json) — the durable,
 // encrypted store. The browser keeps no copy (the old idb-keyval/localStorage
@@ -534,11 +537,78 @@ function safeGetHTML(editor: any): string {
   }
 }
 
+/** One half of a compare-view row. Red tint = only in the left note,
+ *  green tint = only in the right note; "changed" rows carry word-level
+ *  highlights. The empty opposite half keeps the two columns aligned. */
+function CompareCell({
+  side,
+  variant,
+  dir,
+}: {
+  side: CompareSide | null;
+  variant: "left" | "right";
+  dir: "ltr" | "rtl";
+}) {
+  if (!side) {
+    return (
+      <div
+        className="px-3 py-[3px] min-h-[26px] text-xs leading-relaxed"
+        style={{ background: "rgba(255,255,255,0.015)" }}
+      />
+    );
+  }
+  const tone =
+    side.kind === "equal"
+      ? "transparent"
+      : side.kind === "changed"
+        ? variant === "left" ? "rgba(248,113,113,0.08)" : "rgba(52,211,153,0.08)"
+        : variant === "left" ? "rgba(248,113,113,0.18)" : "rgba(52,211,153,0.18)";
+  const gutter =
+    side.kind === "equal" ? "transparent" : variant === "left" ? "#f87171" : "#34d399";
+  return (
+    <div
+      dir={dir}
+      className="px-3 py-[3px] min-h-[26px] text-xs leading-relaxed whitespace-pre-wrap break-words"
+      style={{
+        background: tone,
+        borderInlineStart: `2px solid ${gutter}`,
+        color: side.kind === "equal" ? "var(--text-muted)" : "var(--text)",
+      }}
+    >
+      {side.kind === "changed" && side.tokens ? (
+        side.tokens.map((tok, i) =>
+          tok.type === "equal" ? (
+            <span key={i}>{tok.text}</span>
+          ) : (
+            <span
+              key={i}
+              style={{
+                background:
+                  tok.type === "delete" ? "rgba(248,113,113,0.4)" : "rgba(52,211,153,0.4)",
+                borderRadius: 3,
+                color: "#fff",
+              }}
+            >
+              {tok.text}
+            </span>
+          )
+        )
+      ) : (
+        side.text || "\u00a0"
+      )}
+    </div>
+  );
+}
+
 export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ settings }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
   const initial = useRef(loadTabs());
   const [tabs, setTabs] = useState<ScratchTab[]>(initial.current);
+  // Live mirrors for the exit-flush hook (registered once, must never go
+  // stale): the tab list and the TipTap instance.
+  const tabsRef = useRef<ScratchTab[]>(tabs);
+  tabsRef.current = tabs;
   const [activeId, setActiveId] = useState<string>(
     initial.current && initial.current.length > 0 ? initial.current[0].id : "default"
   );
@@ -589,6 +659,18 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [showRevisions, setShowRevisions] = useState(false);
   const [revisionsList, setRevisionsList] = useState<NoteRevision[]>([]);
   const [selectedRevision, setSelectedRevision] = useState<NoteRevision | null>(null);
+  // Compare-two-notes view: which tabs sit on the left/right of the diff.
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [compareA, setCompareA] = useState("");
+  const [compareB, setCompareB] = useState("");
+  // Rescue view: orphaned revision snapshots (notes whose saves never landed).
+  const [rescueOpen, setRescueOpen] = useState(false);
+  const [rescueList, setRescueList] = useState<any[]>([]);
+  const [rescueLoading, setRescueLoading] = useState(false);
+  const [rescueQuery, setRescueQuery] = useState("");
+  // True while the save queue cannot reach the server — drives the
+  // "changes exist only in this window" banner.
+  const [saveFailing, setSaveFailing] = useState(false);
   const [clearedAlert, setClearedAlert] = useState<{ tabId: string; content: string; timestamp: number } | null>(null);
   // 409 conflict banner state: the server's current version of the tab whose
   // save conflicted, offered to the user when an autosave raced another window.
@@ -724,6 +806,37 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setSelectedRevision(list.length > 0 ? list[0] : null);
     setShowRevisions(true);
   }, [activeId]);
+
+  const openCompare = useCallback(() => {
+    // Left defaults to the active note, right to the first other tab.
+    const other = tabs.find((x) => x.id !== activeId);
+    if (!other) return;
+    setCompareA(activeId);
+    setCompareB(other.id);
+    setCompareOpen(true);
+  }, [tabs, activeId]);
+
+  // Diff of the two selected notes. Reads through contentRef so unsaved
+  // keystrokes on the left note are included. Pure-local LCS — nothing leaves
+  // the machine. eslint-disable for the ref reads is deliberate.
+  const compareData = useMemo(() => {
+    if (!compareOpen) return null;
+    const tabA = tabs.find((x) => x.id === compareA);
+    const tabB = tabs.find((x) => x.id === compareB);
+    if (!tabA || !tabB || tabA.id === tabB.id) return null;
+    const linesA = noteToLines(contentRef.current[tabA.id] ?? tabA.content ?? "");
+    const linesB = noteToLines(contentRef.current[tabB.id] ?? tabB.content ?? "");
+    const rows = buildCompareRows(linesA, linesB);
+    return {
+      rows,
+      stats: compareStats(rows),
+      dirA: detectBaseDir(linesA.join("\n")) as "ltr" | "rtl",
+      dirB: detectBaseDir(linesB.join("\n")) as "ltr" | "rtl",
+      titleA: tabA.title,
+      titleB: tabB.title,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compareOpen, compareA, compareB, tabs]);
 
   // Listen for "Reopen in Scratchpad" event from Library or Command Palette
   useEffect(() => {
@@ -883,6 +996,38 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       } catch { setSlashOpen(false); }
     },
   });
+
+  // Live mirror of the TipTap instance for the once-registered exit hook.
+  const tiptapRef = useRef(tiptap);
+  tiptapRef.current = tiptap;
+
+  // Exit-flush: on quit (tray Exit, shutdown, uninstall-before-update) push
+  // the LIVE editor content into the save queue synchronously — debounce
+  // timers die with the renderer and must never outrank this snapshot. The
+  // flush module then drains the queue to the server before the app exits.
+  useEffect(() => {
+    return registerFlushHook(() => {
+      const ed = tiptapRef.current;
+      const active = activeIdRef.current;
+      if (ed && !ed.isDestroyed) {
+        try {
+          if ((ed as any)._debouncedSync) {
+            window.clearTimeout((ed as any)._debouncedSync);
+            (ed as any)._debouncedSync = null;
+          }
+          const html = safeGetHTML(ed);
+          if (html) contentRef.current[active] = html;
+        } catch {}
+      }
+      const live = ed && !ed.isDestroyed ? contentRef.current[active] : null;
+      enqueueTabsSnapshot(
+        tabsRef.current.map((x) => ({
+          ...x,
+          content: x.id === active && live != null ? live : (contentRef.current[x.id] ?? x.content),
+        }))
+      );
+    });
+  }, []);
 
   // Keep editorRef in sync with TipTap DOM for spellcheck/scroll
   useEffect(() => {
@@ -1191,8 +1336,24 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         // Land any save queued by a previous mount FIRST, so the server copy
         // we load is never older than what the user actually typed.
         await drainScratchpadSaves();
-        const res = await fetch("/api/scratchpad");
-        if (!res.ok) return;
+        // Retry through the pre-unlock window: the very first fetch can land
+        // while the vault is still locked (server up, password not yet
+        // entered) and used to give up for the whole session — the editor
+        // then ran on stale tabs with no visible error.
+        let res: Response | null = null;
+        for (let attempt = 0; attempt < 20; attempt++) {
+          try {
+            res = await fetch("/api/scratchpad");
+          } catch {
+            res = null;
+          }
+          if (cancelled) return;
+          if (res && res.ok) break;
+          res = null;
+          await new Promise((r) => setTimeout(r, 3000));
+          if (cancelled) return;
+        }
+        if (!res || !res.ok) return;
         const data = await res.json();
         // normalizeServerTab PRESERVES rev + pinned/protected flags — stripping
         // them here made protection invisible after every restart.
@@ -1257,6 +1418,64 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setScratchpadConflictHandler((serverTab) => setConflictTab(serverTab));
     return () => setScratchpadConflictHandler(null);
   }, []);
+
+  // Save-health banner: the queue reports when saves stop landing. Without
+  // this the editor happily takes typing that exists only in window memory
+  // and dies with the process (the "lost a day of notes" failure mode).
+  useEffect(() => {
+    setScratchpadFailureHandler((failing) => setSaveFailing(failing));
+    return () => setScratchpadFailureHandler(null);
+  }, []);
+
+  // ── Rescue: orphaned revision snapshots ──
+  const openRescue = useCallback(async () => {
+    setRescueOpen(true);
+    setRescueLoading(true);
+    setRescueQuery("");
+    try {
+      const res = await fetch("/api/scratchpad/revisions/orphaned");
+      if (res.ok) {
+        const data = await res.json();
+        setRescueList(Array.isArray(data.orphans) ? data.orphans : []);
+      } else {
+        setRescueList([]);
+      }
+    } catch {
+      setRescueList([]);
+    } finally {
+      setRescueLoading(false);
+    }
+  }, []);
+
+  const restoreOrphan = useCallback(async (tabId: string, content: string) => {
+    try {
+      // POST /tabs/:id/content upserts unknown ids — saving the latest
+      // snapshot back under its original id revives the note (and keeps its
+      // revision history attached).
+      const res = await fetch(`/api/scratchpad/tabs/${encodeURIComponent(tabId)}/content`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+      if (!res.ok) return;
+      const refresh = await fetch("/api/scratchpad");
+      if (refresh.ok) {
+        const data = await refresh.json();
+        const serverTabs: ScratchTab[] = Array.isArray(data.tabs)
+          ? data.tabs.filter((x: any) => x && !x.archived).map((x: any) => normalizeServerTab(x))
+          : [];
+        setSyncedScratchpadTabs(serverTabs);
+        setTabs(serverTabs);
+        delete contentRef.current[tabId];
+        delete editorHtmlRef.current[tabId];
+        setActiveId(tabId);
+      }
+      setRescueList((prev) => prev.filter((x) => x.tabId !== tabId));
+      const msg = t("scratchpad_rescue_restored");
+      setStatusMsg(msg);
+      if (msg) setTimeout(() => setStatusMsg(""), 3200);
+    } catch {}
+  }, [t]);
 
   const resolveConflict = useCallback((keepMine: boolean) => {
     if (!conflictTab) return;
@@ -1842,7 +2061,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: name }),
-      }).catch(() => {});
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          // The rename bumped the server-side rev — adopt it so the next
+          // content save doesn't 409 against our own rename.
+          if (data?.tab) mergeSyncedScratchpadTab(data.tab as ScratchTab);
+        })
+        .catch(() => {});
     }
     setRenameId(null);
     setRenameValue("");
@@ -1853,6 +2079,17 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setRenameId(id);
     setRenameValue(cur?.title || "");
   };
+
+  // Stable callback ref: runs ONCE when the rename input mounts (an inline
+  // ref re-runs every render, and re-selecting the text after each keystroke
+  // makes the next letter replace the whole field). useCallback keeps the
+  // identity stable so React treats it as attached.
+  const renameInputRef = useCallback((el: HTMLInputElement | null) => {
+    if (el) {
+      el.focus();
+      try { el.select(); } catch {}
+    }
+  }, []);
 
   // Two-click force-save for duplicates: the first save attempt only warns
   // (remembering the items' signature); an immediate second attempt with the
@@ -2009,7 +2246,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         }));
         const newHtml = textToNoteHtml(data.rewritten);
         // setContent routes through setEditorHtml for the active tab, which
-        // updates DOM + history + state together â€” no direct innerHTML write.
+        // updates DOM + history + state together — no direct innerHTML write.
         setContent(activeId, newHtml);
         setStatus(t("scratchpad_rephrased"));
         analyze(activeId, data.rewritten);
@@ -2215,6 +2452,7 @@ className="scratchpad-tab group cursor-pointer"
               {renaming ? (
                 <input
                   autoFocus
+                  ref={renameInputRef}
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   onClick={(e) => e.stopPropagation()}
@@ -2284,149 +2522,202 @@ className="scratchpad-tab group cursor-pointer"
         </button>
       </div>
 
+      {/* Save-health alarm — saves are NOT landing; typing exists only in
+          this window. Never let this fail silently again. */}
+      {saveFailing && (
+        <div
+          className="rounded-2xl px-4 py-3 flex items-center gap-3 text-xs font-semibold"
+          style={{ background: "rgba(248,113,113,0.15)", border: "1px solid rgba(248,113,113,0.45)", color: "#fca5a5" }}
+        >
+          <span className="text-base leading-none">⚠</span>
+          <span className="flex-1">{t("scratchpad_save_failed")}</span>
+          <button
+            type="button"
+            onClick={() => { void drainScratchpadSaves(); }}
+            className="px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer"
+            style={{ background: "rgba(248,113,113,0.25)", color: "#fecaca", border: "1px solid rgba(248,113,113,0.5)" }}
+          >
+            Retry now
+          </button>
+        </div>
+      )}
+
       {/* Editor + actions */}
       <div
         className="rounded-2xl p-4 space-y-3"
         style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
       >
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => analyze(activeId, htmlToPlainText(active?.content || ""))}
-            disabled={b.analyze || !htmlToPlainText(active?.content || "").trim()}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
-            style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
-          >
-            {b.analyze ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            {b.analyze ? t("scratchpad_detecting") : t("scratchpad_detect")}
-          </button>
-
-          {hasSecret ? (
+        {/* Toolbar — grouped action clusters with uniform button sizing:
+            Note | AI | Tools …(spacer)… Rephrase. Groups stay together when
+            the bar wraps; every control is h-8 so the row stays aligned. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+          {/* ── Note actions ── */}
+          <div className="flex items-center gap-1.5">
+            {hasSecret ? (
+              <button
+                type="button"
+                onClick={handleSaveSecret}
+                disabled={b.save}
+                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: "var(--emerald-bg)", color: "var(--emerald)", border: "1px solid rgba(52, 211, 153, 0.2)" }}
+              >
+                {b.save ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <KeyRound className="w-3.5 h-3.5 shrink-0" />}
+                {b.save ? t("scratchpad_saving") : t("scratchpad_save_secret")}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSaveNote}
+                disabled={b.save}
+                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
+              >
+                {b.save ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Save className="w-3.5 h-3.5 shrink-0" />}
+                {b.save ? t("scratchpad_saving") : t("scratchpad_save_note")}
+              </button>
+            )}
             <button
               type="button"
-              onClick={handleSaveSecret}
-              disabled={b.save}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
-              style={{ background: "var(--emerald-bg)", color: "var(--emerald)", border: "1px solid rgba(52, 211, 153, 0.2)" }}
-            >
-              {b.save ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
-              {b.save ? t("scratchpad_saving") : t("scratchpad_save_secret")}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSaveNote}
-              disabled={b.save}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
-              style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
-            >
-              {b.save ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-              {b.save ? t("scratchpad_saving") : t("scratchpad_save_note")}
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
-            style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
-          >
-            <Copy className="w-3.5 h-3.5" />
-            {copied ? t("scratchpad_copied") : t("scratchpad_copy")}
-          </button>
-
-           {!activeIsProtected && (
-           <button
-              type="button"
-              onClick={() => {
-                if (window.confirm("Are you sure you want to clear this note's content?")) {
-                  recordSnapshot(activeId, active?.content || "", "Before Clear");
-                  setContent(activeId, "");
-                }
-              }}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
+              onClick={handleCopy}
+              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
               style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              {t("scratchpad_clear")}
+              <Copy className="w-3.5 h-3.5 shrink-0" />
+              {copied ? t("scratchpad_copied") : t("scratchpad_copy")}
             </button>
-           )}
+            {!activeIsProtected && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm("Are you sure you want to clear this note's content?")) {
+                    recordSnapshot(activeId, active?.content || "", "Before Clear");
+                    setContent(activeId, "");
+                  }
+                }}
+                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
+                style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+              >
+                <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                {t("scratchpad_clear")}
+              </button>
+            )}
+          </div>
 
+          <div className="w-px h-5 shrink-0" style={{ background: "var(--border)" }} />
+
+          {/* ── AI actions ── */}
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => analyze(activeId, htmlToPlainText(active?.content || ""))}
+              disabled={b.analyze || !htmlToPlainText(active?.content || "").trim()}
+              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
+            >
+              {b.analyze ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 shrink-0" />}
+              {b.analyze ? t("scratchpad_detecting") : t("scratchpad_detect")}
+            </button>
             {settings?.enable_ai_proofreader !== false && !activeIsProtected && (
               <button
                 type="button"
                 onClick={handleProofread}
                 disabled={b.proofread || !(active?.content || "").trim()}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
+                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ background: "transparent", color: "var(--amber)", border: "1px solid rgba(245, 158, 11, 0.2)" }}
                 title={t("scratchpad_proofread")}
               >
-                {b.proofread ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+                {b.proofread ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Wand2 className="w-3.5 h-3.5 shrink-0" />}
                 {t("scratchpad_proofread")}
               </button>
             )}
-
-            {!activeIsProtected && (
-            <button
-              type="button"
-              onClick={handleSmartSplitParagraphs}
-              disabled={!(active?.content || "").trim()}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-              style={{ background: "rgba(56, 189, 248, 0.1)", color: "#38bdf8", border: "1px solid rgba(56, 189, 248, 0.3)" }}
-              title="Restore multi-line paragraphs & auto-format structure"
-            >
-              <AlignJustify className="w-3.5 h-3.5" />
-              <span>Format Paragraphs</span>
-            </button>
-            )}
-
-            <button
-              type="button"
-              onClick={handleOpenRevisions}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
-              style={{ background: "rgba(245, 158, 11, 0.12)", color: "#fbbf24", border: "1px solid rgba(245, 158, 11, 0.3)" }}
-              title={t("scratchpad_history_title")}
-            >
-              <History className="w-3.5 h-3.5" />
-              <span>{t("scratchpad_history")}</span>
-            </button>
-
             <button
               type="button"
               onClick={togglePredictions}
               title={enablePredictions ? "AI Predictions Enabled (Click to Disable)" : "AI Predictions Disabled (Click to Enable)"}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+              aria-pressed={enablePredictions}
+              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
               style={{
                 background: enablePredictions ? "rgba(99, 102, 241, 0.15)" : "transparent",
                 color: enablePredictions ? "var(--accent-bright)" : "var(--text-muted)",
                 border: `1px solid ${enablePredictions ? "rgba(99, 102, 241, 0.4)" : "var(--border)"}`,
               }}
             >
-              {enablePredictions ? <Zap className="w-3.5 h-3.5" /> : <ZapOff className="w-3.5 h-3.5" />}
+              {enablePredictions ? <Zap className="w-3.5 h-3.5 shrink-0" /> : <ZapOff className="w-3.5 h-3.5 shrink-0" />}
               <span>Predictions: <strong>{enablePredictions ? "ON" : "OFF"}</strong></span>
             </button>
+          </div>
 
-           <div className="flex-1" />
+          <div className="w-px h-5 shrink-0" style={{ background: "var(--border)" }} />
 
-          {/* Rephrase controls, moved to the right side. */}
-          <div className="flex items-center gap-1">
+          {/* ── Note tools ── */}
+          <div className="flex items-center gap-1.5">
+            {!activeIsProtected && (
+              <button
+                type="button"
+                onClick={handleSmartSplitParagraphs}
+                disabled={!(active?.content || "").trim()}
+                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: "rgba(56, 189, 248, 0.1)", color: "#38bdf8", border: "1px solid rgba(56, 189, 248, 0.3)" }}
+                title="Restore multi-line paragraphs & auto-format structure"
+              >
+                <AlignJustify className="w-3.5 h-3.5 shrink-0" />
+                <span>Format Paragraphs</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleOpenRevisions}
+              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
+              style={{ background: "rgba(245, 158, 11, 0.12)", color: "#fbbf24", border: "1px solid rgba(245, 158, 11, 0.3)" }}
+              title={t("scratchpad_history_title")}
+            >
+              <History className="w-3.5 h-3.5 shrink-0" />
+              <span>{t("scratchpad_history")}</span>
+            </button>
+            <button
+              type="button"
+              onClick={openCompare}
+              disabled={tabs.length < 2}
+              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: "rgba(99, 102, 241, 0.12)", color: "#a5b4fc", border: "1px solid rgba(99, 102, 241, 0.3)" }}
+              title={t("scratchpad_compare_title")}
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5 shrink-0" />
+              <span>{t("scratchpad_compare")}</span>
+            </button>
+            <button
+              type="button"
+              onClick={openRescue}
+              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
+              style={{ background: "rgba(52, 211, 153, 0.12)", color: "#6ee7b7", border: "1px solid rgba(52, 211, 153, 0.3)" }}
+              title={t("scratchpad_rescue_title")}
+            >
+              <LifeBuoy className="w-3.5 h-3.5 shrink-0" />
+              <span>{t("scratchpad_rescue")}</span>
+            </button>
+          </div>
+
+          <div className="flex-1" />
+
+          {/* ── Rephrase (right side) ── */}
+          <div className="flex items-center gap-1.5">
             {(rephraseUndo[activeId]?.length ?? 0) > 0 && (
               <button
                 type="button"
                 onClick={handleUndoRephrase}
                 disabled={b.rewrite}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
+                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
                 title={t("scratchpad_rephrase_undo")}
               >
-                <Undo2 className="w-3.5 h-3.5" />
+                <Undo2 className="w-3.5 h-3.5 shrink-0" />
                 {t("scratchpad_rephrase_undo")}
               </button>
             )}
             <select
               value={style}
               onChange={(e) => setStyle(e.target.value as RewriteStyle)}
-              className="rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none cursor-pointer"
+              className="h-8 rounded-lg px-2.5 text-xs font-medium focus:outline-none cursor-pointer"
               style={{
                 background: "var(--bg-input, #18181b)",
                 border: "1px solid var(--border, #3f3f46)",
@@ -2450,10 +2741,10 @@ className="scratchpad-tab group cursor-pointer"
               type="button"
               onClick={handleRephrase}
               disabled={b.rewrite || !(active?.content || "").trim()}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-50"
+              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ background: "var(--bg-active)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
             >
-              {b.rewrite ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+              {b.rewrite ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Wand2 className="w-3.5 h-3.5 shrink-0" />}
               {b.rewrite ? t("scratchpad_rewriting") : t("scratchpad_rephrase")}
             </button>
           </div>
@@ -2897,7 +3188,7 @@ className="scratchpad-tab group cursor-pointer"
                 className="px-0.5 py-1.5 rounded-r-lg transition-all hover:opacity-100 opacity-70 text-[8px]"
                 style={{ color: "var(--text-dim)" }}
               >
-                â–¾
+                ▾
               </button>
             </div>
             {showTextColorPicker && (
@@ -2948,7 +3239,7 @@ className="scratchpad-tab group cursor-pointer"
                 className="px-0.5 py-1.5 rounded-r-lg transition-all hover:opacity-100 opacity-70 text-[8px]"
                 style={{ color: "var(--text-dim)" }}
               >
-                â–¾
+                ▾
               </button>
             </div>
             {showHighlightPicker && (
@@ -3011,7 +3302,7 @@ className="scratchpad-tab group cursor-pointer"
         {detection ? (
           <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
             {t("scratchpad_ai_detected")}: {detection.families.join(", ")}
-            {detection.provider ? ` Â· ${detection.provider}` : ""}
+            {detection.provider ? ` · ${detection.provider}` : ""}
           </span>
         ) : (
           <span className="text-[10px]" style={{ color: "var(--text-dim)" }}>
@@ -3522,6 +3813,235 @@ className="scratchpad-tab group cursor-pointer"
                   </div>
                 </>
               )}
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Rescue unsaved notes from orphaned revision snapshots. */}
+      {rescueOpen &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+            onClick={() => setRescueOpen(false)}
+          >
+            <div
+              className="w-full max-w-3xl max-h-[85vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl"
+              style={{ background: "#121214", border: "1px solid rgba(255,255,255,0.12)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div
+                className="px-5 py-4 flex items-center justify-between border-b"
+                style={{ borderColor: "rgba(255,255,255,0.08)", background: "#18181b" }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
+                    <LifeBuoy className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">{t("scratchpad_rescue_title")}</h3>
+                    <p className="text-xs text-neutral-400 max-w-lg">{t("scratchpad_rescue_desc")}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRescueOpen(false)}
+                  className="p-1.5 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Search + list */}
+              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2" style={{ background: "#0e0e10" }}>
+                <input
+                  type="text"
+                  value={rescueQuery}
+                  onChange={(e) => setRescueQuery(e.target.value)}
+                  placeholder="Search snapshots…"
+                  className="px-3 py-2 rounded-lg text-xs"
+                  style={{ background: "#1e1e22", border: "1px solid rgba(255,255,255,0.12)", color: "var(--text)" }}
+                />
+                {rescueLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-10 text-xs text-neutral-500">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Scanning snapshots…</span>
+                  </div>
+                ) : rescueList.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-neutral-500">{t("scratchpad_rescue_empty")}</div>
+                ) : (
+                  (() => {
+                    const q = rescueQuery.trim().toLowerCase();
+                    const filtered = q
+                      ? rescueList.filter(
+                          (o) =>
+                            String(o.title || "").toLowerCase().includes(q) ||
+                            htmlToPlainText(String(o.lastContent || "")).toLowerCase().includes(q)
+                        )
+                      : rescueList;
+                    if (filtered.length === 0) {
+                      return <div className="py-10 text-center text-xs text-neutral-500">{t("scratchpad_rescue_empty")}</div>;
+                    }
+                    return filtered.map((o) => {
+                      const when = new Date(Number(o.timestamp) || 0);
+                      const dayStr = when.toLocaleDateString([], { month: "short", day: "numeric" });
+                      const timeStr = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                      const preview = htmlToPlainText(String(o.lastContent || "")).trim().slice(0, 140);
+                      return (
+                        <div
+                          key={o.tabId}
+                          className="p-3 rounded-xl flex flex-col gap-2"
+                          style={{ background: "#17171a", border: "1px solid rgba(255,255,255,0.08)" }}
+                        >
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-white truncate max-w-[280px]">{o.title || "Note"}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-md font-mono" style={{ background: "rgba(255,255,255,0.07)", color: "#a1a1aa" }}>
+                              {dayStr} {timeStr}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-md font-mono" style={{ background: "rgba(99,102,241,0.15)", color: "#a5b4fc" }}>
+                              {o.revisionCount} snapshot{o.revisionCount === 1 ? "" : "s"}
+                            </span>
+                            <div className="flex-1" />
+                            <button
+                              type="button"
+                              onClick={() => { void restoreOrphan(o.tabId, String(o.lastContent || "")); }}
+                              className="px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer"
+                              style={{ background: "rgba(52,211,153,0.18)", color: "#6ee7b7", border: "1px solid rgba(52,211,153,0.4)" }}
+                            >
+                              {t("scratchpad_rescue_restore")}
+                            </button>
+                          </div>
+                          {preview && (
+                            <p className="text-[11px] leading-relaxed text-neutral-400 line-clamp-2" dir="auto">{preview}</p>
+                          )}
+                        </div>
+                      );
+                    });
+                  })()
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Compare two notes side by side with highlighted differences. */}
+      {compareOpen &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+            onClick={() => setCompareOpen(false)}
+          >
+            <div
+              className="w-full max-w-6xl max-h-[88vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl"
+              style={{ background: "#121214", border: "1px solid rgba(255,255,255,0.12)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div
+                className="px-5 py-4 flex items-center justify-between border-b"
+                style={{ borderColor: "rgba(255,255,255,0.08)", background: "#18181b" }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-300">
+                    <ArrowLeftRight className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">{t("scratchpad_compare_title")}</h3>
+                    <p className="text-xs text-neutral-400 max-w-xl">{t("scratchpad_compare_desc")}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCompareOpen(false)}
+                  className="p-1.5 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Note pickers + change stats */}
+              <div
+                className="px-5 py-3 flex flex-wrap items-center gap-2 border-b"
+                style={{ borderColor: "rgba(255,255,255,0.08)", background: "#141416" }}
+              >
+                <select
+                  value={compareA}
+                  onChange={(e) => setCompareA(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg text-xs max-w-[220px] truncate"
+                  style={{ background: "#1e1e22", border: "1px solid rgba(248,113,113,0.35)", color: "#fca5a5" }}
+                >
+                  {tabs.map((x) => (
+                    <option key={x.id} value={x.id}>{x.title}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => { setCompareA(compareB); setCompareB(compareA); }}
+                  title="Swap sides"
+                  className="p-1.5 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5" />
+                </button>
+                <select
+                  value={compareB}
+                  onChange={(e) => setCompareB(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg text-xs max-w-[220px] truncate"
+                  style={{ background: "#1e1e22", border: "1px solid rgba(52,211,153,0.35)", color: "#6ee7b7" }}
+                >
+                  {tabs.map((x) => (
+                    <option key={x.id} value={x.id}>{x.title}</option>
+                  ))}
+                </select>
+                <div className="flex-1" />
+                {compareData && (
+                  <div className="flex items-center gap-2 text-[11px] font-semibold font-mono">
+                    <span className="px-2 py-0.5 rounded-md" style={{ background: "rgba(248,113,113,0.15)", color: "#fca5a5" }}>
+                      −{compareData.stats.removed}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md" style={{ background: "rgba(52,211,153,0.15)", color: "#6ee7b7" }}>
+                      +{compareData.stats.added}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md" style={{ background: "rgba(255,255,255,0.06)", color: "#a1a1aa" }}>
+                      ={compareData.stats.unchanged}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Diff body */}
+              <div className="flex-1 overflow-auto" style={{ background: "#0e0e10" }}>
+                {!compareData ? (
+                  <div className="h-full flex items-center justify-center p-8 text-center text-xs text-neutral-500">
+                    {t("scratchpad_compare_pick_two")}
+                  </div>
+                ) : compareData.stats.added === 0 && compareData.stats.removed === 0 ? (
+                  <div className="h-full flex items-center justify-center p-8">
+                    <div
+                      className="px-4 py-3 rounded-xl text-xs font-semibold"
+                      style={{ background: "rgba(52,211,153,0.12)", color: "#6ee7b7", border: "1px solid rgba(52,211,153,0.3)" }}
+                    >
+                      {t("scratchpad_compare_identical")}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="min-w-0">
+                    {compareData.rows.map((row, i) => (
+                      <div
+                        key={i}
+                        className="grid grid-cols-2"
+                        style={{ borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.04)" }}
+                      >
+                        <CompareCell side={row.left} variant="left" dir={compareData.dirA} />
+                        <CompareCell side={row.right} variant="right" dir={compareData.dirB} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>,
           document.body

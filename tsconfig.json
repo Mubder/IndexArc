@@ -21,6 +21,23 @@
       ]
     },
     "allowImportingTsExtensions": true,
-    "noEmit": true
-  }
+    "noEmit": true,
+    "strict": true
+  },
+  // Pinned program membership (AUD-021): with no include/exclude, tsc pulled
+  // dist/, dist-desktop/ build trees and anything dropped in tmp/ into the
+  // CI lint gate — slow, and one stray file broke the build with a confusing
+  // error. Only first-party source is checked; deps come via imports.
+  "include": [
+    "src",
+    "server",
+    "shared",
+    "server.ts",
+    "electron-main.cjs",
+    "preload.cjs",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "vitest.setup.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-desktop", "dist-desktop2", "dist-desktop-release", "tmp", "data", "backups", "logs", ".desktop-sandbox"]
 }

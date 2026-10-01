@@ -2,10 +2,11 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Search, X, StickyNote, KeyRound, Terminal, Compass, ArrowRight } from "lucide-react";
 import { VaultEntry, Tab, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
-import { isArabicText } from "../utils";
+import { isArabicText, maskValue } from "../utils";
 
 interface CommandPaletteModalProps {
   isOpen: boolean;
+  onOpen: () => void;
   onClose: () => void;
   entries: VaultEntry[];
   onSelectEntry: (entry: VaultEntry) => void;
@@ -15,6 +16,7 @@ interface CommandPaletteModalProps {
 
 export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   isOpen,
+  onOpen,
   onClose,
   entries,
   onSelectEntry,
@@ -31,7 +33,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         if (isOpen) onClose();
-        else setQuery("");
+        else onOpen(); // toggle — previously this only cleared the query, so the advertised Ctrl+K could never OPEN the palette
       }
       if (e.key === "Escape" && isOpen) {
         onClose();
@@ -39,7 +41,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, onOpen]);
 
   const navActions = useMemo(
     () => [
@@ -61,6 +63,36 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
       })
       .slice(0, 15);
   }, [entries, query]);
+
+  const showNav = !query.trim();
+  const navCount = showNav ? navActions.length : 0;
+
+  // Flat selectable order for keyboard navigation (nav actions, then entries).
+  const total = navCount + filteredEntries.length;
+  const clamp = (i: number) => Math.max(0, Math.min(i, total - 1));
+  const activate = (flatIndex: number) => {
+    if (flatIndex < 0 || flatIndex >= total) return;
+    if (flatIndex < navCount) {
+      onNavigateTab(navActions[flatIndex].id as Tab);
+      onClose();
+    } else {
+      onSelectEntry(filteredEntries[flatIndex - navCount]);
+      onClose();
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedIndex((i) => clamp(i + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedIndex((i) => clamp(i - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      activate(selectedIndex);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -86,6 +118,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
               setQuery(e.target.value);
               setSelectedIndex(0);
             }}
+            onKeyDown={handleKeyDown}
             placeholder="Search notes, secrets, commands, or tabs... (Esc to close)"
             dir="auto"
             className="w-full bg-transparent text-base focus:outline-none"
@@ -104,22 +137,22 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         {/* Results Body */}
         <div className="p-2 max-h-[60vh] overflow-y-auto custom-scrollbar space-y-3">
           {/* Quick Navigation Commands */}
-          {!query.trim() && (
+          {showNav && (
             <div>
               <div className="px-3 py-1.5 text-[10px] uppercase font-semibold tracking-wider" style={{ color: "var(--text-muted)" }}>
                 Quick Navigation
               </div>
               <div className="space-y-1">
-                {navActions.map((action) => (
+                {navActions.map((action, i) => (
                   <button
                     key={action.id}
                     type="button"
-                    onClick={() => {
-                      onNavigateTab(action.id as Tab);
-                      onClose();
-                    }}
+                    onClick={() => activate(i)}
                     className="w-full text-left px-3 py-2 rounded-xl flex items-center justify-between gap-3 text-xs transition-all hover:bg-[var(--bg-hover)]"
-                    style={{ color: "var(--text)" }}
+                    style={{
+                      color: "var(--text)",
+                      background: selectedIndex === i ? "var(--bg-hover)" : "transparent",
+                    }}
                   >
                     <div className="flex items-center gap-2.5">
                       {action.icon}
@@ -143,22 +176,27 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
               </p>
             ) : (
               <div className="space-y-1">
-                {filteredEntries.map((entry) => {
+                {filteredEntries.map((entry, i) => {
+                  const flatIndex = navCount + i;
                   const isNote = entry.family === "note";
                   const isSecret = entry.family === "secret";
                   const isCmd = entry.family === "command";
                   const isAr = isArabicText(entry.name);
+                  // Secrets (and unidentified high-entropy values) render
+                  // MASKED — the same policy as every other list surface.
+                  // Search still matches on the real value above.
+                  const isMasked = isSecret || entry.family === "unknown";
 
                   return (
                     <button
                       key={entry.id}
                       type="button"
-                      onClick={() => {
-                        onSelectEntry(entry);
-                        onClose();
-                      }}
+                      onClick={() => activate(flatIndex)}
                       className="w-full text-left px-3 py-2.5 rounded-xl flex items-center justify-between gap-3 transition-all hover:bg-[var(--bg-hover)] group"
-                      style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
+                      style={{
+                        background: selectedIndex === flatIndex ? "var(--bg-hover)" : "var(--bg-surface)",
+                        border: "1px solid var(--border)",
+                      }}
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="shrink-0 p-1.5 rounded-lg" style={{ background: "var(--bg-input)" }}>
@@ -177,7 +215,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
                             {entry.name}
                           </div>
                           <div className="text-[10px] truncate max-w-md" style={{ color: "var(--text-muted)" }}>
-                            {entry.value.slice(0, 90)}
+                            {isMasked ? maskValue(entry.value) : entry.value.slice(0, 90)}
                           </div>
                         </div>
                       </div>
@@ -201,7 +239,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
           className="px-4 py-2 border-t flex items-center justify-between text-[11px]"
           style={{ borderColor: "var(--border)", background: "var(--bg-base)", color: "var(--text-muted)" }}
         >
-          <span>Use <strong>Ctrl + K</strong> anytime to toggle</span>
+          <span>Use <strong>Ctrl + K</strong> anytime to toggle · <strong>↑↓</strong> navigate · <strong>Enter</strong> select</span>
           <span>IndexArc Search</span>
         </div>
       </div>

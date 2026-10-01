@@ -30,8 +30,21 @@ export default function Starfield() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let w = (canvas.width = window.innerWidth);
-    let h = (canvas.height = window.innerHeight);
+    // Backing store in DEVICE pixels, CSS size at 100% (AUD-006): the draw
+    // loop scales the context by dpr every frame, so a CSS-pixel backing
+    // store cropped the field to the top-left quadrant on any display
+    // scaling > 100% (typical on Windows). `w`/`h` stay LOGICAL so the
+    // particle math is unchanged.
+    let w = 0;
+    let h = 0;
+    const resize = () => {
+      const dprNow = Math.min(window.devicePixelRatio || 1, 2);
+      w = window.innerWidth;
+      h = window.innerHeight;
+      canvas.width = Math.round(w * dprNow);
+      canvas.height = Math.round(h * dprNow);
+    };
+    resize();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     // Ambient star drift does not need full refresh rates: 800 particles at
@@ -119,8 +132,8 @@ export default function Starfield() {
     }
 
     const onResize = () => {
-      w = canvas.width = window.innerWidth;
-      h = canvas.height = window.innerHeight;
+      resize();
+      if (reducedMotion) drawFrame();
     };
     window.addEventListener("resize", onResize);
 

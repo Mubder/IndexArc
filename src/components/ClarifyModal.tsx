@@ -33,9 +33,13 @@ export const ClarifyModal: React.FC<ClarifyModalProps> = ({
   onSubmitClarify,
   settings = null,
 }) => {
-  if (!isOpen) return null;
-  const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
+  // Hooks BEFORE any early return (Rules of Hooks): if this component is ever
+  // mounted persistently, `isOpen` flipping false→true would otherwise crash
+  // with "Rendered more hooks than during the previous render".
   const [revealed, setRevealed] = useState(false);
+  const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
+
+  if (!isOpen) return null;
 
   return (
     <div

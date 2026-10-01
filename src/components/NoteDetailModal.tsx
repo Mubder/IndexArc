@@ -23,7 +23,9 @@ interface NoteDetailModalProps {
   entry: VaultEntry | null;
   isOpen: boolean;
   onClose: () => void;
-  onSaveEntry?: (id: string, updates: Partial<VaultEntry>) => Promise<void>;
+  /** PATCH the entry. Resolve true on success — the modal stays in edit mode
+   *  and shows an error when it resolves false or rejects. */
+  onSaveEntry?: (id: string, updates: Partial<VaultEntry>) => Promise<boolean>;
   onReopenInScratchpad?: (title: string, contentHtml: string) => void;
   settings: Settings | null;
 }
@@ -43,6 +45,7 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
   const [editBody, setEditBody] = useState("");
   const [copiedType, setCopiedType] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
@@ -86,16 +89,23 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
   const handleSave = async () => {
     if (!onSaveEntry) return;
     setIsSaving(true);
+    setSaveError("");
     try {
-      await onSaveEntry(entry.id, {
+      const ok = await onSaveEntry(entry.id, {
         name: editTitle,
         notes: editBody.replace(/<[^>]*>/g, ""),
         value: editBody.replace(/<[^>]*>/g, ""),
         raw_fragment: editBody,
       });
-      setIsEditing(false);
+      if (ok) {
+        setIsEditing(false);
+      } else {
+        // The App-level handler already toasted; keep a local hint too so the
+        // modal explains why it stayed in edit mode.
+        setSaveError("Save failed — your edits are still here, retry when the vault is reachable.");
+      }
     } catch {
-      /* ignore */
+      setSaveError("Save failed — your edits are still here, retry when the vault is reachable.");
     } finally {
       setIsSaving(false);
     }
@@ -279,17 +289,22 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
         {/* Content Body */}
         <div className="p-6 flex-1 overflow-y-auto custom-scrollbar leading-relaxed">
           {isEditing ? (
-            <textarea
-              value={editBody}
-              onChange={(e) => setEditBody(e.target.value)}
-              dir="auto"
-              className="w-full h-full min-h-[300px] p-4 rounded-xl text-sm font-mono focus:outline-none transition-all resize-none"
-              style={{
-                background: "var(--bg-input)",
-                border: "1px solid var(--accent-bright)",
-                color: "var(--text)",
-              }}
-            />
+            <div className="flex flex-col h-full gap-2">
+              <textarea
+                value={editBody}
+                onChange={(e) => setEditBody(e.target.value)}
+                dir="auto"
+                className="w-full flex-1 min-h-[300px] p-4 rounded-xl text-sm font-mono focus:outline-none transition-all resize-none"
+                style={{
+                  background: "var(--bg-input)",
+                  border: "1px solid var(--accent-bright)",
+                  color: "var(--text)",
+                }}
+              />
+              {saveError && (
+                <p className="text-xs px-1" style={{ color: "#f87171" }}>{saveError}</p>
+              )}
+            </div>
           ) : richHtml ? (
             <div
               className={`prose prose-invert max-w-none text-sm leading-relaxed ${
