@@ -8,6 +8,9 @@ import type { RouteContext } from "./types.js";
 export function entriesRoutes(ctx: RouteContext) {
   const r = Router();
   const { store } = ctx;
+  // Each candidate in a bulk save can trigger an embedding round-trip —
+  // cap the batch so one 2 MB body can't enqueue thousands of them.
+  const MAX_SAVE_ITEMS = 200;
 
   r.post("/save", async (req, res) => {
     const settings = store.getSettings();
@@ -15,6 +18,9 @@ export function entriesRoutes(ctx: RouteContext) {
     const items = req.body?.candidates || req.body?.items;
     try {
       if (Array.isArray(items) && items.length) {
+        if (items.length > MAX_SAVE_ITEMS) {
+          return res.status(413).json({ error: `Too many candidates in one save (max ${MAX_SAVE_ITEMS}) — split the batch` });
+        }
         const saved = await saveMany(
           store,
           settings,
@@ -32,6 +38,9 @@ export function entriesRoutes(ctx: RouteContext) {
             allow_incomplete: true,
           }))
         );
+        // Bulk saves changed the vault too — other windows need the event
+        // (only the single-candidate branch used to broadcast).
+        sendSSE("entries-changed", { action: "save", count: saved.length });
         return res.json({ entries: saved });
       }
       const c = req.body;
@@ -51,7 +60,7 @@ export function entriesRoutes(ctx: RouteContext) {
       sendSSE("entries-changed", { action: "save" });
       res.json({ entry });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -76,6 +85,7 @@ export function entriesRoutes(ctx: RouteContext) {
         })
       );
     }
+    if (saved.length) sendSSE("entries-changed", { action: "park", count: saved.length });
     res.json({ entries: saved });
   }));
 
@@ -140,8 +150,10 @@ export function entriesRoutes(ctx: RouteContext) {
 
     const name = String(req.body?.name ?? "").trim().toLowerCase();
     if (name) {
+      // Hand-edited/legacy vault JSON can miss `name` — guard before the
+      // toLowerCase (a throw here 500s the whole duplicate check).
       const similarName = entries.find(
-        (e) => e.name.toLowerCase() === name && e.family !== "note" && e.family !== "command"
+        (e) => (e.name || "").toLowerCase() === name && e.family !== "note" && e.family !== "command"
       );
       if (similarName) {
         return res.json({

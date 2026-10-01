@@ -10,13 +10,14 @@ import {
   autoComplete,
 } from "../ai/providers.js";
 import { askVault } from "../services/ask.js";
+import { wrapAsync } from "../asyncWrap.js";
 import type { RouteContext } from "./types.js";
 
 export function aiRoutes(ctx: RouteContext) {
   const r = Router();
   const { store } = ctx;
 
-  r.get("/status", async (_req, res) => {
+  r.get("/status", wrapAsync(async (_req, res) => {
     const settings = store.getSettings();
     const ollama = await checkOllama(settings.ollama_base_url);
     const active = await resolveActiveProvider(settings);
@@ -71,13 +72,18 @@ export function aiRoutes(ctx: RouteContext) {
         total: (stats as { total?: number }).total ?? stats.total_saved + stats.needs_attention,
       },
     });
-  });
+  }));
 
   // AI-content gate: if the request names a protected note, refuse to send
-  // its content to any AI provider.
+  // its content to any AI provider. While the vault is LOCKED the tab list
+  // reads as empty, so `protected` would be unknowable — fail CLOSED (refuse)
+  // instead of silently treating a possibly-protected note as unprotected.
+  // Uses a read-only accessor: getScratchpad() can perform archive-migration
+  // writes as a side effect, inappropriate for an authz check.
   const protectedAiGuard = (tabId: unknown): boolean => {
     if (typeof tabId !== "string" || !tabId) return false;
-    const tab = store.getScratchpad().find((t: any) => t.id === tabId);
+    if (store.isLocked()) return true; // fail-closed while locked
+    const tab = (store as any).peekScratchpadTabs?.()?.find((t: any) => t.id === tabId);
     return !!(tab && tab.protected);
   };
 
@@ -101,20 +107,28 @@ export function aiRoutes(ctx: RouteContext) {
       const tokens = text.split(/(\s+|[^\w\u0600-\u06FF\u0750-\u077F]+)/);
       let localCorrected = "";
       const sp = ctx.spellcheck;
+      // Bounded: one engine round-trip per misspelling — a whole 2 MB note
+      // would otherwise take minutes of serial awaits.
+      const MAX_PROOFREAD_TOKENS = 800;
+      let tokenCount = 0;
       for (const token of tokens) {
         if (!token || /^\s+$/.test(token) || token.length <= 1 || /^[^\w\u0600-\u06FF\u0750-\u077F]+$/.test(token)) {
           localCorrected += token;
           continue;
         }
+        if (++tokenCount > MAX_PROOFREAD_TOKENS) {
+          localCorrected += token; // beyond the budget: pass through unchanged
+          continue;
+        }
         if (sp?.isArabicToken(token)) {
-          if (!sp.checkArabicWord(token, sp.arSpell)) {
+          if (!(await sp.checkArabicWord(token, sp.arSpell))) {
             const sugs = await sp.suggestArabicWord(token, sp.arSpell, 1);
             localCorrected += (sugs && sugs[0]) ? sugs[0] : token;
           } else {
             localCorrected += token;
           }
         } else if (sp?.isLatinToken(token)) {
-          if (!sp.checkEnglishWord(token, sp.enSpell)) {
+          if (!(await sp.checkEnglishWord(token, sp.enSpell))) {
             const sugs = await sp.suggestEnglishWord(token, sp.enSpell, 1);
             localCorrected += (sugs && sugs[0]) ? sugs[0] : token;
           } else {
@@ -128,13 +142,14 @@ export function aiRoutes(ctx: RouteContext) {
       res.json({ corrected: localCorrected || text, mode: "local" });
     } catch (e: any) {
       addLog("PROOFREAD", `Failed: ${e.message}`);
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 
   r.post("/autocomplete", async (req, res) => {
     const prefix = String(req.body?.prefix ?? "").trim();
-    const maxTokens = Number(req.body?.maxTokens) || 64;
+    // Clamp: `Number(x) || 64` passes negatives/floats through to providers.
+    const maxTokens = Math.max(1, Math.min(512, Math.floor(Number(req.body?.maxTokens) || 64)));
     if (!prefix) {
       return res.json({ completion: "", done: true });
     }
@@ -155,24 +170,23 @@ export function aiRoutes(ctx: RouteContext) {
     }
   });
 
-  r.get("/ollama/models", async (_req, res) => {
-    const s = store.getSettings();
-    const ollama = await checkOllama(s.ollama_base_url);
-    res.json(ollama);
-  });
+  // NOTE: the old `GET /ollama/models` duplicate was removed (audit AUD-022)
+  // — `/status` already returns `ollama_models` and nothing called this.
 
-  r.post("/ollama/ensure", async (_req, res) => {
+  r.post("/ollama/ensure", wrapAsync(async (_req, res) => {
     const s = store.getSettings();
     const ollama = await checkOllama(s.ollama_base_url);
     if (!ollama.online) return res.status(503).json({ error: "Ollama is not running" });
     const required = [s.ollama_llm_model, s.ollama_embed_model];
+    // Exact-tag presence: a family-prefix match (qwen2.5:0.5b satisfying
+    // qwen2.5:7b) used to skip the pull and silently warm the wrong variant.
+    const missing: string[] = [];
     for (const model of required) {
-      const has = ollama.models.some(
-        (m) => m === model || m.startsWith(model.split(":")[0])
-      );
-      if (!has) {
+      if (!model) continue;
+      if (!ollama.models.some((m) => m === model)) {
         addLog("OLLAMA", `Pulling model ${model}…`);
-        await pullOllamaModel(s, model, (p) => addLog("OLLAMA", p));
+        const pulled = await pullOllamaModel(s, model, (p) => addLog("OLLAMA", p));
+        if (!pulled) missing.push(model);
       }
     }
     const warmed = await warmOllamaLlm(s);
@@ -181,15 +195,17 @@ export function aiRoutes(ctx: RouteContext) {
         ? await warmOllamaEmbed(s)
         : warmed;
     const updated = await checkOllama(s.ollama_base_url);
-    res.json({
-      status: "success",
+    // Honest status: a failed multi-GB pull used to report plain "success".
+    res.status(missing.length ? 207 : 200).json({
+      status: missing.length ? "partial" : "success",
+      missing,
       models: updated.models,
       llm_loaded: warmed,
       embed_loaded: embedWarmed,
     });
-  });
+  }));
 
-  r.post("/ollama/warm", async (_req, res) => {
+  r.post("/ollama/warm", wrapAsync(async (_req, res) => {
     const s = store.getSettings();
     const ollama = await checkOllama(s.ollama_base_url, true);
     if (!ollama.online) {
@@ -233,7 +249,7 @@ export function aiRoutes(ctx: RouteContext) {
       embed_model: targetEmbed,
       embed_loaded: embedOk,
     });
-  });
+  }));
 
   r.post("/ask", async (req, res) => {
     const query = String(req.body?.query ?? "").trim();
@@ -247,7 +263,7 @@ export function aiRoutes(ctx: RouteContext) {
       );
       res.json(result);
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -291,7 +307,7 @@ export function aiRoutes(ctx: RouteContext) {
       });
     } catch (e: any) {
       addLog("REWRITE", `Rewrite failed: ${e.message}`);
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 

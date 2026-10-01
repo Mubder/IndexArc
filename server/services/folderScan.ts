@@ -131,15 +131,15 @@ function isProbablyBinary(buf: Buffer): boolean {
   return n > 0 && weird / n > 0.3;
 }
 
-function readTextFile(filePath: string): { ok: true; text: string } | { ok: false; reason: string } {
+async function readTextFile(filePath: string): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
   try {
-    const stat = fs.statSync(filePath);
+    const stat = await fs.promises.stat(filePath);
     if (!stat.isFile()) return { ok: false, reason: "Not a file" };
     if (stat.size === 0) return { ok: false, reason: "Empty file" };
     if (stat.size > MAX_FILE_BYTES) {
       return { ok: false, reason: `Too large (${Math.round(stat.size / 1024)}KB > ${MAX_FILE_BYTES / 1024}KB limit)` };
     }
-    const buf = fs.readFileSync(filePath);
+    const buf = await fs.promises.readFile(filePath);
     if (isProbablyBinary(buf)) return { ok: false, reason: "Binary / non-text file" };
     let text = buf.toString("utf-8");
     // strip BOM
@@ -173,7 +173,7 @@ async function extractText(
 
   // JSON Lines / NDJSON: one JSON object per line
   if (ext === ".jsonl" || ext === ".ndjson") {
-    const r = readTextFile(filePath);
+    const r = await readTextFile(filePath);
     if (!r.ok) return r;
     const out = r.text
       .split(/\r?\n/)
@@ -193,7 +193,7 @@ async function extractText(
   // Microsoft Word (.docx)
   if (ext === ".docx") {
     try {
-      const stat = fs.statSync(filePath);
+      const stat = await fs.promises.stat(filePath);
       if (stat.size === 0) return { ok: false, reason: "Empty file" };
       if (stat.size > MAX_DOC_BYTES)
         return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
@@ -208,11 +208,11 @@ async function extractText(
   // PDF
   if (ext === ".pdf") {
     try {
-      const stat = fs.statSync(filePath);
+      const stat = await fs.promises.stat(filePath);
       if (stat.size === 0) return { ok: false, reason: "Empty file" };
       if (stat.size > MAX_DOC_BYTES)
         return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
-      const buf = fs.readFileSync(filePath);
+      const buf = await fs.promises.readFile(filePath);
       const { PDFParse } = await import("pdf-parse");
       const data = await PDFParse(buf);
       const text = ((data && data.text) || "").trim();
@@ -225,7 +225,7 @@ async function extractText(
   // Excel (.xlsx)
   if (ext === ".xlsx") {
     try {
-      const stat = fs.statSync(filePath);
+      const stat = await fs.promises.stat(filePath);
       if (stat.size === 0) return { ok: false, reason: "Empty file" };
       if (stat.size > MAX_DOC_BYTES)
         return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
@@ -281,30 +281,59 @@ function flattenJson(obj: unknown, prefix = ""): string {
   return lines.join("\n");
 }
 
-export function walkFiles(rootDir: string): string[] {
+// Traversal budgets (AUD-017): MAX_FILES caps COLLECTED files only — a tree
+// of empty/unsupported directories used to be walked to exhaustion
+// (scanning C:\ traversed the whole drive), synchronously on the server's
+// event loop. Depth + directory budgets bound the walk itself; the walk is
+// async and yields to the event loop between directories so SSE, auto-lock
+// and every API call stay responsive during a scan.
+const MAX_DEPTH = 12;
+const MAX_DIRS = 4000;
+
+const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+export async function walkFiles(
+  rootDir: string
+): Promise<{ files: string[]; truncated: boolean }> {
   const out: string[] = [];
-  const walk = (dir: string) => {
+  let dirsVisited = 0;
+  let truncated = false;
+
+  const walk = async (dir: string, depth: number): Promise<void> => {
     if (out.length >= MAX_FILES) return;
+    if (depth > MAX_DEPTH || dirsVisited >= MAX_DIRS) {
+      truncated = true;
+      return;
+    }
+    dirsVisited++;
+    // Yield between directories: a huge tree must not monopolize the loop.
+    await yieldToEventLoop();
     let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const ent of entries) {
-      if (out.length >= MAX_FILES) break;
+      if (out.length >= MAX_FILES) {
+        truncated = true;
+        break;
+      }
       const full = path.join(dir, ent.name);
+      // NOTE: Dirent.isDirectory/isFile are false for symlinks — symlinked
+      // files/dirs are skipped (never followed), which is the traversal-safe
+      // behavior for a secret scanner.
       if (ent.isDirectory()) {
         if (IGNORE_DIRS.has(ent.name.toLowerCase())) continue;
         if (ent.name.startsWith(".") && ent.name !== ".env") continue;
-        walk(full);
+        await walk(full, depth + 1);
       } else if (ent.isFile()) {
         out.push(full);
       }
     }
   };
-  walk(rootDir);
-  return out;
+  await walk(rootDir, 0);
+  return { files: out, truncated };
 }
 
 function buildBrief(summary: FolderScanSummary, skipped: SkippedFile[]): string {
@@ -345,19 +374,34 @@ export async function scanFolder(
   const started = Date.now();
   const folderPath = path.resolve(options.folderPath.trim());
 
-  if (!fs.existsSync(folderPath) || !fs.statSync(folderPath).isDirectory()) {
+  let rootStat: fs.Stats;
+  try {
+    rootStat = await fs.promises.stat(folderPath);
+  } catch {
+    throw new Error("Folder path is invalid or not a directory");
+  }
+  if (!rootStat.isDirectory()) {
     throw new Error("Folder path is invalid or not a directory");
   }
 
   addLog("FOLDER", `Starting scan: ${folderPath}`);
 
-  const allFiles = walkFiles(folderPath);
+  const { files: allFiles, truncated: walkTruncated } = await walkFiles(folderPath);
   const skipped: SkippedFile[] = [];
+  if (walkTruncated) {
+    skipped.push({
+      path: folderPath,
+      name: path.basename(folderPath),
+      reason: `Traversal budget reached (max ${MAX_FILES} files / ${MAX_DEPTH} levels / ${MAX_DIRS} folders) — scan is partial`,
+    });
+  }
   const processed: ProcessedFile[] = [];
   const candidates: AnalyzeCandidate[] = [];
   let provider_used = "heuristic";
 
   for (const filePath of allFiles) {
+    // Yield between files so a 500-file scan interleaves with other requests.
+    await yieldToEventLoop();
     const name = path.basename(filePath);
     if (!isSupportedFile(filePath)) {
       skipped.push({
@@ -435,7 +479,7 @@ export async function scanFolder(
     const needs = fileCandidates.length - ready;
     let size = 0;
     try {
-      size = fs.statSync(filePath).size;
+      size = (await fs.promises.stat(filePath)).size;
     } catch {
       /* ignore */
     }
@@ -575,7 +619,7 @@ export async function scanFileIntoSession(
     {
       path: filePath,
       name,
-      size: fs.statSync(filePath).size,
+      size: await fs.promises.stat(filePath).then((st) => st.size).catch(() => 0),
       candidates_found: fileCandidates.length,
       ready: fileCandidates.filter((c) => c.ready).length,
       needs_review: fileCandidates.filter((c) => !c.ready).length,

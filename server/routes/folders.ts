@@ -135,68 +135,16 @@ export function foldersRoutes(ctx: RouteContext) {
     res.json(updated);
   });
 
-  r.post("/sessions/:id/commit", wrapAsync(async (req, res) => {
-    const session = store.getScanSession(req.params.id);
-    if (!session) return res.status(404).json({ error: "Session not found" });
-    if (session.status !== "review") {
-      return res.status(400).json({ error: "Session already committed or discarded" });
-    }
-
-    const mode = String(req.body?.mode || "selected");
-    const settings = store.getSettings();
-    const saved = [];
-    const parked = [];
-    let discarded = 0;
-
-    for (const c of session.candidates) {
-      const decision = c.decision || "pending";
-      if (decision === "discard") {
-        discarded++;
-        continue;
-      }
-
-      let action: "save" | "park" | "skip" = "skip";
-      if (decision === "save") action = "save";
-      else if (decision === "park") action = "park";
-      else if (decision === "pending") {
-        if (mode === "all_ready" && c.ready) action = "save";
-        else if (mode === "all_pending") action = c.ready ? "save" : "park";
-        else if (mode === "apply") action = c.ready ? "save" : "park";
-      }
-
-      if (action === "skip") continue;
-
-      const entry = await saveCandidate(store, settings, {
-        value: c.value,
-        type: c.type,
-        name: c.name,
-        raw_fragment: c.raw_fragment,
-        labels: c.labels,
-        type_aliases: c.type_aliases,
-        family: c.family,
-        paste_id: session.id,
-        source_file: c.source_file,
-        allow_incomplete: true,
-      });
-      if (entry.status === "saved") saved.push(entry);
-      else parked.push(entry);
-    }
-
-    store.updateScanSession(req.params.id, { status: "committed" });
-
-    addLog(
-      "FOLDER",
-      `Committed session ${session.id.slice(0, 8)}: saved=${saved.length} parked=${parked.length} discarded=${discarded}`
-    );
-    sendSSE("folders-changed", { action: "commit", saved: saved.length, parked: parked.length });
-    res.json({ saved, parked, discarded, session_id: session.id });
-  }));
-
+  // NOTE: the old near-duplicate `/sessions/:id/commit` endpoint was removed
+  // (audit AUD-022) — the frontend only calls `/apply`, and the two copies
+  // had silently diverged (different pending-candidate handling).
   r.post("/sessions/:id/apply", wrapAsync(async (req, res) => {
-    const session = store.getScanSession(req.params.id);
-    if (!session) return res.status(404).json({ error: "Session not found" });
-    if (session.status !== "review") {
-      return res.status(400).json({ error: "Session already closed" });
+    // Atomic claim (AUD-009): flip review→committing BEFORE the long awaited
+    // save loop, so a double-click / concurrent SSE-triggered retry cannot
+    // re-enter and commit the candidate set twice.
+    const session = store.claimScanSession(req.params.id, "review", "committing");
+    if (!session) {
+      return res.status(400).json({ error: "Session not found or already closed" });
     }
 
     const settings = store.getSettings();
@@ -204,34 +152,42 @@ export function foldersRoutes(ctx: RouteContext) {
     const parked = [];
     let discarded = 0;
 
-    for (const c of session.candidates) {
-      const decision = c.decision || "pending";
-      if (decision === "discard") {
-        discarded++;
-        continue;
-      }
+    try {
+      for (const c of session.candidates) {
+        const decision = c.decision || "pending";
+        if (decision === "discard") {
+          discarded++;
+          continue;
+        }
 
-      let park = false;
-      if (decision === "park") park = true;
-      else if (decision === "save") park = false;
-      else {
-        park = !c.ready;
-      }
+        let park = false;
+        if (decision === "park") park = true;
+        else if (decision === "save") park = false;
+        else {
+          park = !c.ready;
+        }
 
-      const entry = await saveCandidate(store, settings, {
-        value: c.value,
-        type: park && !c.type ? "" : c.type,
-        name: park && !c.name ? "" : c.name,
-        raw_fragment: c.raw_fragment,
-        labels: c.labels,
-        type_aliases: c.type_aliases,
-        family: c.family,
-        paste_id: session.id,
-        source_file: c.source_file,
-        allow_incomplete: true,
-      });
-      if (entry.status === "saved") saved.push(entry);
-      else parked.push(entry);
+        const entry = await saveCandidate(store, settings, {
+          value: c.value,
+          type: park && !c.type ? "" : c.type,
+          name: park && !c.name ? "" : c.name,
+          raw_fragment: c.raw_fragment,
+          labels: c.labels,
+          type_aliases: c.type_aliases,
+          family: c.family,
+          paste_id: session.id,
+          source_file: c.source_file,
+          allow_incomplete: true,
+        });
+        if (entry.status === "saved") saved.push(entry);
+        else parked.push(entry);
+      }
+    } catch (e: any) {
+      // Roll the claim back so the user can retry instead of a session
+      // stranded in "committing" forever.
+      store.updateScanSession(req.params.id, { status: "review" });
+      addLog("FOLDER", `Apply failed mid-way for session ${req.params.id.slice(0, 8)} (rolled back to review): ${e?.message || e}`);
+      return res.status(500).json({ error: "Internal server error" });
     }
 
     store.updateScanSession(req.params.id, {
@@ -257,23 +213,15 @@ export function foldersRoutes(ctx: RouteContext) {
   }));
 
   r.post("/sessions/:id/discard", (req, res) => {
-    const session = store.getScanSession(req.params.id);
-    if (!session) return res.status(404).json({ error: "Session not found" });
-    store.updateScanSession(req.params.id, { status: "discarded" });
+    // Same atomic claim — discard while an apply is mid-flight is refused.
+    const claimed = store.claimScanSession(req.params.id, "review", "discarded");
+    if (!claimed) return res.status(400).json({ error: "Session not found or already closed" });
     addLog("FOLDER", `Discarded scan session ${req.params.id.slice(0, 8)}`);
     res.json({ success: true });
   });
 
-  r.post("/:id/unwatch", (req, res) => {
-    watchers.stop(req.params.id);
-    const folders = store.listWatchedFolders();
-    const f = folders.find((x) => x.id === req.params.id);
-    if (f) {
-      f.watching = false;
-      store.upsertWatchedFolder(f);
-    }
-    res.json({ success: true });
-  });
+  // NOTE: the old `/:id/unwatch` pause-watching endpoint was removed (audit
+  // AUD-022) — no UI caller existed; DELETE /:id fully removes the folder.
 
   r.delete("/:id", (req, res) => {
     watchers.stop(req.params.id);
@@ -288,14 +236,9 @@ export function foldersRoutes(ctx: RouteContext) {
 export function fsRoutes(_ctx: RouteContext) {
   const r = Router();
 
-  r.get("/roots", (_req, res) => {
-    try {
-      res.json({ roots: listFsRoots() });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
+  // NOTE: the old `GET /roots` duplicate was removed (audit AUD-022) — the
+  // frontend opens the picker via /list with an empty path, which already
+  // returns the root listing.
   r.get("/list", (req, res) => {
     try {
       const dirPath = String(req.query.path || "").trim();

@@ -76,11 +76,9 @@ export class FolderWatcherManager {
     if (!handle) return;
 
     // ignore dirs / temp writes
+    // Hidden files are ignored, except .env* (the whole point of the scan).
     const base = path.basename(filePath);
-    if (base.startsWith(".") && !base.startsWith(".env")) {
-      // allow .env*
-      if (!base.startsWith(".env")) return;
-    }
+    if (base.startsWith(".") && !base.startsWith(".env")) return;
 
     const existing = handle.debounce.get(filePath);
     if (existing) clearTimeout(existing);

@@ -9,9 +9,30 @@ import type { Response } from "express";
 // unthrottled master-password oracle.
 const attempts = new Map<string, { count: number; firstAttempt: number; failures: number }>();
 const WINDOW_MS = 60_000;
+const MAX_TRACKED_KEYS = 10_000;
 
 function clientKey(req: any): string {
   return req.ip || req.socket?.remoteAddress || "unknown";
+}
+
+function getEntry(key: string, now: number) {
+  let entry = attempts.get(key);
+  if (entry && now - entry.firstAttempt > WINDOW_MS) {
+    attempts.delete(key);
+    entry = undefined;
+  }
+  if (!entry) {
+    // Hard cap so a bind override exposing many source IPs can't grow the
+    // map without bound (stale entries for keys that stop requesting are
+    // never otherwise revisited).
+    if (attempts.size >= MAX_TRACKED_KEYS) {
+      const oldest = attempts.keys().next().value;
+      if (oldest !== undefined) attempts.delete(oldest);
+    }
+    entry = { count: 0, firstAttempt: now, failures: 0 };
+    attempts.set(key, entry);
+  }
+  return entry;
 }
 
 export function throttle(
@@ -19,15 +40,7 @@ export function throttle(
   res: Response,
   opts: { max: number }
 ): { delayMs: number } | null {
-  const now = Date.now();
-  let entry = attempts.get(clientKey(req));
-  if (entry && now - entry.firstAttempt > WINDOW_MS) {
-    entry = undefined;
-  }
-  if (!entry) {
-    entry = { count: 0, firstAttempt: now, failures: 0 };
-    attempts.set(clientKey(req), entry);
-  }
+  const entry = getEntry(clientKey(req), Date.now());
   entry.count++;
   if (entry.count > opts.max) {
     res.status(429).json({ error: "Too many attempts. Try again in a minute." });

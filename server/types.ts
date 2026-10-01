@@ -188,7 +188,7 @@ export interface FolderScanSession {
   folder_path: string;
   created_at: string;
   updated_at: string;
-  status: "review" | "committed" | "discarded";
+  status: "review" | "committing" | "committed" | "discarded";
   watching: boolean;
   summary: FolderScanSummary;
   processed_files: ProcessedFile[];

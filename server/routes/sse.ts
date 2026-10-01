@@ -32,13 +32,11 @@ export function sseRoutes(_ctx: RouteContext) {
   });
 
   r.get("/events", (req, res) => {
-    // Bounded: a leaky local client pool must not grow without limit.
+    // Bounded and FAIR: reject the NEWCOMER with 503 (EventSource reconnects
+    // automatically) instead of evicting the oldest client — the oldest is
+    // normally the app's own long-lived shell connection.
     if (clients.size >= MAX_CLIENTS) {
-      const oldest = clients.values().next().value;
-      if (oldest) {
-        try { oldest.end(); } catch {}
-        clients.delete(oldest);
-      }
+      return res.status(503).json({ error: "Too many SSE clients" });
     }
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -51,8 +49,16 @@ export function sseRoutes(_ctx: RouteContext) {
 
     clients.add(res);
 
-    // Heartbeat every 30s to keep connection alive
+    // Heartbeat every 30s to keep the connection alive. res.write on a
+    // destroyed socket returns false / emits 'error' asynchronously instead
+    // of throwing, so ALSO watch close/error and check destroyed before
+    // writing — half-open peers must not pin a client slot forever.
     const heartbeat = setInterval(() => {
+      if (res.destroyed || res.writableEnded) {
+        clearInterval(heartbeat);
+        clients.delete(res);
+        return;
+      }
       try {
         res.write(`:heartbeat\n\n`);
       } catch {
@@ -61,10 +67,13 @@ export function sseRoutes(_ctx: RouteContext) {
       }
     }, 30000);
 
-    req.on("close", () => {
+    const drop = () => {
       clearInterval(heartbeat);
       clients.delete(res);
-    });
+    };
+    req.on("close", drop);
+    res.on("close", drop);
+    res.on("error", drop);
   });
 
   return r;

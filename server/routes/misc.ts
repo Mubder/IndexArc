@@ -377,13 +377,24 @@ export function miscRoutes(ctx: RouteContext) {
     res.json({ revisions });
   });
 
+  // --- Orphaned note recovery ---
+  // Revision snapshots whose tab no longer exists — the rescue path for
+  // notes whose content saves never landed. POST /tabs/:id/content upserts,
+  // so restoring is just saving the latest snapshot back under its id.
+  r.get("/scratchpad/revisions/orphaned", (_req, res) => {
+    res.json({ orphans: store.getOrphanedNoteRevisions() });
+  });
+
   // --- Granular scratchpad endpoints (preferred over whole-array saves) ---
   r.post("/scratchpad/tabs/:id/content", (req, res) => {
     const content = String(req.body?.content ?? "");
     const baseRev = req.body?.base_rev === undefined ? undefined : Number(req.body.base_rev);
+    // Title is honored ONLY when this POST creates the tab (upsert); an
+    // existing tab's title changes must go through /meta (which bumps rev).
+    const title = req.body?.title;
     // NOTE: force/override is intentionally NOT accepted from request bodies —
     // protection can only be lifted via the dedicated /protect route.
-    const result = store.updateScratchpadTabContent(req.params.id, content, baseRev);
+    const result = store.updateScratchpadTabContent(req.params.id, content, baseRev, false, title);
     if (result.protected) {
       return res.status(423).json({ error: "This note is protected", server_tab: result.tab });
     }
