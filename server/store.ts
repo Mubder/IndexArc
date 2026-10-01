@@ -160,8 +160,18 @@ export class VaultStore {
   }
 
   async unlock(password: string): Promise<boolean> {
-    const raw = readJson<any>(this.paths.vaultFile, null);
-    if (!raw || !raw.encrypted) {
+    // Fresh install: no vault file → nothing to unlock (LockScreen passes).
+    if (!fs.existsSync(this.paths.vaultFile)) return true;
+    // An unparseable vault is QUARANTINED by readJsonOrQuarantine (original
+    // preserved as *.corrupt-*). Fail CLOSED (RESIDUAL-2): a corrupt vault
+    // must not "unlock" into an empty plaintext one that the next write
+    // would happily replace. Recovery runs through the Emergency Plan.
+    const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
+    if (raw === null) {
+      addLog("SECURITY", "Vault file unreadable (quarantined as *.corrupt-*) — unlock refused. Restore from Settings → Emergency Plan.");
+      return false;
+    }
+    if (!raw.encrypted) {
       return true;
     }
     try {
@@ -187,6 +197,10 @@ export class VaultStore {
           // next unlock will retry the upgrade.
         }
       }
+      // Verified knowledge of the master password — end the encryption grace
+      // period if its window has elapsed (staged plaintext copies are then
+      // finally deleted; see stagePlaintextArtifactsForGrace).
+      this.maybeClearEncryptionGrace();
       return true;
     } catch {
       return false;
@@ -270,49 +284,98 @@ export class VaultStore {
     } catch {}
     try { this.writeSessions(this.listScanSessions()); } catch {}
     // The vault is now encrypted at rest — every PLAINTEXT copy that existed
-    // a moment ago (backups, snapshots, .prev rollbacks) is a liability.
-    this.purgePlaintextArtifacts();
+    // a moment ago is a liability, but destroying the only recovery path in
+    // the same operation that changes credentials is how a hostile or
+    // fumbled setup turns into permanent data loss (the "one-call ransom").
+    // Industrial pattern: stage the old recovery copies into a grace area
+    // and delete them only after the new state is VERIFIED (successful
+    // unlock ≥24h later). See clearPlaintextGrace / SECURITY.md.
+    this.stagePlaintextArtifactsForGrace();
     // Synchronous (not debounced): the moment encryption turns on is the
     // moment a ciphertext snapshot must exist, before anything else happens.
     this.flushEmergencySnapshot();
   }
 
+  // ── Encryption grace period (ransom recoverability) ──────────────────────
+  // Plaintext-era backups/snapshots are MOVED (not deleted) to
+  // backups/plaintext-grace/ when encryption turns on, and deleted only once
+  // the vault has been successfully unlocked after the grace window. Honest
+  // scope: a one-shot hostile call cannot complete a ransom (the grace copies
+  // survive it and Emergency Plan restores from them); a token-holding
+  // attacker with sustained access can still finish the job by waiting out
+  // the window and unlocking with their own password — but that attacker can
+  // already read every secret, so lockout adds nothing for them.
+  private static readonly GRACE_MS = 24 * 60 * 60 * 1000;
+
+  private graceDir(): string {
+    return path.join(this.paths.backupsDir, "plaintext-grace");
+  }
+
+  /** Snapshots staged into the grace area live here (restorable via name). */
+  private graceSnapshotDir(): string {
+    return path.join(this.graceDir(), "emergency");
+  }
+
+  private graceMarkerFile(): string {
+    return path.join(this.paths.configDir, "encrypt-grace.json");
+  }
+
+  private moveIntoGrace(from: string, toDir: string): boolean {
+    try {
+      fs.mkdirSync(toDir, { recursive: true });
+      let dest = path.join(toDir, path.basename(from));
+      let n = 1;
+      while (fs.existsSync(dest)) {
+        dest = path.join(toDir, `${path.basename(from)}.${n++}`);
+      }
+      try {
+        fs.renameSync(from, dest);
+      } catch {
+        // Cross-device fallback: copy then unlink.
+        fs.copyFileSync(from, dest);
+        fs.unlinkSync(from);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /**
-   * Delete every at-rest artifact that still holds plaintext secret data:
-   * timestamped backups, emergency snapshots recorded as unencrypted, and
-   * .prev rollback copies from the plaintext era. Called the moment a vault
-   * becomes encrypted (setupPassword) — a fresh ciphertext backup and
-   * snapshot are written immediately afterwards, so recovery capability is
-   * preserved while the plaintext footprint goes to zero.
+   * Move every at-rest artifact that still holds plaintext secret data
+   * (timestamped backups, unencrypted emergency snapshots, .prev rollbacks)
+   * into backups/plaintext-grace/ and record the grace marker. Replaces the
+   * old delete-in-place purge, which irreversibly destroyed the recovery
+   * path at the same moment encryption was (possibly hostilely) enabled.
    */
-  private purgePlaintextArtifacts(): void {
-    let purgedBackups = 0;
-    let purgedSnapshots = 0;
-    let purgedPrev = 0;
+  private stagePlaintextArtifactsForGrace(): void {
+    const graceDir = this.graceDir();
+    let stagedBackups = 0;
+    let stagedSnapshots = 0;
+    let stagedPrev = 0;
 
     const isPlaintextJson = (file: string): boolean => {
       try {
         const raw = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
         return !raw?.encrypted;
       } catch {
-        return false; // unreadable ≠ plaintext; never delete what we can't classify
+        return false; // unreadable ≠ plaintext; never touch what we can't classify
       }
     };
 
-    // Timestamped backup sets (vault-/vectors-/scratchpad-/settings-*.json)
-    // and stray .prev copies. Settings backups hold API keys — same rule.
+    // Timestamped backup sets (vault-/vectors-/…/settings-*.json — settings
+    // backups hold API keys) and stray .prev copies. The grace dir itself
+    // carries no .json/.prev suffix at the top level, so it is skipped.
     try {
       for (const f of fs.readdirSync(this.paths.backupsDir)) {
         if (!/\.(json|prev)$/.test(f)) continue;
         const full = path.join(this.paths.backupsDir, f);
-        if (isPlaintextJson(full)) {
-          fs.unlinkSync(full);
-          purgedBackups++;
-        }
+        if (isPlaintextJson(full) && this.moveIntoGrace(full, graceDir)) stagedBackups++;
       }
     } catch {}
 
-    // Emergency snapshots flagged unencrypted, across ALL redundant locations.
+    // Unencrypted emergency snapshots, across ALL redundant locations.
+    const graceSnapDir = this.graceSnapshotDir();
     for (const dir of this.emergencyDirs()) {
       try {
         for (const f of fs.readdirSync(dir)) {
@@ -320,10 +383,7 @@ export class VaultStore {
           const full = path.join(dir, f);
           try {
             const parsed = JSON.parse(fs.readFileSync(full, "utf8"));
-            if (!parsed?.encrypted) {
-              fs.unlinkSync(full);
-              purgedSnapshots++;
-            }
+            if (!parsed?.encrypted && this.moveIntoGrace(full, graceSnapDir)) stagedSnapshots++;
           } catch {}
         }
       } catch {}
@@ -332,19 +392,64 @@ export class VaultStore {
     // .prev rollback copies from the plaintext era.
     for (const file of [this.paths.scratchpadFile + ".prev", this.paths.scratchpadArchiveFile + ".prev"]) {
       try {
-        if (fs.existsSync(file) && isPlaintextJson(file)) {
-          fs.unlinkSync(file);
-          purgedPrev++;
-        }
+        if (fs.existsSync(file) && isPlaintextJson(file) && this.moveIntoGrace(file, graceDir)) stagedPrev++;
       } catch {}
     }
 
-    if (purgedBackups || purgedSnapshots || purgedPrev) {
+    try {
+      fs.mkdirSync(path.dirname(this.graceMarkerFile()), { recursive: true });
+      fs.writeFileSync(
+        this.graceMarkerFile(),
+        JSON.stringify(
+          {
+            created_at: new Date().toISOString(),
+            vault_salt: this.encryptionSaltHex,
+            staged: { backups: stagedBackups, snapshots: stagedSnapshots, prev: stagedPrev },
+          },
+          null,
+          2
+        )
+      );
+    } catch {}
+
+    if (stagedBackups || stagedSnapshots || stagedPrev) {
       addLog(
-        "DATA",
-        `Plaintext scrub after encryption: removed ${purgedBackups} backup file(s), ${purgedSnapshots} unencrypted snapshot(s), ${purgedPrev} rollback copy(ies). Fresh encrypted backups replace them.`
+        "SECURITY",
+        `Encryption grace: moved ${stagedBackups} backup(s), ${stagedSnapshots} snapshot(s), ${stagedPrev} rollback copy(ies) to backups/plaintext-grace/. They are deleted only after the vault is next unlocked ≥24h after encryption (ransom-recovery window — see SECURITY.md).`
       );
     }
+  }
+
+  /** Delete the grace area + marker. Only called on VERIFIED unlock (see below). */
+  private clearPlaintextGrace(reason: string): void {
+    try {
+      if (!fs.existsSync(this.graceMarkerFile())) return;
+      let staged = 0;
+      try {
+        for (const _ of fs.readdirSync(this.graceDir())) staged++;
+      } catch {}
+      fs.rmSync(this.graceDir(), { recursive: true, force: true });
+      fs.unlinkSync(this.graceMarkerFile());
+      addLog("SECURITY", `Encryption grace period ended (${reason}) — removed ${staged} staged plaintext artifact(s).`);
+    } catch {}
+  }
+
+  /**
+   * End the grace period only when BOTH hold: the vault was successfully
+   * unlocked with the master password AND the grace window has elapsed.
+   * The window is what stops a hostile setup→unlock sequence from clearing
+   * its own recovery copies in one sitting.
+   */
+  private maybeClearEncryptionGrace(): void {
+    try {
+      const markerPath = this.graceMarkerFile();
+      if (!fs.existsSync(markerPath)) return;
+      const marker = JSON.parse(fs.readFileSync(markerPath, "utf8"));
+      const setAt = Date.parse(marker?.created_at || "") || 0;
+      if (Date.now() - setAt >= VaultStore.GRACE_MS) {
+        this.clearPlaintextGrace("vault unlocked after the 24h window");
+      }
+    } catch {}
   }
 
   async removePassword(password: string): Promise<boolean> {
@@ -471,6 +576,12 @@ export class VaultStore {
     }
     if (!settings.anthropic_api_key && process.env.ANTHROPIC_API_KEY) {
       settings.anthropic_api_key = process.env.ANTHROPIC_API_KEY;
+    }
+    // LOCAL_OPENAI_API_KEY lets the key live in .env instead of settings.json
+    // (same pattern as the cloud providers — secrets belong outside
+    // copyable config files).
+    if (!settings.local_openai_api_key && process.env.LOCAL_OPENAI_API_KEY) {
+      settings.local_openai_api_key = process.env.LOCAL_OPENAI_API_KEY;
     }
     this._settingsCache = settings;
     return settings;
@@ -862,6 +973,21 @@ export class VaultStore {
     return all.filter((t: any) => t && !t.archived);
   }
 
+  /**
+   * Public READ-ONLY view of the active tabs for authorization-style checks
+   * (e.g. the AI protected-note guard). Unlike getScratchpad(), this never
+   * performs the archive-migration write and never populates the write-path
+   * cache; a locked vault simply reads as empty.
+   */
+  peekScratchpadTabs(): any[] {
+    if (this._scratchpadCache) return this._scratchpadCache;
+    try {
+      return this.readScratchpadRaw();
+    } catch {
+      return [];
+    }
+  }
+
   saveScratchpad(
     tabs: any[],
     opts: { force?: boolean; override_protected?: boolean } = {}
@@ -927,8 +1053,11 @@ export class VaultStore {
       }
     } catch {}
 
-    this._scratchpadCache = enriched;
+    // Cache only AFTER the write succeeded — the same invariant writeVault
+    // documents: a failed write must not leave the cache holding state that
+    // never reached disk (otherwise reads serve a phantom save).
     this.writeProtectedJson(this.paths.scratchpadFile, { version: 2, tabs: enriched });
+    this._scratchpadCache = enriched;
     return enriched;
   }
 
@@ -1018,7 +1147,8 @@ export class VaultStore {
     id: string,
     content: string,
     baseRev?: number,
-    force = false
+    force = false,
+    title?: unknown
   ): { ok: boolean; conflict?: boolean; protected?: boolean; tab?: any } {
     const active = this.getScratchpad();
     const tab = active.find((t: any) => t.id === id);
@@ -1027,7 +1157,15 @@ export class VaultStore {
     }
     if (!tab) {
       // Upsert: a brand-new tab created by a client (client-generated id).
-      const created = { id, title: "Scratch", content, archived: false };
+      // The client's title travels with the content save — defaulting it to
+      // "Scratch" made every newly created note lose its name the first time
+      // the server's list replaced the client's (e.g. after an archive).
+      const created = {
+        id,
+        title: (title && String(title)) || "Scratch",
+        content,
+        archived: false,
+      };
       const saved = this.saveScratchpad([...active, created], { force: true });
       return { ok: true, tab: saved.find((t: any) => t.id === id) };
     }
@@ -1128,6 +1266,57 @@ export class VaultStore {
     this.writeProtectedJson(this.paths.noteRevisionsFile, { version: 1, revisions: all });
   }
 
+  /**
+   * Revision groups whose tab no longer exists. These survive when a note's
+   * content saves never landed (server down/locked while the editor kept
+   * typing — snapshots POST through a separate path) or a tab was removed
+   * out from under live revisions. They are often the ONLY remaining copy
+   * of a note the user believes was lost, newest snapshot first.
+   */
+  getOrphanedNoteRevisions(): Array<{
+    tabId: string;
+    title: string;
+    timestamp: number;
+    revisionCount: number;
+    charCount: number;
+    lastContent: string;
+  }> {
+    const raw = this.readProtectedJson<{ revisions: Record<string, any[]> }>(this.paths.noteRevisionsFile, {
+      revisions: {},
+    });
+    const all = raw.revisions || {};
+    // A revision group is only orphaned if NO tab owns it — active OR
+    // archived. Archived notes keep their revision history (unarchive
+    // restores it), and surfacing them here would offer "restoring" a note
+    // that still exists as a duplicate.
+    const tabIds = new Set(this.getScratchpad().map((t: any) => String(t.id)));
+    for (const archived of this.getScratchpadArchive()) {
+      tabIds.add(String((archived as any)?.id));
+    }
+    const out: Array<{
+      tabId: string;
+      title: string;
+      timestamp: number;
+      revisionCount: number;
+      charCount: number;
+      lastContent: string;
+    }> = [];
+    for (const [tabId, revs] of Object.entries(all)) {
+      if (!Array.isArray(revs) || revs.length === 0) continue;
+      if (tabIds.has(tabId)) continue;
+      const latest = revs[0]; // addNoteRevision prepends newest
+      out.push({
+        tabId,
+        title: String(latest?.title || "Note"),
+        timestamp: Number(latest?.timestamp) || 0,
+        revisionCount: revs.length,
+        charCount: Number(latest?.charCount) || 0,
+        lastContent: String(latest?.content ?? ""),
+      });
+    }
+    return out.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
   // --- Scratchpad Archive (Passive Cold Storage) ---
   getScratchpadArchive(): any[] {
     if (this._scratchpadArchiveCache) return this._scratchpadArchiveCache;
@@ -1148,8 +1337,9 @@ export class VaultStore {
       }
     } catch {}
 
-    this._scratchpadArchiveCache = safe;
+    // Cache only after the write succeeded (see saveScratchpad).
     this.writeProtectedJson(this.paths.scratchpadArchiveFile, { version: 1, tabs: safe });
+    this._scratchpadArchiveCache = safe;
     return safe;
   }
 
@@ -1291,6 +1481,10 @@ export class VaultStore {
       };
       companion(this.paths.vectorsFile, "vectors");
       companion(this.paths.scratchpadFile, "scratchpad");
+      // Distinct prefixes — "scratchpad-archive" would collide with the
+      // "scratchpad-" prune pool and the two kinds would evict each other.
+      companion(this.paths.scratchpadArchiveFile, "notes-archive");
+      companion(this.paths.noteRevisionsFile, "note-revisions");
       companion(this.paths.settingsFile, "settings");
 
       this.pruneBackups(keep);
@@ -1328,6 +1522,8 @@ export class VaultStore {
       prune("vault-");
       prune("vectors-");
       prune("scratchpad-");
+      prune("notes-archive-");
+      prune("note-revisions-");
       prune("settings-");
     } catch {}
   }
@@ -1412,6 +1608,24 @@ export class VaultStore {
     return this.readSessions().find((s) => s.status === "review");
   }
 
+  /**
+   * Atomic claim for closing a review session (AUD-009): compare-and-set the
+   * status BEFORE the caller starts its long awaited work, so a concurrent
+   * double-click / double-apply cannot re-enter and save the candidate set
+   * twice. Synchronous on purpose — no await may separate the check from the
+   * write. Returns the claimed session snapshot, or null when the session is
+   * missing or not in the expected state.
+   */
+  claimScanSession(id: string, expected: FolderScanSession["status"], next: FolderScanSession["status"]): FolderScanSession | null {
+    const sessions = this.readSessions();
+    const idx = sessions.findIndex((s) => s.id === id);
+    if (idx === -1) return null;
+    if (sessions[idx].status !== expected) return null;
+    sessions[idx] = { ...sessions[idx], status: next, updated_at: new Date().toISOString() };
+    this.writeSessions(sessions);
+    return sessions[idx];
+  }
+
   saveScanSession(session: FolderScanSession) {
     const sessions = this.readSessions().filter((s) => s.id !== session.id);
     sessions.unshift(session);
@@ -1492,6 +1706,11 @@ export class VaultStore {
         vault: readB64(this.paths.vaultFile),
         vectors: readB64(this.paths.vectorsFile),
         scratchpad: readB64(this.paths.scratchpadFile),
+        // Cold storage + note history are user data too — a snapshot without
+        // them "survived" the reinstall but silently lost every archived note
+        // and the whole revision history (audit AUD-003).
+        scratchpad_archive: readB64(this.paths.scratchpadArchiveFile),
+        note_revisions: readB64(this.paths.noteRevisionsFile),
         settings: readB64(this.paths.settingsFile),
       },
     };
@@ -1505,7 +1724,17 @@ export class VaultStore {
    */
   createEmergencySnapshot(keep = 15): string | null {
     try {
-      if (!fs.existsSync(this.paths.vaultFile)) return null;
+      // Scratchpad-only users never create vault.json — their notes are
+      // snapshot-worthy too (paths.ts applies the same rule for root
+      // detection). Snapshot when ANY bundled file exists, not just the vault.
+      const anySource = [
+        this.paths.vaultFile,
+        this.paths.vectorsFile,
+        this.paths.scratchpadFile,
+        this.paths.scratchpadArchiveFile,
+        this.paths.noteRevisionsFile,
+      ].some((f) => fs.existsSync(f));
+      if (!anySource) return null;
       const { payload } = this.buildSnapshot();
 
       const stamp = new Date()
@@ -1573,13 +1802,22 @@ export class VaultStore {
     encrypted: boolean;
     has_vault: boolean;
     has_notes: boolean;
+    /** True for plaintext-era snapshots staged into the encryption grace
+     *  area — the ransom-recovery copies; restorable like any other. */
+    grace?: boolean;
     locations: string[];
   }[] {
     const byName = new Map<
       string,
-      { name: string; size: number; created_at: string; encrypted: boolean; has_vault: boolean; has_notes: boolean; locations: string[] }
+      { name: string; size: number; created_at: string; encrypted: boolean; has_vault: boolean; has_notes: boolean; grace?: boolean; locations: string[] }
     >();
-    for (const dir of this.emergencyDirs()) {
+    // Grace-staged snapshots are listed alongside live ones (flagged) so the
+    // Emergency Plan UI offers the pre-encryption recovery copies.
+    const scanDirs: Array<{ dir: string; grace: boolean }> = [
+      ...this.emergencyDirs().map((dir) => ({ dir, grace: false })),
+      { dir: this.graceSnapshotDir(), grace: true },
+    ];
+    for (const { dir, grace } of scanDirs) {
       try {
         if (!fs.existsSync(dir)) continue;
         for (const f of fs.readdirSync(dir)) {
@@ -1598,7 +1836,7 @@ export class VaultStore {
             // ("empty" — restoring one is a no-op), so users don't pick the
             // newest entry blindly when it holds nothing.
             has_vault = !!parsed?.files?.vault;
-            has_notes = !!parsed?.files?.scratchpad;
+            has_notes = !!(parsed?.files?.scratchpad || parsed?.files?.scratchpad_archive);
           } catch {}
           const prev = byName.get(f);
           if (prev) {
@@ -1611,6 +1849,7 @@ export class VaultStore {
               encrypted,
               has_vault,
               has_notes,
+              grace,
               locations: [dir],
             });
           }
@@ -1626,9 +1865,10 @@ export class VaultStore {
    * on success.
    */
   restoreEmergencySnapshot(name: string): boolean {
-    // Locate the file in any location.
+    // Locate the file in any location — live emergency dirs AND the grace
+    // area (pre-encryption recovery copies are restorable by name too).
     let payload: string | null = null;
-    for (const dir of this.emergencyDirs()) {
+    for (const dir of [...this.emergencyDirs(), this.graceSnapshotDir()]) {
       const full = path.join(dir, name);
       try {
         if (fs.existsSync(full)) {
@@ -1667,6 +1907,11 @@ export class VaultStore {
     writeB64(this.paths.vaultFile, snapshot.files.vault);
     writeB64(this.paths.vectorsFile, snapshot.files.vectors);
     writeB64(this.paths.scratchpadFile, snapshot.files.scratchpad);
+    // Pre-AUD-003 snapshots have no archive/revisions fields — writeB64's
+    // null check makes restoring them a no-op for those files (backward
+    // compatible), while new snapshots round-trip them fully.
+    writeB64(this.paths.scratchpadArchiveFile, snapshot.files.scratchpad_archive);
+    writeB64(this.paths.noteRevisionsFile, snapshot.files.note_revisions);
     writeB64(this.paths.settingsFile, snapshot.files.settings);
 
     // Critical: drop ALL in-memory state. The store caches entries, settings,
@@ -1680,7 +1925,7 @@ export class VaultStore {
     this.clearCache();
     // Re-baseline integrity HMACs so the next startup check doesn't flag the
     // restored files as "unexpectedly modified".
-    for (const f of [this.paths.vaultFile, this.paths.vectorsFile, this.paths.scratchpadFile, this.paths.settingsFile]) {
+    for (const f of [this.paths.vaultFile, this.paths.vectorsFile, this.paths.scratchpadFile, this.paths.scratchpadArchiveFile, this.paths.noteRevisionsFile, this.paths.settingsFile]) {
       this.recordIntegrity(f);
     }
     return true;

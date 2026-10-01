@@ -12,6 +12,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   spellcheckWords: (words) => ipcRenderer.invoke("spellcheck-words", words),
   spellcheckSuggest: (word) => ipcRenderer.invoke("spellcheck-suggest", word),
   addCustomWord: (word) => ipcRenderer.invoke("add-custom-word", word),
+  // Quit handshake: main asks the renderer to flush unsaved notes before the
+  // app exits; the renderer answers when its save queue is drained.
+  onFlushRequest: (cb) => {
+    ipcRenderer.on("flush-request", () => {
+      try { cb(); } catch {}
+    });
+  },
+  flushComplete: () => ipcRenderer.send("flush-complete"),
 });
 
 // On right-click inside a text field, select the word under the cursor when

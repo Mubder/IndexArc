@@ -88,7 +88,7 @@ describe("encryption envelope coverage + plaintext scrub", () => {
     expect(fresh.listScanSessions().length).toBe(1);
   });
 
-  it("setting a password scrubs pre-existing plaintext backups and snapshots", async () => {
+  it("setting a password STAGES pre-existing plaintext backups and snapshots into the grace area (moved, not deleted)", async () => {
     store.createEntry(entry("e1", "k1"));
 
     // Plaintext artifacts from the unencrypted era.
@@ -104,12 +104,26 @@ describe("encryption envelope coverage + plaintext scrub", () => {
 
     await store.setupPassword("hunter2 hunter2");
 
+    // Gone from their live locations...
     expect(fs.existsSync(path.join(paths.backupsDir, "vault-2026-01-01.json"))).toBe(false);
     expect(fs.existsSync(path.join(paths.backupsDir, "settings-2026-01-01.json"))).toBe(false);
     expect(fs.existsSync(path.join(snapDir, "indexarc-emergency-2026-01-01T00-00-00.000.iabak"))).toBe(false);
     expect(fs.existsSync(paths.scratchpadFile + ".prev")).toBe(false);
 
-    // An ENCRYPTED snapshot (written after setup) survives.
+    // ...but RECOVERABLE in the grace area (moved, not destroyed — the
+    // ransom-recovery window), with a marker recording it.
+    const graceDir = path.join(paths.backupsDir, "plaintext-grace");
+    expect(fs.existsSync(path.join(graceDir, "vault-2026-01-01.json"))).toBe(true);
+    expect(fs.existsSync(path.join(graceDir, "settings-2026-01-01.json"))).toBe(true);
+    expect(fs.existsSync(path.join(graceDir, "emergency", "indexarc-emergency-2026-01-01T00-00-00.000.iabak"))).toBe(true);
+    expect(fs.existsSync(path.join(paths.configDir, "encrypt-grace.json"))).toBe(true);
+
+    // The staged snapshot is LISTED (grace-flagged) so Emergency Plan can restore it.
+    const staged = store.listEmergencySnapshots().find((s) => s.grace);
+    expect(staged?.name).toBe("indexarc-emergency-2026-01-01T00-00-00.000.iabak");
+    expect(staged?.encrypted).toBe(false);
+
+    // An ENCRYPTED snapshot (written after setup) survives in the live dir.
     const remaining = fs.readdirSync(snapDir).filter((f) => f.endsWith(".iabak"));
     expect(remaining.length).toBeGreaterThan(0);
     for (const f of remaining) {

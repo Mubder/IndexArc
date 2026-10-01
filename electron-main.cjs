@@ -1,5 +1,5 @@
 const { app, BrowserWindow, Menu, MenuItem, dialog, ipcMain, Tray, nativeImage, shell, clipboard } = require("electron");
-const { fork, spawn } = require("child_process");
+const { spawn } = require("child_process");
 const path = require("path");
 const http = require("http");
 const https = require("https");
@@ -128,12 +128,23 @@ function logCrash(tag, e) {
 process.on("uncaughtException", (e) => logCrash("uncaughtException", e));
 process.on("unhandledRejection", (e) => logCrash("unhandledRejection", e));
 
-let serverProcess = null;
+let serverProcess = null; // reserved: a future out-of-process server mode
 let ollamaProcess = null;
 let mainWindow = null;
 let tray = null;
 let isQuiting = false;
 const PORT = Number(process.env.PORT) || 3000;
+
+// SINGLE INSTANCE: launching the exe again while the app is tray-hidden used
+// to start a SECOND full instance with its own server on the next port — its
+// window loaded STALE server state while the tray instance still held newer
+// unsaved edits in memory, so notes looked wiped until the hidden instance
+// saved. A second launch now just restores + focuses the existing window.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => showWindow());
+}
 
 // Render in SOFTWARE. Three independent GPU-compositing failures on consumer
 // drivers (constant coil whine; scroll drift; blank unpainted regions where
@@ -717,22 +728,22 @@ function startBackendServer() {
     require(serverPath);
     console.log("[embedded-server] Express vault server embedded cleanly in main process");
   } catch (err) {
-    console.error("[embedded-server] Failed to require serverPath directly, attempting fork fallback:", err);
-    serverProcess = fork(serverPath, [], {
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: "1",
-      },
-      execPath: process.execPath,
-      silent: false,
-    });
-
-    serverProcess.on("close", (code) => {
-      console.log(`Backend closed: ${code}`);
-    });
-    serverProcess.on("error", (err) => {
-      console.error("Backend failed:", err);
-    });
+    // Fail LOUDLY (same doctrine as the missing-bundle check above). The old
+    // fallback forked the server as a child process — but the child's env is
+    // a COPY: INDEXARC_ACTUAL_PORT and the pairing token never propagated
+    // back to this parent, so waitForServerPort timed out after 15s (or the
+    // identity check failed with expected===null) and the app quit anyway.
+    // A broken embed is a broken build — say so instead of hanging.
+    console.error("[embedded-server] Failed to embed vault server:", err);
+    try {
+      dialog.showErrorBox(
+        "IndexArc — server failed to start",
+        "The embedded vault server could not start:\n\n" +
+          (err && err.message ? err.message : String(err)) +
+          "\n\nThe application will close. Your data on disk is untouched."
+      );
+    } catch {}
+    app.exit(1);
   }
 }
 
@@ -1031,6 +1042,61 @@ app.on("window-all-closed", () => {
   // With a tray, keep the app running when all windows are closed
   // (except on macOS where the convention is to quit).
   if (process.platform === "darwin") app.quit();
+});
+
+// ── Coordinated flush before exit ──
+// The renderer owns the freshest note content (editor memory + debounce
+// timers). Quitting used to destroy it mid-debounce — the last keystrokes
+// died unsaved. Before the app goes down, give the renderer a short, bounded
+// window to push everything to the embedded server (each POST is written
+// straight to disk), then proceed with the quit.
+let flushBeforeExitDone = false;
+function requestRendererFlush(timeoutMs) {
+  return new Promise((resolve) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      try { ipcMain.removeListener("flush-complete", onFlushComplete); } catch {}
+      resolve();
+    };
+    const onFlushComplete = () => finish();
+    ipcMain.on("flush-complete", onFlushComplete);
+    const timer = setTimeout(finish, timeoutMs);
+    timer.unref?.();
+    try {
+      mainWindow.webContents.send("flush-request");
+    } catch {
+      finish();
+    }
+  });
+}
+
+function quitWithFlush(e, timeoutMs) {
+  if (flushBeforeExitDone) return; // second pass — let the quit proceed
+  try {
+    e?.preventDefault?.();
+  } catch {}
+  flushBeforeExitDone = true;
+  requestRendererFlush(timeoutMs).then(() => {
+    isQuiting = true;
+    app.quit();
+  });
+}
+
+app.on("before-quit", (e) => {
+  // Tray Exit, app.quit() from anywhere, and the silent uninstall that
+  // precedes a reinstall/update all land here first.
+  quitWithFlush(e, 3000);
+});
+
+// Windows shutdown / logoff — shorter deadline, the OS is not patient.
+app.on("session-end", (e) => {
+  quitWithFlush(e, 1500);
 });
 
 app.on("activate", () => {

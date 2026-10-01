@@ -148,4 +148,48 @@ describe("emergency restore serves fresh data without restart", () => {
       .map((s) => s.name);
     expect(new Set(names).size).toBe(names.length);
   });
+
+  // AUD-003 regression: archived notes and revision history are user data —
+  // a snapshot that omits them "survives" a reinstall while silently losing
+  // every archived note. They must round-trip through snapshot + restore.
+  it("snapshots and restores the archive and note revisions too", () => {
+    fs.writeFileSync(
+      paths.scratchpadFile,
+      JSON.stringify({ version: 2, tabs: [{ id: "live", title: "Live", content: "<p>l</p>" }] })
+    );
+    fs.writeFileSync(
+      paths.scratchpadArchiveFile,
+      JSON.stringify({ version: 1, tabs: [{ id: "cold", title: "Cold", content: "<p>c</p>", archived: true }] })
+    );
+    store.addNoteRevision({ tabId: "live", title: "Live", timestamp: 1234, content: "<p>v1</p>" });
+
+    const snap = store.createEmergencySnapshot(50);
+    expect(snap).toBeTruthy();
+    expect(store.listEmergencySnapshots().find((s) => s.name === snap)?.has_notes).toBe(true);
+
+    // Simulate the reinstall wipe: everything under data/ is gone.
+    fs.unlinkSync(paths.scratchpadFile);
+    fs.unlinkSync(paths.scratchpadArchiveFile);
+    fs.unlinkSync(paths.noteRevisionsFile);
+
+    expect(store.restoreEmergencySnapshot(snap as string)).toBe(true);
+    expect(store.getScratchpadArchive().map((t: any) => t.id)).toEqual(["cold"]);
+    expect(store.getNoteRevisions("live").length).toBe(1);
+
+    // Timestamped backups carry the companions as well.
+    store.createEntry({
+      value: "s3cret",
+      type: "api key",
+      name: "backup-key",
+      raw_fragment: "",
+      labels: [],
+      type_aliases: [],
+      status: "saved",
+      family: "secret",
+    });
+    store.backupVault(10);
+    const stampFiles = fs.readdirSync(paths.backupsDir);
+    expect(stampFiles.some((f) => f.startsWith("notes-archive-"))).toBe(true);
+    expect(stampFiles.some((f) => f.startsWith("note-revisions-"))).toBe(true);
+  });
 });
