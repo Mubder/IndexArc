@@ -210,6 +210,18 @@ export function miscRoutes(ctx: RouteContext) {
             : `${scratchTabs ?? 0} active note(s)${archivedCount ? `, ${archivedCount} archived` : ""}.`,
         },
         {
+          id: "archive-integrity",
+          label: "Archived notes integrity",
+          severity: "critical",
+          ok: locked ? true : (store.verifyArchiveIntegrity() === null),
+          detail: locked
+            ? "Locked — archive integrity hidden until unlock."
+            : (() => {
+                const w = store.verifyArchiveIntegrity();
+                return w ? `⚠ ${w}` : `${archivedCount ?? 0} archived note(s) intact.`;
+              })(),
+        },
+        {
           id: "integrity",
           label: "Data integrity",
           severity: "critical",
@@ -518,6 +530,17 @@ export function miscRoutes(ctx: RouteContext) {
 
   r.get("/scratchpad/archive/count", (_req, res) => {
     res.json({ count: store.getScratchpadArchive().length });
+  });
+
+  r.get("/scratchpad/archive/verify", (_req, res) => {
+    const warning = store.verifyArchiveIntegrity();
+    const count = store.getScratchpadArchive().length;
+    res.json({
+      ok: warning === null,
+      count,
+      baseline: (store as any)._archiveBaseline ?? null,
+      warning,
+    });
   });
 
   r.post("/scratchpad/archive-tab", (req, res) => {

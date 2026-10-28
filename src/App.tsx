@@ -315,7 +315,30 @@ export default function App() {
         .then((saved) => {
           settingsDirtyRef.current = false;
           if (saved && typeof saved === "object" && (saved as Settings).ai_provider) {
-            setSettings(saved as Settings);
+            // The server masks API keys (writes them as ""). Never let a
+            // masked response wipe locally stored key material — merge
+            // server fields while preserving non-empty local key values.
+            // Without this, every settings save replaced the whole settings
+            // object with a masked copy, and components below the first
+            // edited toggle (e.g. the egress card at the top of SettingsTab)
+            // re-rendered with blanked keys — visually "cut in half."
+            const KEY_FIELDS = [
+              "gemini_api_key",
+              "openai_api_key",
+              "groq_api_key",
+              "openrouter_api_key",
+              "anthropic_api_key",
+              "local_openai_api_key",
+            ] as const;
+            setSettings((prev) => {
+              const merged = { ...prev, ...saved };
+              for (const k of KEY_FIELDS) {
+                if (merged[k] === "" && prev?.[k]) {
+                  merged[k] = prev[k];
+                }
+              }
+              return merged;
+            });
           }
         })
         .catch(() => {
@@ -355,13 +378,13 @@ export default function App() {
         if (vStatus.is_locked) {
           // Locked: Only logs and settings can be fetched
           const [lg, se] = await Promise.all([
-            fetch("/api/logs").then((r) => r.json()),
-            fetch("/api/settings").then((r) => r.json()),
+            fetch("/api/logs").then((r) => r.json()).catch(() => []),
+            fetch("/api/settings").then((r) => r.json()).catch(() => null),
           ]);
           if (isStale()) return;
           setVaultStatus(vStatus);
-          setLogs(lg);
-          if (!settingsDirtyRef.current) {
+          if (Array.isArray(lg)) setLogs(lg);
+          if (!settingsDirtyRef.current && se && typeof se === "object") {
             setSettings(se);
           }
           return;
@@ -381,7 +404,10 @@ export default function App() {
       setStatus(st);
       if (Array.isArray(en)) setEntries(en);
       if (Array.isArray(att)) setAttention(att);
-      setLogs(lg);
+      // An error/non-array payload (401, 500, SPA fallback) must never replace
+      // the log array — SettingsTab renders logs.slice(), so a stray object
+      // here crashed the whole app.
+      if (Array.isArray(lg)) setLogs(lg);
       // Only load settings from server when form is clean (not mid-edit)
       if (!settingsDirtyRef.current && se) {
         setSettings(se);
@@ -941,7 +967,7 @@ export default function App() {
 
 return (
     <div
-      className="h-full font-sans antialiased flex flex-col relative overflow-hidden"
+      className="h-full font-sans antialiased flex flex-col relative overflow-clip"
       style={{
         background: "var(--bg-root)",
         color: "var(--text)",
@@ -1015,7 +1041,7 @@ return (
           {/* Sidebar - desktop: always visible, mobile: drawer */}
           <aside
             className={`
-              w-60 flex-shrink-0 flex flex-col border-r 
+              w-60 flex-shrink-0 flex flex-col border-r overflow-y-auto
               ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} 
               md:translate-x-0
               transition-transform duration-250 ease-out
@@ -1089,10 +1115,10 @@ return (
             </div>
             <div className="grid grid-cols-2 gap-1.5">
               {([
-                { val: status?.stats.total_saved ?? 0, lbl: "Saved", filter: "all" },
-                { val: status?.stats.needs_attention ?? 0, lbl: "Pending", filter: "attention" },
-                { val: status?.stats.total_secrets ?? 0, lbl: "Secrets", filter: "secret" },
-                { val: status?.stats.total_commands ?? 0, lbl: "Commands", filter: "command" },
+                { val: status?.stats?.total_saved ?? 0, lbl: "Saved", filter: "all" },
+                { val: status?.stats?.needs_attention ?? 0, lbl: "Pending", filter: "attention" },
+                { val: status?.stats?.total_secrets ?? 0, lbl: "Secrets", filter: "secret" },
+                { val: status?.stats?.total_commands ?? 0, lbl: "Commands", filter: "command" },
               ] as { val: number; lbl: string; filter: LibraryFilter }[]).map((s) => (
                 <button
                   key={s.lbl}

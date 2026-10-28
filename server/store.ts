@@ -1318,15 +1318,69 @@ export class VaultStore {
   }
 
   // --- Scratchpad Archive (Passive Cold Storage) ---
+  private _archiveBaseline: number | null = null;
+
+  /**
+   * Industrial guard: before any destructive archive write, snapshot the
+   * current archive file to backups/ with a timestamp so a mistaken or
+   * truncated write is always recoverable. Never throws — a failed guard
+   * logswarns but does not block the write (the .prev rollback is the
+   * hard backstop inside writeProtectedJson/saveScratchpadArchive).
+   */
+  private guardArchiveWrite(): void {
+    try {
+      if (!fs.existsSync(this.paths.scratchpadArchiveFile)) return;
+      const cur = fs.readFileSync(this.paths.scratchpadArchiveFile);
+      if (cur.length === 0) return;
+      const stamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")
+        .replace("T", "_")
+        .replace("Z", "");
+      const dest = path.join(this.paths.backupsDir, `notes-archive-guard-${stamp}.json`);
+      fs.mkdirSync(this.paths.backupsDir, { recursive: true });
+      fs.writeFileSync(dest, cur);
+      addLog("DATA", `Pre-write archive guard snapshot → ${path.basename(dest)}`);
+    } catch (e: any) {
+      addLog("DATA", `Archive guard snapshot failed: ${e?.message || e}`);
+    }
+  }
+
+  /**
+   * Record the archive count as the baseline on first read. Any later
+   * unexpected decrease is flagged by verifyArchiveIntegrity().
+   */
+  private setArchiveBaseline(count: number): void {
+    if (this._archiveBaseline === null) {
+      this._archiveBaseline = count;
+    }
+  }
+
+  /**
+   * Compare the current archive count against the baseline. Returns a
+   * human-readable warning if the count has dropped (possible data loss),
+   * or null if everything is consistent.
+   */
+  verifyArchiveIntegrity(): string | null {
+    const current = this.getScratchpadArchive().length;
+    if (this._archiveBaseline !== null && current < this._archiveBaseline) {
+      return `Archived notes decreased from ${this._archiveBaseline} to ${current} — possible data loss. Restore from backups/notes-archive-guard-*.json or Settings → Emergency Plan.`;
+    }
+    return null;
+  }
+
   getScratchpadArchive(): any[] {
     if (this._scratchpadArchiveCache) return this._scratchpadArchiveCache;
     const raw = this.readProtectedJson<{ tabs: any[] }>(this.paths.scratchpadArchiveFile, { tabs: [] }).tabs;
     const tabs = Array.isArray(raw) ? raw : [];
     this._scratchpadArchiveCache = tabs;
+    this.setArchiveBaseline(tabs.length);
+    this.ensureEmergencySnapshotHasArchive();
     return tabs;
   }
 
   saveScratchpadArchive(tabs: any[]): any[] {
+    this.guardArchiveWrite();
     const safe = Array.isArray(tabs) ? tabs : [];
     try {
       if (fs.existsSync(this.paths.scratchpadArchiveFile)) {
@@ -1367,6 +1421,7 @@ export class VaultStore {
 
     // Cold storage FIRST: a crash between the two writes then leaves the tab
     // duplicated (active + archive) instead of silently gone.
+    this.guardArchiveWrite();
     const archive = this.getScratchpadArchive();
     const archivedItem = { ...target, archived: true, archivedAt: Date.now() };
     const newArchive = [archivedItem, ...archive.filter((t: any) => t.id !== tabId)];
@@ -1395,6 +1450,7 @@ export class VaultStore {
 
     // Active list FIRST (deduped by id): a crash then leaves the tab in both
     // places — recoverable — instead of in neither.
+    this.guardArchiveWrite();
     const active = this.getScratchpad().filter((t: any) => t.id !== tabId);
     const restored = { ...target, archived: false };
     delete restored.archivedAt;
@@ -1413,6 +1469,7 @@ export class VaultStore {
   }
 
   deleteArchivedScratchpadTab(tabId: string): { success: boolean; archivedCount: number } {
+    this.guardArchiveWrite();
     const archive = this.getScratchpadArchive();
     const newArchive = archive.filter((t: any) => t.id !== tabId);
     this.saveScratchpadArchive(newArchive);
@@ -1857,6 +1914,23 @@ export class VaultStore {
       } catch {}
     }
     return [...byName.values()].sort((a, b) => b.name.localeCompare(a.name));
+  }
+
+  /**
+   * Pre-AUD-003 emergency snapshots lack the scratchpad_archive field —
+   * restoring one would silently delete every archived note. On first
+   * archive read, if every existing snapshot is missing the archive field,
+   * create a fresh snapshot that includes it so the restore path is safe.
+   */
+  private ensureEmergencySnapshotHasArchive(): void {
+    try {
+      const snaps = this.listEmergencySnapshots();
+      if (snaps.length === 0) return;
+      const allMissingArchive = snaps.every((s) => !s.has_notes);
+      if (!allMissingArchive) return;
+      this.createEmergencySnapshot();
+      addLog("SYSTEM", "Created fresh emergency snapshot including scratchpad_archive (pre-AUD-003 snapshots lacked it).");
+    } catch {}
   }
 
   /**
