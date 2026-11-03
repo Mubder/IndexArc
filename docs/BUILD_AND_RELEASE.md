@@ -48,12 +48,24 @@ All artifacts land in `dist-desktop/`.
 ## How packaging works
 
 1. **`vite build`** compiles the React UI into static assets in `dist/`.
-2. **esbuild** bundles `server.ts` into a single **`dist/server.cjs`** (`--platform=node --format=cjs`, externalizing `vite` and `electron`). This means the packaged app needs **no `node_modules` at runtime**.
-3. **electron-builder** wraps Electron + `dist/` + `electron-main.cjs` + `preload.cjs` + `public/` into platform installers.
+2. **esbuild** bundles `server.ts` into a single **`dist/server.cjs`** (`--platform=node --format=cjs`, externalizing `vite` and `electron`). `scripts/copy-pdf-worker.cjs` copies the pdf.js worker to `dist/pdf.worker.mjs`.
+3. **`scripts/write-dist-manifest.cjs`** writes `dist-manifest.json` (sha256 of every shipped `dist/` file; see [Release trust](#release-trust-fuses-dist-manifest-sbom)).
+4. **electron-builder** wraps Electron + `dist/` + `electron-main.cjs` + `preload.cjs` + `shared/` + `public/` + `dictionaries/` + the production `node_modules` into platform installers, then flips the Electron fuses.
 
-At runtime, Electron sets: `INDEXARC_ROOT` (portable data root), `INDEXARC_DIST_DIR` (packaged assets), `NODE_ENV=production`, and forks the server which binds `127.0.0.1` only.
+At runtime, Electron sets `INDEXARC_ROOT` (portable data root), `INDEXARC_DIST_DIR` (packaged assets) and `NODE_ENV=production`, verifies `dist/`, and `require()`s the server in the main process; it binds `127.0.0.1` only.
 
-> **`asar` is disabled** (`asar: false`) in the build config, so app files live under `resources/app/` unpacked.
+### Runtime dependencies
+
+Only packages that are `require()`d **outside** the Vite/esbuild bundles are `dependencies`; everything else (React, TipTap, Express, the AI SDK, exceljs, mammoth, pdf-parse, …) is a `devDependency` because it is bundled. The runtime set is:
+
+| Package | Why it must be on disk |
+|---------|------------------------|
+| `@napi-rs/canvas` | pdf.js (inside `dist/server.cjs`) loads it with `createRequire`; native `.node` binary. Pinned to the version pdf-parse expects. |
+| `nspell`, `cspell-lib` | `shared/spellcheck.cjs` is required directly by `electron-main.cjs` (not bundled). |
+
+Before adding a dependency, check whether the importing code is bundled. To see the server bundle's externals: `grep -o 'require("[^".][^"]*")' dist/server.cjs | sort -u` (expect only Node built-ins, plus `@napi-rs/canvas` via `createRequire`).
+
+> **asar:** `asar: true`. `dist/**`, `public/**`, `dictionaries/**` and `node_modules/@napi-rs/**` are `asarUnpack`ed (pdf.js imports `dist/pdf.worker.mjs` from disk; native modules must be real files). Everything else, including `dist-manifest.json`, is inside `app.asar`.
 
 ---
 
@@ -106,8 +118,8 @@ Defined in `package.json` under `"build"`. Key points:
 
 - `appId`: `com.indexarc.vault`; `productName`: `IndexArc`; `icon`: `assets/icon.png`.
 - `directories.output`: `dist-desktop`, `buildResources`: `assets`.
-- `asar: false`.
-- **`files`** — includes `dist/**/*`, `public/**/*`, `electron-main.cjs`, `preload.cjs`, `package.json`, and **excludes all user data**:
+- `asar: true` with `asarUnpack` as above; `electronFuses` as in [Release trust](#release-trust-fuses-dist-manifest-sbom).
+- **`files`** — includes `dist/**/*`, `public/**/*`, `dictionaries/**/*`, `shared/**/*`, `electron-main.cjs`, `preload.cjs`, `dist-manifest.json`, `package.json`, excludes `*.test.*` files, and **excludes all user data**:
 
   ```
   !data{,/**/*}   !config{,/**/*}   !logs{,/**/*}
@@ -138,7 +150,52 @@ The net effect: **updating or reinstalling never changes where your vault lives,
 
 ## Code signing
 
-Windows artifacts are signed with `signtool.exe` during the build (the exe, the portable, the uninstaller, and helper binaries). Ensure a valid code-signing certificate is available to `signtool` in your environment. macOS notarization is not yet configured.
+Artifacts are **unsigned** today: CI sets `CSC_IDENTITY_AUTO_DISCOVERY=false` and no certificate is configured. When a certificate is available, electron-builder signs the exe, the portable, the uninstaller and helper binaries with `signtool.exe`. The steps and the decisions still open (OV vs EV, macOS notarization) are in [RELEASE.md](./RELEASE.md#1-code-signing-windows-first--it-is-the-primary-install-base).
+
+---
+
+## Release trust: fuses, dist manifest, SBOM
+
+### Electron fuses
+
+`build.electronFuses` (electron-builder ≥ 26 runs `@electron/fuses` after packing) sets:
+
+| Fuse | Value | Effect |
+|------|-------|--------|
+| `runAsNode` | off | `ELECTRON_RUN_AS_NODE=1 IndexArc.exe` can no longer be used as a general Node.js interpreter |
+| `enableNodeOptionsEnvironmentVariable` | off | `NODE_OPTIONS` (e.g. `--require evil.js`) is ignored |
+| `enableNodeCliInspectArguments` | off | `--inspect` / `--inspect-brk` cannot attach a debugger |
+| `enableEmbeddedAsarIntegrityValidation` | on | `app.asar` is checked against the hash embedded in the executable (Windows/macOS) |
+| `onlyLoadAppFromAsar` | on | Electron refuses to load the app from a loose `resources/app/` folder |
+
+Check a build with `npx @electron/fuses read --app dist-desktop/win-unpacked/IndexArc.exe`.
+
+Once the executable is signed, these fuses also stop an attacker from swapping `app.asar` or injecting code through the environment. Until it is signed, an attacker can still replace the whole executable.
+
+### dist manifest
+
+`dist/` stays unpacked (pdf.js must import `dist/pdf.worker.mjs` from disk), so asar integrity does not cover it. Instead:
+
+1. `npm run build` ends with `scripts/write-dist-manifest.cjs`, which writes **`dist-manifest.json`** (sha256 of every `dist/` file except source maps) to the project root. The file is gitignored.
+2. electron-builder packs `dist-manifest.json` **inside `app.asar`**, where the integrity fuse protects it.
+3. In a packaged app, `startBackendServer` (`electron-main.cjs`) calls `shared/verify-dist.cjs` **before** `require()`-ing `dist/server.cjs`. A missing manifest, a missing file or a hash mismatch shows the "IndexArc — build incomplete" dialog and exits. Dev runs (`!app.isPackaged`) skip the check.
+4. `npm run check:dist` runs the same verification, so a stale manifest fails the build before packaging.
+
+If you edit anything in `dist/` after `npm run build`, run the build again. A manifest from an older build will fail the check.
+
+### SBOM
+
+`.github/workflows/desktop-builds.yml` generates a CycloneDX SBOM of the production dependency tree on the Windows leg:
+
+```bash
+npx --yes @cyclonedx/cyclonedx-npm --omit dev --output-file sbom.cdx.json
+```
+
+It is uploaded as the `IndexArc-SBOM` workflow artifact. Attach it to the GitHub release next to the installers.
+
+### Dependency updates
+
+`.github/dependabot.yml` opens weekly PRs for npm and GitHub Actions, with minor and patch updates grouped. Actions are pinned to full commit SHAs with a `# vX.Y.Z` comment, and Dependabot updates both. `@napi-rs/canvas` is pinned exactly; when Dependabot bumps `pdf-parse`, move it to the version pdf-parse depends on (`npm ls @napi-rs/canvas` should show a single deduped copy).
 
 ---
 
@@ -167,10 +224,10 @@ A quick manual check that an update-style launch keeps data:
 ## Release checklist
 
 1. Bump `version` in `package.json` (drives artifact names).
-2. `npm run lint` — must pass.
+2. `npm run lint` (main tsconfig + `tsconfig.electron.json`) and `npm test` — must pass.
 3. `node --check electron-main.cjs` and `node --check preload.cjs`.
 4. `npm run desktop:win` (and mac/linux on their hosts/CI).
-5. Confirm both Windows artifacts exist in `dist-desktop/` and are signed.
+5. Confirm both Windows artifacts exist in `dist-desktop/`, the fuses read as above, and (once a certificate exists) they are signed.
 6. Smoke-test the portable exe: launch, unlock (if encrypted), verify entries via `/api/status`.
 7. Verify [data safety](#verifying-data-safety-after-a-build).
 8. Publish artifacts.

@@ -109,6 +109,7 @@ IndexArc is industrial grade when every statement below is true and checked by C
 - `@electron/fuses`: `RunAsNode` off, `EnableNodeOptionsEnvironmentVariable` off, `EnableNodeCliInspectArguments` off, `EnableEmbeddedAsarIntegrityValidation` on, `OnlyLoadAppFromAsar` on.
 - Stop `asarUnpack: dist/**` (server bundle and UI are swappable plain files today) — unpack only what must be on disk (native `.node`, the pdf worker, dictionaries), and verify the server bundle hash at load.
 - Type-check `.cjs` files (`checkJs` or convert `electron-main`/`preload` to TS).
+- **Progress (branch `roadmap/r2-release-trust`):** fuses on via `build.electronFuses` (verified with `@electron/fuses read`). `dist/` stays unpacked, because pdf.js imports the worker from disk. Instead, `dist-manifest.json` (sha256 of every dist file) is packed inside `app.asar` and checked by `shared/verify-dist.cjs` before the server bundle loads; a tampered `server.cjs` was refused in a packaged build. `preload.cjs` is type-checked strictly via `tsconfig.electron.json` in `npm run lint`. **Open:** `electron-main.cjs` (73 strict errors, mostly implicit `any`). Unpacking only the pdf worker and native modules instead of all of `dist/` is optional now that the manifest exists.
 
 ### R2.3 Signed auto-update *(needs an owner decision: GitHub Releases vs static host)*
 - `electron-updater` with `verifyUpdateCodeSignature`; staged rollout; the installer-preservation CI job stays the guard.
@@ -116,6 +117,7 @@ IndexArc is industrial grade when every statement below is true and checked by C
 ### R2.4 Package slimming
 - Move build-only packages to `devDependencies` (`vite`, `@vitejs/plugin-react`, `@tailwindcss/vite`, `tailwindcss` …); remove unused deps (`@typesafe-ai/sdk`, any others with zero imports).
 - Ship only runtime-needed `node_modules` (the UI is already bundled by Vite; the server by esbuild). Target: installed size < 100 MB (from ~184 MB / 432 packages).
+- **Progress:** done. Runtime `dependencies` are now only `@napi-rs/canvas`, `nspell` and `cspell-lib`; everything else moved to dev, and `@typesafe-ai/sdk` was removed. `app.asar` went from 183 MB to 7.1 MB, packaged packages from 432 to 101, and `resources/` from 268 MB to 74 MB. The full unpacked install is about 440 MB; the Electron runtime itself accounts for roughly 365 MB of that, and no app-side change can shrink it.
 
 ### R2.5 CI & repository hygiene
 - `permissions: contents: read` in every workflow; actions pinned by commit SHA; `npm ci` only (drop `|| npm install`).
@@ -123,6 +125,7 @@ IndexArc is industrial grade when every statement below is true and checked by C
 - Branch protection on `main`: required checks, no direct pushes.
 - Conventional commits + generated `CHANGELOG.md`; semver tags.
 - Remove hard-coded `C:/Users/balfa/...` paths from `scripts/find-vaults.mjs` and `scripts/check-live-data.mjs`; de-duplicate the four copies of the logo PNG.
+- **Progress:** done: workflow permissions, SHA-pinned actions, `npm ci` only, Dependabot, the CycloneDX SBOM artifact, `CHANGELOG.md` with the commit convention, and the hard-coded paths. **Open:** branch protection (a repository setting the owner must change), the logo de-duplication, attaching the SBOM to the GitHub Release automatically (it is a workflow artifact today), and a generated changelog (it is hand-maintained for now).
 
 **Exit R2:** a tagged release produces signed, fused, SBOM-carrying artifacts from CI with no manual steps, and an installed build auto-updates to the next signed release.
 
@@ -208,7 +211,7 @@ These are what make people choose IndexArc over a generic password manager. Each
 | P4.1 KDF upgrade | Done (Argon2id, migration tested) | — |
 | P4.2 OS-level secrets at rest | Done for packaged builds (safeStorage) | Edge cases in R1.3 |
 | P4.3 Clipboard hygiene | Done in R0 (fixed 45 s) | Setting in R1.5 |
-| P4.4 CI | Partial (tsc, tests, audit gate) | R2.5 |
+| P4.4 CI | Mostly done (tsc, tests, audit gate, pinned actions, Dependabot, SBOM) | R2.5 (branch protection open) |
 | P4.5 Release trust | Not started | R2.1–R2.3 |
 | P4.6 Strict TypeScript | Done for `.ts` | `.cjs` in R2.2, `any` burn-down in R4 |
 | P4.7 Test pyramid | Partial (server unit tests only) | R4 |

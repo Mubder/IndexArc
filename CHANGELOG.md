@@ -33,6 +33,13 @@ Commit messages follow the convention in
 - Dependabot watches npm and GitHub Actions weekly (minor/patch updates grouped).
 - Desktop builds produce a CycloneDX SBOM (`sbom.cdx.json`) as a workflow artifact.
 - Diagnostic scripts no longer contain hard-coded per-user paths.
+- Only runtime-needed packages ship: `app.asar` 183 MB → 7 MB (432 → 101 packages);
+  unused `@typesafe-ai/sdk` removed.
+- Electron fuses enabled (no RunAsNode / `NODE_OPTIONS` / `--inspect`; asar integrity validation;
+  load app only from asar).
+- Packaged builds verify the unpacked `dist/` against a sha256 manifest packed in `app.asar`
+  before loading the server, and refuse to start on mismatch.
+- `preload.cjs` is type-checked in `npm run lint` (`tsconfig.electron.json`).
 
 ## [2.0.0]
 
