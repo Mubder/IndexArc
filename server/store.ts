@@ -71,6 +71,24 @@ function readJsonOrQuarantine<T>(filePath: string, fallback: T, label: string): 
   }
 }
 
+// True when every vault-key-protected file carried by an emergency snapshot
+// is an encrypted envelope (settings.json is not vault-key protected). Absent
+// files don't count against it — restoring them is a no-op.
+function snapshotIsFullyEncrypted(snapshot: any): boolean {
+  const files = snapshot?.files || {};
+  for (const key of ["vault", "vectors", "scratchpad", "scratchpad_archive", "note_revisions"]) {
+    const b64 = files[key];
+    if (b64 == null) continue;
+    try {
+      const parsed = JSON.parse(Buffer.from(b64, "base64").toString("utf-8").replace(/^﻿/, ""));
+      if (!parsed?.encrypted) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 function readJson<T>(filePath: string, fallback: T): T {
   try {
     if (!fs.existsSync(filePath)) return fallback;
@@ -595,6 +613,18 @@ export class VaultStore {
     if (this.settingsKeyBuf()) {
       for (const f of VaultStore.SECRET_SETTING_FIELDS) {
         atRest[f] = this.wrapSettingSecret((next as Record<string, unknown>)[f]);
+      }
+    }
+    // A wrapped key this process cannot open (portable copy on another
+    // PC/user, keychain reset) reads back as "". Saving that "" would destroy
+    // the only copy of the key — keep the on-disk blob unless the caller
+    // explicitly set that field in this save.
+    const onDisk = readJson<Record<string, unknown>>(this.paths.settingsFile, {});
+    for (const f of VaultStore.SECRET_SETTING_FIELDS) {
+      const blob = onDisk[f];
+      if (Object.prototype.hasOwnProperty.call(partial, f)) continue;
+      if (typeof blob === "string" && blob.startsWith("enc:v1:") && this.unwrapSettingSecret(blob) === "") {
+        atRest[f] = blob;
       }
     }
     atomicWrite(this.paths.settingsFile, JSON.stringify(atRest, null, 2));
@@ -1937,8 +1967,29 @@ export class VaultStore {
    * Restore from a named emergency snapshot. Before overwriting, the CURRENT
    * state is snapshotted first (so a restore is itself undoable). Returns true
    * on success.
+   *
+   * While the vault is LOCKED only fully-encrypted snapshots are restorable:
+   * restoring a plaintext (pre-encryption / grace) snapshot over a locked
+   * vault would hand every secret to a token holder without the master
+   * password. Plaintext recovery needs either an unlock first, or proof of
+   * local presence (moving data/vault.json aside by hand, which un-encrypts
+   * the "current" vault and lifts the lock gate).
    */
   restoreEmergencySnapshot(name: string): boolean {
+    const snapshot = this.loadEmergencySnapshot(name);
+    if (!snapshot) return false;
+    if (this.isLocked() && !snapshotIsFullyEncrypted(snapshot)) return false;
+    return this.applyEmergencySnapshot(snapshot);
+  }
+
+  /** null = snapshot not found/unreadable; otherwise whether every vault-key
+   *  protected file inside it is an encrypted envelope. */
+  emergencySnapshotIsEncrypted(name: string): boolean | null {
+    const snapshot = this.loadEmergencySnapshot(name);
+    return snapshot ? snapshotIsFullyEncrypted(snapshot) : null;
+  }
+
+  private loadEmergencySnapshot(name: string): any | null {
     // Locate the file in any location — live emergency dirs AND the grace
     // area (pre-encryption recovery copies are restorable by name too).
     let payload: string | null = null;
@@ -1951,16 +2002,19 @@ export class VaultStore {
         }
       } catch {}
     }
-    if (!payload) return false;
+    if (!payload) return null;
 
     let snapshot: any;
     try {
       snapshot = JSON.parse(payload);
     } catch {
-      return false;
+      return null;
     }
-    if (snapshot?.format !== "indexarc-emergency" || !snapshot.files) return false;
+    if (snapshot?.format !== "indexarc-emergency" || !snapshot.files) return null;
+    return snapshot;
+  }
 
+  private applyEmergencySnapshot(snapshot: any): boolean {
     // Safety net: snapshot the current state before we clobber it.
     try {
       this.createEmergencySnapshot();

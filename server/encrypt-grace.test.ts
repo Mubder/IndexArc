@@ -130,4 +130,21 @@ describe("encryption grace period (ransom recoverability)", () => {
     // in the grace area for manual recovery.
     expect(fs.readFileSync(path.join(graceDir(), "vault-2026-01-01.json"), "utf8")).toContain("pre-encryption");
   });
+
+  it("a LOCKED vault refuses a plaintext snapshot restore (no secret downgrade)", async () => {
+    plantPlaintextEra();
+    const snapName = store.createEmergencySnapshot(50);
+    await store.setupPassword("owner-password");
+    store.lock();
+    expect(store.isLocked()).toBe(true);
+    expect(store.emergencySnapshotIsEncrypted(snapName as string)).toBe(false);
+
+    expect(store.restoreEmergencySnapshot(snapName as string)).toBe(false);
+    expect(store.isLocked()).toBe(true);
+    expect(store.isEncryptionEnabled()).toBe(true);
+
+    // Once the owner unlocks, the same plaintext recovery is allowed.
+    expect(await store.unlock("owner-password")).toBeTruthy();
+    expect(store.restoreEmergencySnapshot(snapName as string)).toBe(true);
+  });
 });

@@ -196,6 +196,15 @@ function uid(): string {
   return `t_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
+// Legacy plaintext copy of notes from before the server became the only
+// durable store. Removed once the server holds the notes, so it doesn't sit
+// unencrypted in Chromium's LevelDB indefinitely.
+function dropLegacyLocalTabs(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {}
+}
+
 function loadTabs(): ScratchTab[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -1369,6 +1378,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           // Server has the durable copy — it wins over the localStorage cache.
           setTabs(serverTabs);
           setActiveId(serverTabs[0].id);
+          dropLegacyLocalTabs();
         } else {
           // First run on this vault: migrate existing localStorage tabs up so
           // they become durable and survive future reinstalls.
@@ -1379,7 +1389,13 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ tabs: local }),
-            }).catch(() => {});
+            })
+              .then((r) => {
+                if (r.ok) dropLegacyLocalTabs();
+              })
+              .catch(() => {});
+          } else {
+            dropLegacyLocalTabs();
           }
         }
       } catch {

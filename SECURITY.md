@@ -12,9 +12,15 @@ IndexArc is designed with a **local-first, local-only by default** security post
 
 ### 🛡️ Local Encryption At Rest
 * **Cipher:** AES-256-GCM (Galois/Counter Mode), providing authenticated encryption with strong integrity guarantees.
-* **Key Derivation:** Derived from the user's master password using PBKDF2-HMAC-SHA256 with **100,000** iterations.
-* **Salts and IVs:** Each encrypted file (e.g., `vault.json`, `vectors.json`) uses a cryptographically secure, unique salt (re-used for stable PBKDF2 keys per file) and a fresh 12-byte IV for every write.
-* **Lock State:** Locking the vault purges the derived encryption key from the server process memory (`null`s out the key). Unlocking must be explicitly triggered by the user via password entry.
+* **Key Derivation:** Argon2id (64 MiB memory, t=3, p=4 — Bitwarden-aligned), parameters recorded in every envelope. Vaults created before 2.1 used PBKDF2-HMAC-SHA256 (100,000 iterations); they are re-derived to Argon2id transparently on the next successful unlock.
+* **Salts and IVs:** One random vault salt shared by the encrypted files (`vault.json`, `vectors.json`, scratchpad files), so a single derived key opens them all; a fresh random 12-byte IV for every write.
+* **Lock State:** Locking zeroes and drops the derived key in the server process and clears decrypted entries, pasted text and notes from the UI. Auto-lock (configurable minutes) counts only real user input — background polling does not keep the vault open. Unlocking requires the master password; failed attempts are throttled with an escalating delay.
+* **Locked-state guarantees:** While locked, a holder of the local API token sees metadata only. Emergency restores of snapshots that contain unencrypted data are refused until the vault is unlocked.
+* **Clipboard:** Copied secret values are cleared from the clipboard after 45 seconds (only if the clipboard still holds that value).
+* **Cloud API keys at rest:** In packaged builds, provider API keys in `config/settings.json` are wrapped with a key protected by the OS keychain (Electron `safeStorage` / DPAPI). On a machine that can't open that key (a portable copy moved to another PC), the wrapped keys are left untouched and work again on the original machine. Dev/standalone runs keep them in plaintext.
+
+### 📍 Data outside the portable folder
+IndexArc keeps its data in the portable root, with these deliberate exceptions for crash/reinstall recovery: emergency snapshots in `%APPDATA%\IndexArc\emergency` and `~/.IndexArc/emergency` (same encryption as the vault), the vault-root pointer in `HKCU\Software\IndexArc` and `%APPDATA%\IndexArc\vault-root.json`, and Chromium's renderer profile.
 
 ### 🌐 Network & Process Isolation
 * **Localhost Binding:** The Express server binds exclusively to `127.0.0.1` (localhost). It does not accept remote incoming network traffic.
@@ -125,7 +131,8 @@ construction — a token holder learns vault *metadata*, never secret values):
 `/api/status`, `/api/settings` (GET returns `*_configured` booleans only;
 POST is sticky write-only — an empty key field means "keep stored"),
 `/api/logs` (redaction policy: ids, never values), `/api/health`,
-`/api/backups` + `/api/emergency*` (metadata only; restore re-locks),
+`/api/backups` + `/api/emergency*` (metadata only; restore re-locks, and a
+snapshot holding unencrypted data is refused while locked),
 `/api/audit` (hash-chained, ids only), and the spellcheck routes.
 
 Provider API keys may be supplied via environment variables instead of

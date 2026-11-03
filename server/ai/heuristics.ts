@@ -13,8 +13,30 @@ const CLI_WITH_SUBCOMMAND_RE =
 const COMMANDISH_RE =
   /^\s*(\.\\|\.\/|\/(usr|bin|etc|home|opt|var|tmp|mnt|root)\b|[A-Za-z]:\\|[A-Za-z]:\/).+/i;
 
-const ENV_LINE_RE =
-  /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*[=:]\s*["']?(.+?)["']?\s*$/;
+// KEY=value / KEY: value. Parsed in two steps instead of one regex: the
+// former /...[=:]\s*["']?(.+?)["']?\s*$/ backtracked quadratically on long
+// runs of internal whitespace (one crafted 512 KB .env line froze the
+// server for about a minute). Match semantics are unchanged: any non-empty,
+// single-line remainder after the separator matches; the value loses
+// surrounding whitespace and one optional pair of quotes.
+const ENV_KEY_RE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*[=:]/;
+const LINE_TERMINATOR_RE = /[\n\r\p{Zl}\p{Zp}]/u;
+
+function matchEnvLine(line: string): [string, string, string] | null {
+  const head = ENV_KEY_RE.exec(line);
+  if (!head) return null;
+  const rest = line.slice(head[0].length);
+  if (!rest || LINE_TERMINATOR_RE.test(rest)) return null;
+  let value = rest.trim();
+  if (value.length > 1 && (value[0] === '"' || value[0] === "'")) value = value.slice(1);
+  const last = value[value.length - 1];
+  if (value.length > 1 && (last === '"' || last === "'")) value = value.slice(0, -1);
+  return [line, head[1], value || rest];
+}
+
+function isEnvLine(line: string): boolean {
+  return matchEnvLine(line) !== null;
+}
 /** KEY "value" or KEY 'value' without equals */
 const ENV_SPACED_RE =
   /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+["']([^"']+)["']\s*$/;
@@ -38,7 +60,12 @@ const GOOGLE_API_KEY_ALT_RE = /^AQ\.[A-Za-z0-9_-]{20,}$/;
 const URL_RE = /^(?:https?|ftp):\/\/[^\s]+$/i;
 /** Strip trailing separators like " |" that users use to delimit pasted URLs — preserve verbatim core, not the delimiter */
 function stripTrailingDelim(s: string): string {
-  return s.replace(/\s*[|;]+\s*$/, "").trim();
+  // Hand-rolled: /\s*[|;]+\s*$/ re-scanned every whitespace run from each
+  // start position — quadratic on long space runs (ReDoS).
+  const t = s.trimEnd();
+  let i = t.length;
+  while (i > 0 && (t[i - 1] === "|" || t[i - 1] === ";")) i--;
+  return (i === t.length ? t : t.slice(0, i)).trim();
 }
 
 /** Decorative section rules / pure punctuation — never extract as notes */
@@ -79,7 +106,7 @@ function isCommandLine(line: string): boolean {
   if (!t) return false;
   // section titles like "Hermes Windows =====" are not commands
   if (TITLE_WITH_RULE_RE.test(t) || isNoiseLine(t)) return false;
-  if (ENV_LINE_RE.test(t) || ENV_SPACED_RE.test(t)) return false;
+  if (isEnvLine(t) || ENV_SPACED_RE.test(t)) return false;
   if (CLI_WITH_SUBCOMMAND_RE.test(t)) return true;
   if (COMMAND_RE.test(t)) return true;
   if (COMMANDISH_RE.test(t) && t.length < 500) return true;
@@ -254,7 +281,7 @@ function isUsefulNoteLine(line: string): boolean {
   if (!t || isNoiseLine(t) || isSectionBanner(t)) return false;
   if (t.length > MAX_NOTE_CHARS) return false;
   if (isCommandLine(t)) return false;
-  if (ENV_LINE_RE.test(t) || ENV_SPACED_RE.test(t)) return false;
+  if (isEnvLine(t) || ENV_SPACED_RE.test(t)) return false;
   if (classifyStandaloneSecret(t)) return false;
   const titleOnly = stripSectionRule(t);
   if (!titleOnly || isNoiseLine(titleOnly)) return false;
@@ -479,7 +506,7 @@ function isTitleLabelLine(line: string): boolean {
   const t = line.trim();
   if (!t || t.length < 2 || t.length > 80) return false;
   if (isNoiseLine(t) || isSectionBanner(t) || isCommandLine(t)) return false;
-  if (ENV_LINE_RE.test(t) || ENV_SPACED_RE.test(t)) return false;
+  if (isEnvLine(t) || ENV_SPACED_RE.test(t)) return false;
   if (classifyStandaloneSecret(t)) return false;
   if (/^https?:\/\//i.test(t)) return false;
   // Prefer prose / product names over code-ish lines
@@ -576,7 +603,7 @@ export function heuristicAnalyze(paste: string): AnalyzeCandidate[] {
       continue;
     }
     if (URL_RE.test(clean) || URL_RE.test(t)) continue;
-    if (ENV_LINE_RE.test(t) || ENV_SPACED_RE.test(t) || ENV_LINE_RE.test(clean) || ENV_SPACED_RE.test(clean)) envHits++;
+    if (isEnvLine(t) || ENV_SPACED_RE.test(t) || isEnvLine(clean) || ENV_SPACED_RE.test(clean)) envHits++;
   }
 
   if (envHits >= 1 || lines.length > 1) {
@@ -631,7 +658,7 @@ export function heuristicAnalyze(paste: string): AnalyzeCandidate[] {
         }
       }
 
-      const m = t.match(ENV_LINE_RE) || t.match(ENV_SPACED_RE);
+      const m = matchEnvLine(t) || t.match(ENV_SPACED_RE);
       if (m) {
         const key = m[1];
         const value = m[2].trim();

@@ -62,9 +62,9 @@ Unlike cloud password managers or traditional note apps, **IndexArc runs 100% lo
 - **Duplicate Finder**: Identifies duplicate values or similar entry names across your vault and provides one-click bulk cleanup.
 
 ### 🔐 6. Bank-Grade Security & Portability
-- **AES-256-GCM Encryption**: Optional master password protection using scrypt/Argon2id key derivation with 500ms timing-attack mitigation.
-- **Automatic Backups**: Creates timestamped backups on every save (`backups/vault-<stamp>.json`), retaining the last 10 versions automatically.
-- **Zero-AppData Dependency**: All configuration (`config/`) and data (`data/`) stay strictly inside the application root directory.
+- **AES-256-GCM Encryption**: Master password protection with Argon2id key derivation (64 MiB, t=3, p=4); failed unlock attempts are throttled with an escalating delay.
+- **Automatic Backups**: A timestamped backup on every startup (`backups/vault-<stamp>.json`, last 10 kept), plus rolling emergency snapshots shortly after changes (last 15 per location).
+- **Portable by design**: Configuration (`config/`) and data (`data/`) live in the application folder. The only copies kept elsewhere are encrypted emergency snapshots and a pointer to the vault folder (registry + AppData), so a reinstall or wiped folder can be recovered — see [SECURITY.md](./SECURITY.md).
 
 ---
 

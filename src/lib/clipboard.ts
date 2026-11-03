@@ -9,14 +9,24 @@
 //   2. navigator.clipboard (plain-browser use)
 //   3. hidden-textarea + execCommand (last resort, synchronous)
 // Returns whether ANY path actually succeeded — callers must surface failure.
-export async function copyTextToClipboard(text: string): Promise<boolean> {
+//
+// `sensitive` (secret values): the clipboard is cleared after
+// SECRET_CLIPBOARD_CLEAR_MS if it still holds the copied value — standard
+// password-manager hygiene so a token doesn't sit on the clipboard forever.
+export const SECRET_CLIPBOARD_CLEAR_MS = 45_000;
+
+export async function copyTextToClipboard(
+  text: string,
+  opts: { sensitive?: boolean } = {}
+): Promise<boolean> {
   const value = String(text ?? "");
   if (!value) return false;
+  const clearAfterMs = opts.sensitive ? SECRET_CLIPBOARD_CLEAR_MS : 0;
 
   const bridge = window.electronAPI;
   if (bridge?.copyText) {
     try {
-      if (await bridge.copyText(value)) return true;
+      if (await bridge.copyText(value, clearAfterMs)) return true;
     } catch {
       /* fall through */
     }
@@ -24,6 +34,7 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
 
   try {
     await navigator.clipboard.writeText(value);
+    if (clearAfterMs) scheduleBrowserClear(value, clearAfterMs);
     return true;
   } catch {
     /* fall through */
@@ -41,8 +52,19 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
     ta.select();
     const ok = document.execCommand("copy");
     ta.remove();
+    if (ok && clearAfterMs) scheduleBrowserClear(value, clearAfterMs);
     return ok;
   } catch {
     return false;
   }
+}
+
+// Browser fallback: readText may be refused (permissions) — then we can't
+// verify the clipboard still holds our value, so we leave it alone.
+function scheduleBrowserClear(value: string, ms: number): void {
+  setTimeout(async () => {
+    try {
+      if ((await navigator.clipboard.readText()) === value) await navigator.clipboard.writeText("");
+    } catch {}
+  }, ms);
 }

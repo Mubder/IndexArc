@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, MenuItem, dialog, ipcMain, Tray, nativeImage, shell, clipboard } = require("electron");
 const { spawn } = require("child_process");
+const { childEnv } = require("./shared/child-env.cjs");
 const path = require("path");
 const http = require("http");
 const https = require("https");
@@ -477,7 +478,7 @@ async function installOllama() {
       };
     }
     await new Promise((resolve, reject) => {
-      const inst = spawn(tmp, ["/S"], { stdio: "ignore" });
+      const inst = spawn(tmp, ["/S"], { stdio: "ignore", env: childEnv() });
       inst.on("exit", (code) => resolve(code));
       inst.on("error", reject);
     });
@@ -507,7 +508,7 @@ ipcMain.handle("start-ollama", async () => {
   const p = findOllamaPath();
   if (!p) return false;
   try {
-    spawn(p, ["serve"], { detached: true, stdio: "ignore" }).unref();
+    spawn(p, ["serve"], { detached: true, stdio: "ignore", env: childEnv() }).unref();
     return true;
   } catch {
     return false;
@@ -541,10 +542,25 @@ ipcMain.handle("get-api-token", () => process.env.INDEXARC_API_TOKEN || null);
 // packaged Electron window rejects silently on focus changes (the click
 // itself can unfocus the document), which made every Copy button lie about
 // succeeding. The text is never logged.
-ipcMain.handle("copy-text", (_e, text) => {
+// Secrets (clearAfterMs > 0) are wiped from the OS clipboard after the delay
+// — but only if the clipboard still holds exactly what we put there, so a
+// newer copy by the user is never clobbered.
+let clipboardClearTimer = null;
+ipcMain.handle("copy-text", (_e, text, clearAfterMs) => {
   if (typeof text !== "string" || text.length === 0 || text.length > 1024 * 1024) return false;
   try {
     clipboard.writeText(text);
+    if (clipboardClearTimer) clearTimeout(clipboardClearTimer);
+    clipboardClearTimer = null;
+    const delay = Number(clearAfterMs);
+    if (Number.isFinite(delay) && delay > 0) {
+      clipboardClearTimer = setTimeout(() => {
+        clipboardClearTimer = null;
+        try {
+          if (clipboard.readText() === text) clipboard.clear();
+        } catch {}
+      }, Math.min(delay, 10 * 60_000));
+    }
     return true;
   } catch {
     return false;
@@ -616,6 +632,7 @@ async function startOllamaIfNeeded() {
   ollamaProcess = spawn(ollamaPath, ["serve"], {
     detached: true,
     stdio: "ignore",
+    env: childEnv(),
   });
   ollamaProcess.unref();
 
@@ -667,6 +684,15 @@ function initSettingsSecretsKey(root) {
         const candidate = safeStorage.decryptString(fs.readFileSync(keyFile));
         if (candidate && Buffer.from(candidate, "base64").length === 32) key = candidate;
       } catch {}
+      if (!key) {
+        // The key file exists but this OS user/machine can't open it (portable
+        // copy moved to another PC, profile reset). NEVER overwrite it: that
+        // would orphan every wrapped API key in settings.json for good. Run
+        // without a wrap key instead — the store keeps the unreadable blobs
+        // untouched, and they work again on the original machine.
+        logCrash("settings-key", new Error("settings.key.enc is not decryptable on this machine — API keys unavailable here; file left intact"));
+        return;
+      }
     }
     if (!key) {
       key = crypto.randomBytes(32).toString("base64");

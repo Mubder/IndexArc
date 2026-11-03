@@ -341,7 +341,8 @@ Guidelines:
 Matching Vault Entries:
 ${matchesContext}`;
 
-      const genResult = await generateText(settings, userPrompt, systemInstruction);
+      // Pinned to `active`: the prompt above was built for THIS provider.
+      const genResult = await generateText(settings, userPrompt, systemInstruction, active);
       if (genResult) {
         answer = genResult.text;
         provider_used = `${provider_used} + generateText via ${genResult.provider_used}`;

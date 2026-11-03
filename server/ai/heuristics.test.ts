@@ -25,3 +25,16 @@ describe("heuristicAnalyze — verbatim preservation", () => {
     expect(r[0]?.value).toBe("https://example.com/_path");
   });
 });
+
+describe("heuristicAnalyze — env parsing", () => {
+  it("strips surrounding quotes and whitespace from env values", () => {
+    const r = heuristicAnalyze(`export API_TOKEN = "abc123def456ghi"  `);
+    expect(r.some((c) => c.value === "abc123def456ghi")).toBe(true);
+  });
+  it("stays linear on a long whitespace run (ReDoS regression)", () => {
+    const line = "KEY=a" + " ".repeat(200_000) + "b";
+    const t0 = Date.now();
+    heuristicAnalyze(line);
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+});

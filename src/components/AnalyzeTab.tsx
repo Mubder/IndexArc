@@ -47,6 +47,12 @@ export const AnalyzeTab: React.FC<AnalyzeTabProps> = ({
         <textarea
           value={paste}
           onChange={(e) => setPaste(e.target.value)}
+          // Pasted secrets must never reach the OS spellchecker or its
+          // "Add to dictionary" list (plaintext in the Chromium profile).
+          spellCheck={false}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
           rows={5}
           dir="auto"
           className="app-input w-full px-3 py-2 text-sm resize-none"

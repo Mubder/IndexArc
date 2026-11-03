@@ -6,7 +6,7 @@ interface ElectronAPI {
   startOllama: () => Promise<boolean>;
   openExternal: (url: string) => Promise<boolean>;
   getApiToken: () => Promise<string | null>;
-  copyText: (text: string) => Promise<boolean>;
+  copyText: (text: string, clearAfterMs?: number) => Promise<boolean>;
   spellcheckWords: (words: string[]) => Promise<string[]>;
   spellcheckSuggest: (word: string) => Promise<string[]>;
   addCustomWord: (word: string) => Promise<void>;
@@ -20,11 +20,6 @@ declare global {
   }
 }
 
-// Third-party file parser without bundled types
-declare module "pdf-parse" {
-  export function PDFParse(data: Buffer, options?: any): Promise<{ text: string; [k: string]: any }>;
-  export default PDFParse;
-}
 
 declare module "./shared/spellcheck.cjs" {
   const spellcheck: {

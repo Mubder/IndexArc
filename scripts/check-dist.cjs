@@ -5,7 +5,8 @@
 const fs = require("fs");
 const path = require("path");
 
-const required = ["dist/index.html", "dist/server.cjs"];
+// pdf.worker.mjs: pdf.js loads it from beside server.cjs (PDF folder scans).
+const required = ["dist/index.html", "dist/server.cjs", "dist/pdf.worker.mjs"];
 let ok = true;
 for (const f of required) {
   if (!fs.existsSync(path.join(process.cwd(), f))) {
@@ -19,4 +20,4 @@ if (!ok) {
   );
   process.exit(1);
 }
-console.log("[build-check] dist OK (index.html + server.cjs present)");
+console.log("[build-check] dist OK (index.html + server.cjs + pdf.worker.mjs present)");

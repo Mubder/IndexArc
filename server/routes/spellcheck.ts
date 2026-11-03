@@ -27,8 +27,8 @@ const {
 // last-resort fallback. The previous process.cwd()-only resolution broke
 // packaged/USB launches started from a different working directory (AUD-012).
 //
-// Dual-environment on purpose: the esbuild CJS bundle makes `import.meta.url`
-// EMPTY (it warns at build time), but gives us native `__dirname`; tsx dev
+// Dual-environment on purpose: the esbuild CJS bundle gets `import.meta.url`
+// only through the build's --define shim, but has native `__dirname`; tsx dev
 // mode is ESM and has no `__dirname` but a real `import.meta.url`. Try both.
 function thisModuleDir(): string | null {
   try {

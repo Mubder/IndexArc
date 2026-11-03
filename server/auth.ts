@@ -28,8 +28,11 @@ export function serverIdentity(): string {
 
 const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost|\[::1\]|::1)(:\d+)?$/i;
 
-// Last observed user activity (any authenticated /api request). The auto-lock
-// timer in server.ts reads this.
+// Last observed USER activity. The auto-lock timer in server.ts reads this.
+// Background reads (the renderer's 30s/60s polls, SSE-triggered refetches)
+// are GETs and must NOT count — otherwise an open window never auto-locks.
+// User-driven work is a mutating request, or an explicit POST /api/activity
+// ping the renderer sends (throttled) on keyboard/pointer/scroll input.
 let lastActivity = Date.now();
 
 export function getLastActivity(): number {
@@ -126,6 +129,18 @@ export function apiAuthMiddleware(req: Request, res: Response, next: NextFunctio
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-  lastActivity = Date.now();
+  if (req.path === "/activity" && req.method === "POST") {
+    lastActivity = Date.now();
+    res.status(204).end();
+    return;
+  }
+  if (isUserActivity(req)) lastActivity = Date.now();
   next();
+}
+
+function isUserActivity(req: Request): boolean {
+  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return false;
+  // Issued automatically on every SSE (re)connect — not a user action.
+  if (req.path === "/sse/ticket") return false;
+  return true;
 }

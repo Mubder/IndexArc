@@ -52,6 +52,16 @@ export function setSyncedScratchpadTabs(tabs: ScratchTab[]): void {
 }
 
 /**
+ * Vault locked: drop the module-level mirror of note content so it doesn't
+ * outlive the lock in renderer memory. Unsaved edits (`pending`) are kept —
+ * they are the user's own work and flush after unlock; ScratchpadTab
+ * re-baselines the mirror from the server when it remounts.
+ */
+export function purgeScratchpadMirrorOnLock(): void {
+  if (!pending) lastSynced = [];
+}
+
+/**
  * POST one tab's content. Returns the SERVER's saved tab (carrying the new
  * rev) on success, or false when the save was refused (409 conflict surfaced
  * to the handler / 423 protected). The returned rev matters: the server

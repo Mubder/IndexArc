@@ -17,7 +17,11 @@ function clientKey(req: any): string {
 
 function getEntry(key: string, now: number) {
   let entry = attempts.get(key);
+  // Consecutive failures outlive the window: only a verified success clears
+  // them, so waiting out the minute doesn't reset the escalating delay.
+  let carriedFailures = 0;
   if (entry && now - entry.firstAttempt > WINDOW_MS) {
+    carriedFailures = entry.failures;
     attempts.delete(key);
     entry = undefined;
   }
@@ -29,7 +33,7 @@ function getEntry(key: string, now: number) {
       const oldest = attempts.keys().next().value;
       if (oldest !== undefined) attempts.delete(oldest);
     }
-    entry = { count: 0, firstAttempt: now, failures: 0 };
+    entry = { count: 0, firstAttempt: now, failures: carriedFailures };
     attempts.set(key, entry);
   }
   return entry;
@@ -56,6 +60,9 @@ export function recordFailure(req: any): void {
   if (entry) entry.failures++;
 }
 
+/** Call ONLY after a verified secret (master password). A fixed confirm
+ *  word is not a secret — letting it clear the counter turned the shared
+ *  throttle into an unlimited master-password oracle. */
 export function recordSuccess(req: any): void {
   attempts.delete(clientKey(req));
 }

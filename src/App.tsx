@@ -47,6 +47,7 @@ import { LibraryTab } from "./components/LibraryTab";
 import { useSSE } from "./hooks/useSSE";
 import { SettingsTab } from "./components/SettingsTab";
 import { LockScreen } from "./components/LockScreen";
+import { purgeScratchpadMirrorOnLock } from "./scratchpadSaveQueue";
 import { SetupScreen } from "./components/SetupScreen";
 import { SetupChecker } from "./components/SetupChecker";
 import { HealthModal } from "./components/HealthModal";
@@ -265,22 +266,29 @@ export default function App() {
     }
   }, []);
 
+  // Purge secret-bearing working state from renderer memory — entries,
+  // pasted tokens, unsaved candidates and ask results must not survive the
+  // lock in React state (heap-scrape exposure). Runs for EVERY lock path:
+  // the manual button, and server-side auto-lock / lock-on-minimize that the
+  // UI only learns about through fetchAll.
+  const purgeSecretState = useCallback(() => {
+    setEntries([]);
+    setAttention([]);
+    setPaste("");
+    setCandidates([]);
+    setAskResults([]);
+    setAskAnswer(null);
+    setAskAnswerProvider("");
+    setScanSession(null);
+    purgeScratchpadMirrorOnLock();
+  }, []);
+
   const handleLockVault = async () => {
     try {
       const res = await fetch("/api/vault/lock", { method: "POST" });
       if (res.ok) {
         setVaultStatus((prev) => prev ? { ...prev, is_locked: true } : null);
-        setEntries([]);
-        setAttention([]);
-        // Purge secret-bearing working state from renderer memory — pasted
-        // tokens, unsaved candidates and ask results must not survive the
-        // lock in React state (heap-scrape exposure).
-        setPaste("");
-        setCandidates([]);
-        setAskResults([]);
-        setAskAnswer(null);
-        setAskAnswerProvider("");
-        setScanSession(null);
+        purgeSecretState();
       }
     } catch (e) {
       console.error(e);
@@ -383,6 +391,7 @@ export default function App() {
           ]);
           if (isStale()) return;
           setVaultStatus(vStatus);
+          purgeSecretState();
           if (Array.isArray(lg)) setLogs(lg);
           if (!settingsDirtyRef.current && se && typeof se === "object") {
             setSettings(se);
@@ -447,6 +456,25 @@ export default function App() {
     const t = setInterval(fetchHealth, 60000);
     return () => clearInterval(t);
   }, [fetchHealth]);
+
+  // Auto-lock counts USER activity only: background polls are GETs and are
+  // ignored server-side, so real keyboard/pointer/scroll input is reported
+  // with a throttled ping. Without it, reading the vault would auto-lock.
+  useEffect(() => {
+    const PING_EVERY_MS = 30_000;
+    let last = 0;
+    const onInput = () => {
+      const now = Date.now();
+      if (now - last < PING_EVERY_MS) return;
+      last = now;
+      fetch("/api/activity", { method: "POST" }).catch(() => {});
+    };
+    const events = ["keydown", "pointerdown", "wheel", "touchstart"] as const;
+    for (const ev of events) window.addEventListener(ev, onInput, { passive: true, capture: true });
+    return () => {
+      for (const ev of events) window.removeEventListener(ev, onInput, { capture: true });
+    };
+  }, []);
 
   // SSE: refetch data when server state changes
   useSSE(useCallback((msg) => {
@@ -1636,7 +1664,7 @@ return (
             setLibraryQuery(entry.name);
           } else {
             void (async () => {
-              const ok = await copyTextToClipboard(entry.value);
+              const ok = await copyTextToClipboard(entry.value, { sensitive: true });
               showToast(ok ? `Copied ${entry.name}` : "Copy failed", ok ? "success" : "error");
             })();
           }

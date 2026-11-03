@@ -956,9 +956,14 @@ export async function pullOllamaModel(
 export async function generateText(
   settings: AppSettings,
   prompt: string,
-  system: string
+  system: string,
+  /** Use exactly this provider instead of re-resolving. Callers that shaped
+   *  the prompt for a specific provider (Ask puts secret values in it only
+   *  when that provider is LOCAL) must pin it: re-resolving here could pick a
+   *  cloud fallback if the local one went offline in between. */
+  pinnedProvider?: Awaited<ReturnType<typeof resolveActiveProvider>>
 ): Promise<{ text: string; provider_used: string } | null> {
-  const active = await resolveActiveProvider(settings);
+  const active = pinnedProvider ?? (await resolveActiveProvider(settings));
   if (active === "heuristic") return null;
   // Egress gate: cloud LLM calls carrying vault-derived text need explicit
   // consent. Local (loopback) providers pass untouched.

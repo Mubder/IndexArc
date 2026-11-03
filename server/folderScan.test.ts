@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { walkFiles } from "./services/folderScan.js";
+import { walkFiles, extractText } from "./services/folderScan.js";
 
 // AUD-017 regression: the walk used to be synchronous and unbounded in
 // directories/depth — MAX_FILES only capped COLLECTED files, so scanning a
@@ -78,5 +78,45 @@ describe("walkFiles traversal budgets", () => {
     const { files } = await walkFiles(tmpDir);
     expect(files).not.toContain(path.join(tmpDir, "link", "s.txt"));
     expect(files).toContain(path.join(tmpDir, "real", "s.txt"));
+  });
+});
+
+// Minimal one-page PDF with a single text run; xref offsets computed so the
+// parser doesn't need to repair the file.
+function minimalPdf(text: string): Buffer {
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 144] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    null,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  const stream = `BT /F1 12 Tf 20 100 Td (${text}) Tj ET`;
+  objs[3] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+  let out = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objs.forEach((o, i) => {
+    offsets.push(out.length);
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets) out += `${String(off).padStart(10, "0")} 00000 n \n`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, "latin1");
+}
+
+describe("extractText — PDF", () => {
+  it("extracts text from a PDF (pdf-parse v2 class API)", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "indexarc-pdf-"));
+    try {
+      const file = path.join(dir, "keys.pdf");
+      fs.writeFileSync(file, minimalPdf("OPENAI_KEY sk-test-abc123"));
+      const r = await extractText(file);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.text).toContain("sk-test-abc123");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

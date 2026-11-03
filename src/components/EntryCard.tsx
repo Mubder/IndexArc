@@ -47,7 +47,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     e.stopPropagation();
     // copied reflects REAL success — a silent clipboard failure must not
     // show a checkmark (this button used to lie in packaged builds).
-    setCopied(await copyTextToClipboard(isNote ? noteBody : entry.value));
+    setCopied(await copyTextToClipboard(isNote ? noteBody : entry.value, { sensitive: !isNote }));
     setTimeout(() => setCopied(false), 1500);
   };
 

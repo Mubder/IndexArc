@@ -116,7 +116,7 @@ for (const p of protectedPaths) {
 //       keys are masked; POST is sticky-write-only), /api/logs (entries are
 //       redacted by policy — ids, never values), /api/health (read-only
 //       diagnostics), /api/backups + /api/emergency* (metadata only; restore
-//       re-locks), /api/audit (hash-chained, ids only), spellcheck routes.
+//       re-locks, and while locked only fully-encrypted snapshots restore), /api/audit (hash-chained, ids only), spellcheck routes.
 //     A token holder while locked learns vault METADATA, never secret values.
 
 // --- Analyze (Paste & Analyze — standalone) ---

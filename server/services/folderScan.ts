@@ -166,7 +166,7 @@ const MAX_DOC_BYTES = 5 * 1024 * 1024; // 5MB for binary documents
  * (.docx/.pdf/.xlsx) and JSON-Lines (.jsonl/.ndjson); falls back to the
  * plain-text reader for everything else.
  */
-async function extractText(
+export async function extractText(
   filePath: string
 ): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
   const ext = path.extname(filePath).toLowerCase();
@@ -213,9 +213,16 @@ async function extractText(
       if (stat.size > MAX_DOC_BYTES)
         return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
       const buf = await fs.promises.readFile(filePath);
+      // pdf-parse v2 exports a class (the v1 function call threw for every
+      // PDF — a stale local type stub hid it from the compiler).
       const { PDFParse } = await import("pdf-parse");
-      const data = await PDFParse(buf);
-      const text = ((data && data.text) || "").trim();
+      const parser = new PDFParse({ data: new Uint8Array(buf) });
+      let text = "";
+      try {
+        text = ((await parser.getText()).text || "").trim();
+      } finally {
+        await parser.destroy().catch(() => {});
+      }
       return text ? { ok: true, text } : { ok: false, reason: "No extractable text" };
     } catch (e: any) {
       return { ok: false, reason: `PDF read failed: ${e.message}` };

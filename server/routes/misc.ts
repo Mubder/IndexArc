@@ -341,6 +341,12 @@ export function miscRoutes(ctx: RouteContext) {
     if (!/^indexarc-emergency-[\w\-.]+\.iabak$/.test(name)) {
       return res.status(400).json({ ok: false, error: "invalid snapshot name" });
     }
+    if (store.isLocked() && store.emergencySnapshotIsEncrypted(name) === false) {
+      return res.status(423).json({
+        ok: false,
+        error: "This snapshot contains unencrypted data and the vault is locked. Unlock first, or move data/vault.json aside manually to recover it.",
+      });
+    }
     const ok = store.restoreEmergencySnapshot(name);
     if (ok) {
       addLog("SYSTEM", `Restored from emergency snapshot → ${name}`);
@@ -467,7 +473,10 @@ export function miscRoutes(ctx: RouteContext) {
           gate.delayMs || 500
         );
       }
-      recordSuccess(req);
+      // Only a verified master password resets the shared throttle — the
+      // public confirm word must not (it would reset remove-password and
+      // unlock guess counters too).
+      if (pwOk) recordSuccess(req);
     }
     const tab = store.setScratchpadTabProtected(req.params.id, wantProtected);
     if (!tab) return res.status(404).json({ error: "Tab not found" });

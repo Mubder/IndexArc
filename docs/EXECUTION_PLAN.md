@@ -1,6 +1,6 @@
 # IndexArc — Master Execution Plan
 
-**Status:** Authoritative build order · **Date:** 2026-09-05
+**Status:** Superseded by [`INDUSTRIAL_ROADMAP.md`](./INDUSTRIAL_ROADMAP.md) (2026-11-02) — Phases 1–3 shipped; Phase 4 and 5 items are tracked there · **Date:** 2026-09-05
 **Supersedes:** the phase tables in [`SCRATCHPAD_AND_PROTECTION_PLAN.md`](./SCRATCHPAD_AND_PROTECTION_PLAN.md) (kept as design reference) and the fix-order list in [`AUDIT_REPORT.md`](./AUDIT_REPORT.md) (kept as findings reference).
 **Inputs merged:** the 2026-09 audit, the scratchpad/protection design, the peer review of that design (corrections adopted — listed per task), and the hosted-deployment analysis (Path A adopted; Path B rejected).
 

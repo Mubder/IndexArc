@@ -8,7 +8,7 @@
   "main": "electron-main.cjs",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --external:vite --external:electron --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --external:vite --external:electron --banner:js=\"const __importMetaUrl = require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__importMetaUrl --sourcemap --outfile=dist/server.cjs && node scripts/copy-pdf-worker.cjs",
     "start": "node dist/server.cjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true}); try{require('fs').rmSync('dist-desktop',{recursive:true,force:true})}catch(e){}\"",
     "lint": "tsc --noEmit",
@@ -114,6 +114,7 @@
     "asar": true,
     "asarUnpack": [
       "dist/**/*",
+      "node_modules/@napi-rs/**/*",
       "public/**/*",
       "dictionaries/**/*"
     ],

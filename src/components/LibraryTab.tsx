@@ -472,7 +472,7 @@ const LibraryTableRow: React.FC<{
 
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    setCopied(await copyTextToClipboard(isNote ? noteBody : entry.value));
+    setCopied(await copyTextToClipboard(isNote ? noteBody : entry.value, { sensitive: !isNote }));
     setTimeout(() => setCopied(false), 1500);
   };
 

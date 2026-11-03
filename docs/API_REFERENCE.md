@@ -78,6 +78,7 @@ Everything else is reachable without unlocking (including `/api/vault/*`, `/api/
 | GET | `/api/vault/status` | Lock + encryption state | — | `{ is_locked, encryption_enabled }` | No |
 | POST | `/api/vault/unlock` | Unlock with master password | `{ password }` | `{ success: true }`; `400` if empty; `401 { error }` (500ms delay) on wrong password | No |
 | POST | `/api/vault/lock` | Lock (clear in-memory key) | — | `{ success: true }` | No |
+| POST | `/api/activity` | Report user input to the auto-lock timer (only mutating requests and this ping count as activity; GET polling does not) | — | `204` | No |
 | POST | `/api/vault/setup-password` | Enable encryption | `{ password }` (min 4 chars) | `{ success: true }`; `400 { error }` if too short or already encrypted | No |
 | POST | `/api/vault/remove-password` | Decrypt back to plaintext | `{ password }` | `{ success: true }`; `400` if empty; `401` (500ms delay) on wrong password | No |
 

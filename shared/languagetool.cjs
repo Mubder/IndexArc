@@ -3,6 +3,7 @@
 const http = require("http");
 const https = require("https");
 const { spawnSync, spawn } = require("child_process");
+const { childEnv } = require("./child-env.cjs");
 const fs = require("fs");
 const path = require("path");
 
@@ -132,6 +133,7 @@ class LanguageToolService {
         ], {
           detached: false,
           stdio: ["ignore", "ignore", "ignore"],
+          env: childEnv(),
         });
 
         this.serverProcess.on("error", (err) => {
