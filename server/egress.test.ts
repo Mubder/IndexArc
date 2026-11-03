@@ -239,17 +239,13 @@ describe("R4 egress", () => {
 
     it("non-loopback ollama_base_url: no vault-bearing request leaves", async () => {
       await driveAll(mk({ ai_provider: "local", ollama_base_url: `http://${REMOTE_OLLAMA_HOST}:11434`, ai_cloud_consent: false }));
-      // Probes may go out (see the it.fails below) but nothing with a body.
+      // Not even a probe goes out (asserted below); certainly nothing with a body.
       expect(external().filter((c) => c.body).map((c) => c.url)).toEqual([]);
     }, 60_000);
 
-    // BUG (R4 egress finding): checkOllama() probes GET <ollama_base_url>/api/tags
-    // regardless of ai_cloud_consent. With a non-loopback ollama_base_url this
-    // contacts a remote host on every status/health poll and AI call while
-    // consent is OFF — no vault data in it, but it is still off-device egress
-    // (and fingerprints the app). The gate in cloudEgressAllowed() is only
-    // applied to the data-bearing calls, not to the availability probe.
-    it.fails("non-loopback ollama_base_url: not even an availability probe leaves (BUG: checkOllama ignores consent)", async () => {
+    // Regression (R4 finding, fixed in R1.4): checkOllama() used to probe a
+    // non-loopback ollama_base_url while consent was OFF.
+    it("non-loopback ollama_base_url: not even an availability probe leaves", async () => {
       await driveAll(mk({ ai_provider: "local", ollama_base_url: `http://${REMOTE_OLLAMA_HOST}:11434`, ai_cloud_consent: false }));
       expect(external().map((c) => c.url)).toEqual([]);
     }, 60_000);
@@ -321,17 +317,10 @@ describe("R4 egress", () => {
       }, 60_000);
     }
 
-    // BUG (R4 egress finding): with ai_provider / llm_provider_override pinned
-    // to "local" and Ollama OFFLINE, resolveActiveProvider() returns
-    // "heuristic", and embedText()'s fallback chain then sends the text to
-    // GEMINI whenever a Gemini key is stored and consent is ON
-    // (providers.ts embedText → "Fallbacks"). indexEntry() reaches this on
-    // every save, so a user who pinned local AI still gets entry metadata
-    // (name/type/labels — values are stripped by indexTextFor's cloudSafe
-    // branch) embedded in the cloud. The fallback should only run when the
-    // user has NOT pinned a provider.
+    // Regression (R4 finding, fixed in R1.4): with a provider pinned to
+    // "local" and Ollama offline, embedText() used to fall back to Gemini.
     for (const [pinLabel, pin] of pins.slice(0, 2)) {
-      it.fails(`${pinLabel} / Ollama offline: embeddings never fall back to Gemini (BUG: embedText fallback)`, async () => {
+      it(`${pinLabel} / Ollama offline: embeddings never fall back to Gemini`, async () => {
         const s = mk({ ...pin, ai_cloud_consent: true });
         await embedText(s, "harmless");
         await indexEntry(store, s, entry);
@@ -339,13 +328,10 @@ describe("R4 egress", () => {
       }, 60_000);
     }
 
-    // BUG (R4 egress finding): embed_provider_override is ignored by
-    // indexEntry() and askVault() — both pass the LLM's resolved provider as
-    // embedText's explicit providerOverride, which takes precedence over
-    // settings.embed_provider_override. With embeddings pinned to local and
-    // ai_provider=auto resolving to a cloud LLM, entry metadata is embedded in
-    // the cloud instead of locally.
-    it.fails("embed_provider_override=local is honored by indexEntry/Ask (BUG: overridden by the LLM provider)", async () => {
+    // Regression (R4 finding, fixed in R1.4): the caller's LLM provider used to
+    // override settings.embed_provider_override, so embeddings pinned to local
+    // still went to the cloud LLM's provider.
+    it("embed_provider_override=local is honored by indexEntry/Ask", async () => {
       const s = mk({ ai_provider: "auto", embed_provider_override: "local", ai_cloud_consent: true });
       await indexEntry(store, s, entry);
       await askVault(store, s, QUERY, 12);

@@ -95,12 +95,12 @@ const POLICY: Record<string, Policy> = {
 
   // --- AI (caller-supplied text only, or vault-wide via /ask) ---
   "GET /api/status": "token",
-  "POST /api/proofread": "token",
+  "POST /api/proofread": "token+unlocked",
   "POST /api/autocomplete": "token",
-  "POST /api/ollama/ensure": "token",
+  "POST /api/ollama/ensure": "token+unlocked",
   "POST /api/ollama/warm": "token",
   "POST /api/ask": "token+unlocked",
-  "POST /api/rewrite": "token",
+  "POST /api/rewrite": "token+unlocked",
 
   // --- SSE ---
   "POST /api/sse/ticket": "token",

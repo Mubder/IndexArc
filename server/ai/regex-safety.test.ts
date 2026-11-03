@@ -214,14 +214,9 @@ function runAll(patterns: Pattern[]): Promise<Result[]> {
 // files belong to the AI/heuristics work). Key = the literal as written in
 // source, so line drift does not matter. When one is fixed, its it.fails
 // starts failing: delete the row.
-const KNOWN_SLOW: Record<string, string> = {
-  // heuristics.ts isCommand(): t.split(...) for chained shell commands —
-  // ~2.2 s on a 50k run of spaces (reachable: the guard only needs one " && ").
-  [String.raw`/\s*(?:&&|\|\||;)\s*/`]: "quadratic on long whitespace runs (~2.2 s @ 50k spaces)",
-  // heuristics.ts stripSectionRule(): decorative-rule stripper on title lines —
-  // ~1.9 s on a 50k run of interior spaces.
-  [String.raw`/\s*[=\-_*]{3,}\s*/g`]: "quadratic on long whitespace runs (~1.9 s @ 50k spaces)",
-};
+// The two rows R4 found (isCommand's split and stripSectionRule) were fixed
+// in R1.4; the list is empty and kept for the next finding.
+const KNOWN_SLOW: Record<string, string> = {};
 
 const id = (p: Pattern) => `${p.file}:${p.line}`;
 

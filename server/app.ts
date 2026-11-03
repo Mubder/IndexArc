@@ -19,7 +19,21 @@ import type { RouteContext } from "./routes/types.js";
 // Paths that ADDITIONALLY require the vault to be unlocked (see the gating
 // matrix below). Exported so the route lock-matrix test can assert against
 // the same list the app mounts.
-export const protectedPaths = ["/api/entries", "/api/analyze", "/api/folders", "/api/ask", "/api/snippets", "/api/scratchpad", "/api/fs"];
+// /api/proofread and /api/rewrite: while locked the server cannot tell
+// whether the text comes from a protected note. /api/ollama/ensure: no
+// multi-GB downloads before the user has unlocked (R1.5).
+export const protectedPaths = [
+  "/api/entries",
+  "/api/analyze",
+  "/api/folders",
+  "/api/ask",
+  "/api/snippets",
+  "/api/scratchpad",
+  "/api/fs",
+  "/api/proofread",
+  "/api/rewrite",
+  "/api/ollama/ensure",
+];
 
 export interface CreateAppDeps {
   paths: PortablePaths;
