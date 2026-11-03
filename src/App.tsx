@@ -489,7 +489,7 @@ return (
     <div
       className="h-full font-sans antialiased flex flex-col relative overflow-clip"
       style={{
-        background: "var(--bg-root)",
+        background: "var(--bg-app, var(--bg-root))",
         color: "var(--text)",
       }}
     >
@@ -516,7 +516,7 @@ return (
           <TopBar handleAsk={handleAsk} handleLockVault={handleLockVault} health={health} query={query} setCmdPaletteOpen={setCmdPaletteOpen} setHealthOpen={setHealthOpen} setQuery={setQuery} setSidebarOpen={setSidebarOpen} setTab={setTab} settings={settings} sidebarOpen={sidebarOpen} status={status} t={t} theme={theme} toggleLanguage={toggleLanguage} toggleTheme={toggleTheme} vaultStatus={vaultStatus} />
 
           {/* Content Area */}
-          <main dir={settings?.ui_language === "ar" ? "rtl" : "ltr"} className="flex-1 min-h-0 overflow-y-auto px-8 py-6">
+          <main dir={settings?.ui_language === "ar" ? "rtl" : "ltr"} className="flex-1 min-h-0 overflow-y-auto px-8 py-6 app-main">
             <SetupChecker
               status={status}
               settings={settings}

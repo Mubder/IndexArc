@@ -49,7 +49,8 @@ export function Sidebar({ nav, setLibraryFilter, setTab, sidebarOpen, status, t,
                 key={n.id}
                 type="button"
                 onClick={() => setTab(n.id)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm font-medium transition-all relative group"
+                data-active={isActive}
+                className="nav-item w-full flex items-center gap-2.5 ps-5 pe-3 py-2 text-sm font-medium relative group"
                 style={{
                   borderRadius: "9999px",
                   color: isActive ? "var(--tab-active-color)" : "var(--tab-inactive-color)",
@@ -128,7 +129,7 @@ export function Sidebar({ nav, setLibraryFilter, setTab, sidebarOpen, status, t,
             style={{
               borderColor: "var(--border-glow)",
               background: "var(--accent-bg)",
-              boxShadow: "0 0 16px var(--accent-glow)",
+              boxShadow: "0 0 10px var(--accent-glow)",
             }}
             title="https://kazma.ai"
           >

@@ -30,7 +30,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
     <>
           {/* Top Bar - Fixed Layout */}
           <header
-            className="flex items-center gap-4 px-6 py-3 border-b flex-shrink-0"
+            className="app-header flex items-center gap-4 px-6 py-3 border-b flex-shrink-0"
             style={{
               background: "var(--glass)",
               backdropFilter: "blur(12px)",
@@ -113,7 +113,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
               {/* Mobile Menu Toggle */}
               <button
                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="p-2 rounded-xl border transition-all md:hidden"
+                className="icon-btn p-2 rounded-xl border transition-all md:hidden"
                 style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
                 aria-label={sidebarOpen ? t("menu_close") : t("menu_open")}
               >
@@ -151,7 +151,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
               {vaultStatus?.encryption_enabled && !vaultStatus?.is_locked && (
                 <button
                   onClick={handleLockVault}
-                  className="p-2 rounded-xl border transition-all"
+                  className="icon-btn p-2 rounded-xl border transition-all"
                   style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
                   title={t("sec_lock_btn") || "Lock vault"}
                 >
@@ -162,7 +162,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
               {/* App Health */}
               <button
                 onClick={() => setHealthOpen(true)}
-                className="p-2 rounded-xl border transition-all relative"
+                className="icon-btn p-2 rounded-xl border transition-all relative"
                 style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
                 title={t("health_open_btn")}
                 aria-label={t("health_open_btn")}
@@ -182,7 +182,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
               {/* Theme Toggle */}
               <button
                 onClick={toggleTheme}
-                className="p-2 rounded-xl border transition-all"
+                className="icon-btn p-2 rounded-xl border transition-all"
                 style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
                 title={theme === "dark" ? t("theme_to_light") : t("theme_to_dark")}
                 aria-label={theme === "dark" ? t("theme_to_light") : t("theme_to_dark")}
@@ -193,7 +193,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
               {/* Command Palette Trigger */}
               <button
                 onClick={() => setCmdPaletteOpen(true)}
-                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs transition-all"
+                className="icon-btn hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs transition-all"
                 style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-muted)" }}
                 title={t("search_btn_title")}
               >
@@ -205,7 +205,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
               {/* Language Toggle */}
               <button
                 onClick={toggleLanguage}
-                className="p-2 rounded-xl border transition-all"
+                className="icon-btn p-2 rounded-xl border transition-all"
                 style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
                 title={t("lang_switch_title")}
                 aria-label={t("lang_switch_title")}
@@ -216,7 +216,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
               {/* New Entry */}
               <button
                 onClick={() => setTab("home")}
-                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
+                className="btn-primary px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
                 style={{
                   background: "linear-gradient(135deg, var(--accent), #1d4ed8)",
                   boxShadow: "0 0 20px var(--accent-glow), 0 2px 8px rgba(0,0,0,0.3)",

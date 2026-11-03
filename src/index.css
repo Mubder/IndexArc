@@ -230,15 +230,21 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
 
 /* ── Dark Theme (default) ── */
 :root, [data-theme="dark"] {
-  --bg-root: #0e1626;
-  --bg-base: #0e1626;
-  --bg-surface: rgba(22, 27, 46, 0.92);
+  --bg-root: #0b1120;
+  --bg-base: #0b1120;
+  /* Ambient backdrop: static aurora light (no animation, no GPU cost). */
+  --bg-app:
+    radial-gradient(1200px 600px at 12% -10%, rgba(59, 130, 246, 0.20), transparent 60%),
+    radial-gradient(900px 520px at 92% -6%, rgba(139, 92, 246, 0.16), transparent 62%),
+    radial-gradient(1000px 600px at 55% 115%, rgba(20, 184, 166, 0.10), transparent 60%),
+    #0b1120;
+  --bg-surface: rgba(19, 27, 48, 0.78);
   --bg-surface-solid: #16223a;
   --bg-input: rgba(27, 41, 69, 0.95);
   --bg-hover: rgba(59, 130, 246, 0.14);
   --bg-active: rgba(59, 130, 246, 0.2);
-  --border: rgba(125, 158, 255, 0.38);
-  --border-hover: rgba(125, 158, 255, 0.6);
+  --border: rgba(140, 165, 255, 0.2);
+  --border-hover: rgba(140, 165, 255, 0.42);
   --border-glow: rgba(125, 180, 255, 0.75);
   --border-input: rgba(125, 158, 255, 0.42);
   --card-outline: rgba(150, 175, 255, 0.16);
@@ -267,22 +273,27 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --glass: rgba(14, 22, 38, 0.82);
   --glass-border: rgba(255, 255, 255, 0.12);
   --shadow-glow: 0 0 20px rgba(37, 99, 235, 0.14), 0 0 60px rgba(37, 99, 235, 0.07);
-  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.55), 0 0 1px rgba(125, 158, 255, 0.35);
+  --shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 12px 32px -14px rgba(0, 0, 0, 0.7);
   --skeleton-from: rgba(37, 99, 235, 0.07);
   --skeleton-mid: rgba(37, 99, 235, 0.14);
   --tab-active-bg: linear-gradient(135deg, rgba(59, 130, 246, 0.28), rgba(99, 102, 241, 0.2));
   --tab-active-border: var(--accent-bright);
   --tab-active-shadow: 0 2px 12px rgba(59, 130, 246, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.15);
   --tab-active-color: #ffffff;
-  --tab-inactive-bg: rgba(14, 22, 38, 0.75);
-  --tab-inactive-border: var(--border);
+  --tab-inactive-bg: transparent;
+  --tab-inactive-border: transparent;
   --tab-inactive-color: var(--text-muted);
 }
 
 /* ── Light Theme ── */
 [data-theme="light"] {
-  --bg-root: #dde4f0;
-  --bg-base: #dde4f0;
+  --bg-root: #e6ebf5;
+  --bg-base: #e6ebf5;
+  --bg-app:
+    radial-gradient(1200px 600px at 12% -10%, rgba(59, 130, 246, 0.16), transparent 60%),
+    radial-gradient(900px 520px at 92% -6%, rgba(139, 92, 246, 0.12), transparent 62%),
+    radial-gradient(1000px 600px at 55% 115%, rgba(20, 184, 166, 0.10), transparent 60%),
+    #e6ebf5;
   --bg-surface: rgba(255, 255, 255, 0.88);
   --bg-surface-solid: #f5f7fc;
   --bg-input: rgba(230, 237, 247, 0.95);
@@ -315,15 +326,15 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --font-size-ar: 16px;
   --arabic-font-scale: calc(var(--font-size-ar) / var(--font-size-en));
   --shadow-glow: 0 0 20px rgba(37, 99, 235, 0.06), 0 0 60px rgba(37, 99, 235, 0.03);
-  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.08), 0 0 1px rgba(37, 59, 135, 0.12);
+  --shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 10px 28px -14px rgba(30, 50, 110, 0.28);
   --skeleton-from: rgba(37, 99, 235, 0.06);
   --skeleton-mid: rgba(37, 99, 235, 0.1);
   --tab-active-bg: linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(99, 102, 241, 0.14));
   --tab-active-border: var(--accent);
   --tab-active-shadow: 0 2px 8px rgba(37, 99, 235, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.5);
   --tab-active-color: #0c1526;
-  --tab-inactive-bg: rgba(255, 255, 255, 0.7);
-  --tab-inactive-border: var(--border);
+  --tab-inactive-bg: transparent;
+  --tab-inactive-border: transparent;
   --tab-inactive-color: var(--text-dim);
 }
 
@@ -387,10 +398,10 @@ body {
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: var(--bg-base); }
-::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 5px; border: 2px solid var(--bg-base); }
-::-webkit-scrollbar-thumb:hover { background: var(--accent-bright); }
-::-webkit-scrollbar-corner { background: var(--bg-base); }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(126, 176, 255, 0.28); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(126, 176, 255, 0.55); background-clip: padding-box; border: 3px solid transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
 
 /* ── Animations ── */
 @keyframes shimmer {
@@ -643,4 +654,68 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .flex.overflow-x-auto::-webkit-scrollbar-thumb {
   background-color: var(--border);
   border-radius: 2px;
+}
+
+/* ── Visual polish (2026-11) ──────────────────────────────────────────── */
+
+/* Selection and keyboard focus: one consistent accent ring. */
+::selection { background: rgba(59, 130, 246, 0.35); color: inherit; }
+:where(button, a, [role="button"], input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
+}
+
+/* Sidebar navigation: quiet items, a lit accent bar on the active one. */
+.nav-item { transition: background 0.15s ease, color 0.15s ease, box-shadow 0.2s ease; }
+.nav-item:not([data-active="true"]):hover {
+  background: var(--bg-hover) !important;
+  color: var(--text) !important;
+}
+.nav-item[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 6px;
+  top: 50%;
+  width: 3px;
+  height: 55%;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--cyan), var(--accent-bright));
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+/* Top bar icon buttons and the primary action. */
+.icon-btn { transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.15s ease; }
+.icon-btn:hover {
+  color: var(--text) !important;
+  border-color: var(--border-hover) !important;
+  background: var(--bg-hover) !important;
+  transform: translateY(-1px);
+}
+.btn-primary { transition: filter 0.15s ease, transform 0.15s ease, box-shadow 0.2s ease; }
+.btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+
+/* Header: frosted with a soft accent hairline instead of a hard rule. */
+.app-header { position: relative; border-bottom-color: transparent !important; }
+.app-header::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(126, 176, 255, 0.35), rgba(139, 92, 246, 0.3), transparent);
+  pointer-events: none;
+}
+
+/* Tab content eases in when a tab mounts (persistent banners don't re-run). */
+@keyframes contentIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.app-main > * { animation: contentIn 0.26s ease-out both; }
+
+/* Light theme: the starfield is a dark-theme effect; keep only a hint. */
+[data-theme="light"] canvas { opacity: 0.35; }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-main > * { animation: none !important; }
+  .icon-btn:hover, .btn-primary:hover { transform: none; }
 }
