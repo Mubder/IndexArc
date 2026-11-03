@@ -184,6 +184,50 @@ function snapshotIsFullyEncrypted(snapshot: any): boolean {
   return true;
 }
 
+/** Parse the UTC time out of indexarc-emergency-YYYY-MM-DD_HH-mm-ss-mmm.iabak. */
+function snapshotTime(name: string): number | null {
+  const m = /^indexarc-emergency-(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})-(\d{3})/.exec(name);
+  if (!m) return null;
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6], +m[7]);
+}
+
+/**
+ * Which snapshots to keep: the newest `recent`, plus the newest of each hour
+ * for the last 24 h, each day for the last 14 days and each week for the
+ * last 8 weeks. Count-only retention ("newest 15") meant ~2.5 minutes of
+ * edits — the 10 s debounce re-arms on every write — evicted every snapshot
+ * from before a mistake (audit M-6). Unparseable names are kept.
+ */
+export function snapshotsToKeep(names: string[], now: number, recent = 15): Set<string> {
+  const keep = new Set<string>();
+  const timed: Array<{ name: string; t: number }> = [];
+  for (const name of names) {
+    const t = snapshotTime(name);
+    if (t === null) keep.add(name);
+    else timed.push({ name, t });
+  }
+  timed.sort((a, b) => b.t - a.t); // newest first
+  timed.slice(0, recent).forEach((s) => keep.add(s.name));
+  const HOUR = 3_600_000;
+  const DAY = 24 * HOUR;
+  const tiers: Array<{ span: number; bucket: number }> = [
+    { span: DAY, bucket: HOUR },
+    { span: 14 * DAY, bucket: DAY },
+    { span: 56 * DAY, bucket: 7 * DAY },
+  ];
+  for (const { span, bucket } of tiers) {
+    const seen = new Set<number>();
+    for (const s of timed) {
+      if (now - s.t > span) continue;
+      const b = Math.floor(s.t / bucket);
+      if (seen.has(b)) continue; // newest in this bucket already kept
+      seen.add(b);
+      keep.add(s.name);
+    }
+  }
+  return keep;
+}
+
 function readJson<T>(filePath: string, fallback: T): T {
   try {
     if (!fs.existsSync(filePath)) return fallback;
@@ -231,8 +275,27 @@ export class VaultStore {
       try {
         this.createEmergencySnapshot();
       } catch {}
+      this.maybeScheduledBackup();
     }, 10_000);
     this.emergencyTimer.unref?.();
+  }
+
+  /**
+   * backups/ used to be written only at server start — a tray-resident app
+   * running for weeks had no backup newer than its launch. Called from the
+   * write-debounce: takes a backup when the newest one is over a day old.
+   */
+  maybeScheduledBackup(now = Date.now()): string | null {
+    try {
+      const dir = this.paths.backupsDir;
+      const newest = fs.existsSync(dir)
+        ? Math.max(0, ...fs.readdirSync(dir).filter((f) => /^vault-.*\.json$/.test(f)).map((f) => fs.statSync(path.join(dir, f)).mtimeMs))
+        : 0;
+      if (now - newest < 24 * 3_600_000) return null;
+      return this.backupVault(10);
+    } catch {
+      return null;
+    }
   }
 
   /** Write an emergency snapshot now, discarding any pending debounce. */
@@ -2206,25 +2269,71 @@ export class VaultStore {
           atomicWrite(path.join(dir, name), payload);
           wroteAny = true;
 
-          // Prune to keep newest N.
-          const after = fs
-            .readdirSync(dir)
-            .filter((f) => f.endsWith(".iabak"))
-            .sort();
-          while (after.length > keep) {
-            const old = after.shift();
-            if (old) {
-              try {
-                fs.unlinkSync(path.join(dir, old));
-              } catch {}
-            }
+          // Tiered retention (see snapshotsToKeep): a burst of edits after a
+          // mass delete no longer evicts every snapshot from before it.
+          const all = fs.readdirSync(dir).filter((f) => f.endsWith(".iabak"));
+          const keepSet = snapshotsToKeep(all, Date.now(), keep);
+          for (const old of all) {
+            if (keepSet.has(old)) continue;
+            try {
+              fs.unlinkSync(path.join(dir, old));
+            } catch {}
           }
         } catch {}
+      }
+      if (wroteAny && !this._snapshotSecretsPurged) {
+        this._snapshotSecretsPurged = true;
+        this.purgePlaintextSnapshotSecrets();
       }
       return wroteAny ? name : null;
     } catch {
       return null;
     }
+  }
+
+  private _snapshotSecretsPurged = false;
+
+  /**
+   * Snapshots taken before settings secrets were wrapped (safeStorage key)
+   * still carry the provider API keys in plaintext — in up to three places,
+   * one of them outside the portable root, for up to 8 weeks of retention.
+   * Re-wrap them in place. Needs the settings key; without it the live
+   * settings.json is plaintext too and there is nothing to gain. Returns the
+   * number of snapshot files rewritten.
+   */
+  purgePlaintextSnapshotSecrets(): number {
+    if (!this.settingsKeyBuf()) return 0;
+    let rewritten = 0;
+    for (const dir of this.emergencyDirs()) {
+      let names: string[] = [];
+      try {
+        names = fs.readdirSync(dir).filter((f) => f.endsWith(".iabak"));
+      } catch {
+        continue;
+      }
+      for (const name of names) {
+        const file = path.join(dir, name);
+        try {
+          const snap = JSON.parse(fs.readFileSync(file, "utf-8"));
+          const b64 = snap?.files?.settings;
+          if (typeof b64 !== "string") continue;
+          const settings = JSON.parse(Buffer.from(b64, "base64").toString("utf-8").replace(/^\uFEFF/, ""));
+          let changed = false;
+          for (const f of VaultStore.SECRET_SETTING_FIELDS) {
+            const v = settings?.[f];
+            if (typeof v === "string" && v !== "" && !v.startsWith("enc:v1:")) {
+              settings[f] = this.wrapSettingSecret(v);
+              changed = true;
+            }
+          }
+          if (!changed) continue;
+          snap.files.settings = Buffer.from(JSON.stringify(settings, null, 2), "utf-8").toString("base64");
+          atomicWrite(file, JSON.stringify(snap));
+          rewritten++;
+        } catch {}
+      }
+    }
+    return rewritten;
   }
 
   /**

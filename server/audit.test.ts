@@ -158,4 +158,27 @@ describe("hash-chained audit log", () => {
     expect(records[0].prev).toBe(last.hash); // chain continues from the anchor
     expect(revived.verify().checked).toBe(1); // the rebuilt file itself verifies
   });
+
+  // R1.3 — a chain that is internally perfect can still be short: only the
+  // anchor knows how far it really went.
+  it("detects deletion of the LAST records (tail truncation)", () => {
+    audit.log("vault.unlock", "success");
+    audit.log("vault.decrypt", "export");
+    audit.log("vault.lock", "manual");
+    const file = path.join(paths.dataDir, "audit.log");
+    const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+    fs.writeFileSync(file, lines.slice(0, -2).join("\n") + "\n");
+    const res = new AuditLog(paths).verify();
+    expect(res.ok).toBe(false);
+    expect(res.brokenAtSeq).toBe(2);
+  });
+
+  it("detects a deleted .1 generation when .2 or a rotation header remains", () => {
+    audit.log("vault.unlock", "success");
+    const file = path.join(paths.dataDir, "audit.log");
+    const first = JSON.parse(fs.readFileSync(file, "utf8").split("\n")[0]);
+    // A current file that claims to follow a rotation, with no .1 beside it.
+    fs.writeFileSync(file, JSON.stringify({ ...first, event: "__generation__" }) + "\n");
+    expect(new AuditLog(paths).verify().ok).toBe(false);
+  });
 });

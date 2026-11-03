@@ -89,7 +89,15 @@ export class AuditLog {
       fs.mkdirSync(path.dirname(this.anchorFile), { recursive: true });
       const anchor: AuditAnchor = { seq: this.nextSeq - 1, hash: this.lastHash, ts: new Date().toISOString() };
       const tmp = `${this.anchorFile}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(anchor), "utf8");
+      // fsync before the rename: a torn anchor would read as "no anchor" and
+      // silently disable the tail check in verify().
+      const fd = fs.openSync(tmp, "w");
+      try {
+        fs.writeSync(fd, JSON.stringify(anchor));
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
       fs.renameSync(tmp, this.anchorFile);
     } catch {}
   }
@@ -224,6 +232,20 @@ export class AuditLog {
     if (suffixes.includes(".1") && !suffixes.includes("")) {
       return { ok: false, checked: 0, brokenAtSeq: null };
     }
+    // Generations are contiguous: .2 without .1 means .1 was deleted, and a
+    // current file that starts with a rotation header must have its .1.
+    if (suffixes.includes(".2") && !suffixes.includes(".1")) {
+      return { ok: false, checked: 0, brokenAtSeq: null };
+    }
+    if (!suffixes.includes(".1")) {
+      const first = readRecords(this.file)[0];
+      try {
+        if (first && JSON.parse(first).event === GENERATION_EVENT) {
+          return { ok: false, checked: 0, brokenAtSeq: null };
+        }
+      } catch {}
+    }
+    let last: AuditRecord | null = null;
     for (const suffix of suffixes) {
       for (const line of readRecords(this.file + suffix)) {
         let rec: AuditRecord;
@@ -239,7 +261,22 @@ export class AuditLog {
           return { ok: false, checked, brokenAtSeq: rec.seq ?? null };
         }
         prev = rec.hash;
+        last = rec;
         checked++;
+      }
+    }
+    // Tail check against the out-of-band anchor: deleting the LAST records
+    // (e.g. the vault.decrypt that gave someone away) leaves a chain that is
+    // internally perfect — only the anchor knows how far it really went.
+    // The trail may be one record AHEAD of the anchor (crash between append
+    // and anchor write); it may never be behind it or disagree with it.
+    const anchor = this.readAnchor();
+    if (anchor && last) {
+      if (last.seq < anchor.seq) {
+        return { ok: false, checked, brokenAtSeq: last.seq + 1 };
+      }
+      if (last.seq === anchor.seq && last.hash !== anchor.hash) {
+        return { ok: false, checked, brokenAtSeq: last.seq };
       }
     }
     return { ok: true, checked, brokenAtSeq: null };
