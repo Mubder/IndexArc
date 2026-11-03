@@ -1,6 +1,8 @@
 import React from "react";
 import { Plus, Sparkles, Inbox, Save, SkipForward } from "lucide-react";
 import { VaultEntry, AnalyzeCandidate, Settings } from "../types";
+import type { SystemStatus, HealthReport, FolderScanSession, LibraryFilter } from "../types";
+import { KpiTiles, HealthCard, VaultMixCard, ServicesCard, RecentList } from "./home/DashboardCards";
 import { EntryCard } from "./EntryCard";
 import { CandidateCard } from "./CandidateCard";
 import { getTranslation } from "../utils/i18n";
@@ -23,6 +25,14 @@ interface HomeTabProps {
   onOpenClarify: (entry: VaultEntry) => void;
   onDeleteEntry: (id: string) => Promise<void>;
   settings: Settings | null;
+  status: SystemStatus | null;
+  health: HealthReport | null;
+  scanSession: FolderScanSession | null;
+  encrypted: boolean;
+  onOpenLibrary: (filter: LibraryFilter) => void;
+  onOpenHealth: () => void;
+  onOpenFolders: () => void;
+  onOpenSettings: () => void;
 }
 
 export const HomeTab: React.FC<HomeTabProps> = ({
@@ -43,6 +53,14 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   onOpenClarify,
   onDeleteEntry,
   settings,
+  status,
+  health,
+  scanSession,
+  encrypted,
+  onOpenLibrary,
+  onOpenHealth,
+  onOpenFolders,
+  onOpenSettings,
 }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
@@ -51,13 +69,34 @@ export const HomeTab: React.FC<HomeTabProps> = ({
     onOpenAnalyzeTab();
   };
 
+  const lang = settings?.ui_language === "ar" ? "ar" : "en";
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? t("home_good_morning") : hour < 18 ? t("home_good_afternoon") : t("home_good_evening");
+  // Info-level issues (no backup yet, AI offline) don't make the vault unhealthy.
+  const healthy = !health || health.overall !== "attention";
+  const today = new Date().toLocaleDateString(lang === "ar" ? "ar" : "en", { weekday: "long", day: "numeric", month: "long" });
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-[1280px]">
+      <header className="flex flex-col gap-1">
+        <span className="text-[13px]" style={{ color: "var(--text-muted)" }}>{today}</span>
+        <h1 className="text-2xl md:text-[28px] font-bold tracking-tight" style={{ color: "var(--text)" }}>
+          {greeting}. {healthy ? t("home_sub_healthy") : t("home_sub_attention")}
+        </h1>
+      </header>
+
+      <KpiTiles entries={entries} status={status} encrypted={encrypted} t={t} onOpen={onOpenLibrary} />
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] items-start">
+      <div className="space-y-5 min-w-0">
       <div className="app-card p-5 space-y-3" style={{ backdropFilter: "blur(10px)" }}>
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--text)" }}>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 min-w-0">
+          <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: "var(--text)" }}>
             <Plus className="w-4 h-4" style={{ color: "var(--cyan)" }} /> {t("quick_paste")}
           </h2>
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>{t("quick_capture_hint")}</span>
+          </div>
           {providerUsed && (
             <span className="text-[11px] font-mono" style={{ color: "var(--text-muted)" }}>via {providerUsed}</span>
           )}
@@ -81,8 +120,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
             type="button"
             onClick={handleAnalyze}
             disabled={analyzing || !paste.trim()}
-            className="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center gap-2 transition-all"
-            style={{ background: "linear-gradient(135deg, var(--accent), #1d4ed8)", boxShadow: "0 0 20px var(--accent-glow)" }}
+            className="btn-primary px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2"
           >
             <Sparkles className="w-4 h-4" />
             {analyzing ? t("analyzing") : t("analyze_btn")}
@@ -178,25 +216,14 @@ export const HomeTab: React.FC<HomeTabProps> = ({
         </div>
       )}
 
-        <div className="app-card p-4 space-y-3">
-          <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("recent_saved")}</h2>
-        <div className="space-y-2">
-          {entries
-            .filter((e) => e.status === "saved")
-            .slice(0, 8)
-            .map((e) => (
-              <EntryCard
-                key={e.id}
-                entry={e}
-                onOpenClarify={onOpenClarify}
-                onDeleteEntry={onDeleteEntry}
-                settings={settings}
-              />
-            ))}
-          {!entries.filter((e) => e.status === "saved").length && (
-            <p className="text-sm italic" style={{ color: "var(--text-muted)" }}>{t("no_saved")}</p>
-          )}
-        </div>
+        <RecentList entries={entries} lang={lang} t={t} onOpenLibrary={() => onOpenLibrary("all")} />
+      </div>
+
+      <aside className="space-y-5 min-w-0">
+        <HealthCard health={health} t={t} onOpenDetails={onOpenHealth} />
+        <VaultMixCard status={status} t={t} />
+        <ServicesCard status={status} settings={settings} scanSession={scanSession} t={t} onOpenFolders={onOpenFolders} onOpenSettings={onOpenSettings} />
+      </aside>
       </div>
     </div>
   );

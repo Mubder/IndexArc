@@ -509,7 +509,7 @@ return (
               aria-hidden="true"
             />
           )}
-          <Sidebar nav={nav} setLibraryFilter={setLibraryFilter} setTab={setTab} sidebarOpen={sidebarOpen} status={status} t={t} tab={tab} />
+          <Sidebar nav={nav} setTab={setTab} sidebarOpen={sidebarOpen} settings={settings} vaultStatus={vaultStatus} handleLockVault={handleLockVault} t={t} tab={tab} />
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
@@ -527,7 +527,7 @@ return (
               onlyWhenAttention={tab !== "home"}
             />
 
-            <HealthBanners compact={tab !== "home"} health={health} integrityDismissed={integrityDismissed} integrityWarnings={integrityWarnings} setHealthOpen={setHealthOpen} setIntegrityDismissed={setIntegrityDismissed} t={t} />
+            <HealthBanners compact health={health} integrityDismissed={integrityDismissed} integrityWarnings={integrityWarnings} setHealthOpen={setHealthOpen} setIntegrityDismissed={setIntegrityDismissed} t={t} />
 
             {tab === "home" && (
               <HomeTab
@@ -548,6 +548,17 @@ return (
                 onOpenClarify={openClarify}
                 onDeleteEntry={deleteEntry}
                 settings={settings}
+                status={status}
+                health={health}
+                scanSession={scanSession}
+                encrypted={!!vaultStatus?.encryption_enabled}
+                onOpenLibrary={(f) => {
+                  setLibraryFilter(f);
+                  setTab("library");
+                }}
+                onOpenHealth={() => setHealthOpen(true)}
+                onOpenFolders={() => setTab("folders")}
+                onOpenSettings={() => setTab("settings")}
               />
             )}
 

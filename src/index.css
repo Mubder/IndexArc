@@ -258,6 +258,9 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --accent-glow: rgba(59, 130, 246, 0.45);
   --accent-bg: rgba(59, 130, 246, 0.14);
   --cyan: #34e0f5;
+  --cyan-bg: rgba(52, 224, 245, 0.12);
+  --violet: #b69cff;
+  --violet-bg: rgba(182, 156, 255, 0.14);
   --emerald: #4ee3a8;
   --emerald-bg: rgba(52, 211, 153, 0.14);
   --amber: #ffce4d;
@@ -312,6 +315,9 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --accent-glow: rgba(37, 99, 235, 0.18);
   --accent-bg: rgba(37, 99, 235, 0.08);
   --cyan: #0891b2;
+  --cyan-bg: rgba(8, 145, 178, 0.1);
+  --violet: #7c3aed;
+  --violet-bg: rgba(124, 58, 237, 0.1);
   --emerald: #16a34a;
   --emerald-bg: rgba(22, 163, 74, 0.08);
   --amber: #d97706;
@@ -807,3 +813,13 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 @media (prefers-reduced-motion: reduce) {
   .btn-primary::after { transition: none; }
 }
+
+/* ── Home dashboard (2.1) ─────────────────────────────────────────────── */
+.kpi-tile { transition: transform 0.15s ease, box-shadow 0.2s ease; }
+.kpi-tile:hover { transform: translateY(-2px); }
+.recent-row { transition: background 0.15s ease; }
+.recent-row:hover { background: var(--bg-hover); }
+.service-row { transition: background 0.15s ease; }
+.service-row:hover { background: var(--bg-hover); }
+.lock-card-bar { transition: width 0.4s ease; }
+@media (prefers-reduced-motion: reduce) { .kpi-tile:hover { transform: none; } }

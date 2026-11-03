@@ -1,20 +1,22 @@
-import type { Tab } from "../../types";
-import { LibraryFilter } from "../../types";
+import type { Tab, Settings } from "../../types";
 import type { Dispatch, SetStateAction, ReactNode } from "react";
-import type { SystemStatus } from "../../types";
 import type { TranslationDict } from "../../utils/i18n";
+import { Lock, ShieldCheck, ShieldAlert } from "lucide-react";
 
 export interface SidebarProps {
   nav: { id: Tab; label: string; icon: ReactNode; badge?: number | undefined; }[];
-  setLibraryFilter: Dispatch<SetStateAction<LibraryFilter>>;
   setTab: Dispatch<SetStateAction<Tab>>;
   sidebarOpen: boolean;
-  status: SystemStatus | null;
+  settings: Settings | null;
+  vaultStatus: { is_locked: boolean; encryption_enabled: boolean } | null;
+  handleLockVault: () => Promise<void>;
   t: (key: keyof TranslationDict) => string;
   tab: Tab;
 }
 
-export function Sidebar({ nav, setLibraryFilter, setTab, sidebarOpen, status, t, tab }: SidebarProps) {
+export function Sidebar({ nav, setTab, sidebarOpen, settings, vaultStatus, handleLockVault, t, tab }: SidebarProps) {
+  const encrypted = !!vaultStatus?.encryption_enabled;
+  const autoLock = settings?.auto_lock_minutes ?? 0;
   return (
     <>
           {/* Sidebar - desktop: always visible, mobile: drawer */}
@@ -74,51 +76,45 @@ export function Sidebar({ nav, setLibraryFilter, setTab, sidebarOpen, status, t,
             })}
           </nav>
 
-          {/* Stats */}
-          <div
-            className="mx-3 mb-3 p-4 rounded-xl border"
-            style={{ background: "var(--bg-surface)", borderColor: "var(--border)", backdropFilter: "blur(10px)" }}
-          >
-            <div
-              className="text-[10px] font-semibold uppercase tracking-wider mb-2.5"
-              style={{ color: "var(--text-muted)" }}
-            >
-              {t("vault_overview")}
+          {/* Vault security */}
+          <div className="mx-3 mb-3 p-4 rounded-xl border flex flex-col gap-3" style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}>
+            <div className="flex items-center gap-2">
+              {encrypted ? (
+                <ShieldCheck className="w-4 h-4" style={{ color: "var(--emerald)" }} aria-hidden="true" />
+              ) : (
+                <ShieldAlert className="w-4 h-4" style={{ color: "var(--amber)" }} aria-hidden="true" />
+              )}
+              <span className="text-[13px] font-semibold" style={{ color: "var(--text)" }}>
+                {encrypted ? t("lock_card_unlocked") : t("lock_card_plain")}
+              </span>
+              {encrypted && (
+                <span className="ms-auto text-[11px] font-mono" style={{ color: "var(--text-muted)" }}>AES-256</span>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {([
-                { val: status?.stats?.total_saved ?? 0, lbl: t("stat_saved"), filter: "all" },
-                { val: status?.stats?.needs_attention ?? 0, lbl: t("stat_pending"), filter: "attention" },
-                { val: status?.stats?.total_secrets ?? 0, lbl: t("stat_secrets"), filter: "secret" },
-                { val: status?.stats?.total_commands ?? 0, lbl: t("stat_commands"), filter: "command" },
-              ] as { val: number; lbl: string; filter: LibraryFilter }[]).map((s) => (
+            {encrypted ? (
+              <>
+                <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  {autoLock > 0 ? t("lock_card_autolock").replace("{n}", String(autoLock)) : t("lock_card_autolock_off")}
+                </span>
                 <button
-                  key={s.lbl}
                   type="button"
-                  onClick={() => {
-                    setLibraryFilter(s.filter);
-                    setTab("library");
-                  }}
-                  className="text-center py-1.5 rounded-lg border transition-all hover:brightness-125 cursor-pointer"
-                  style={{ background: "var(--accent-bg)", borderColor: "rgba(37, 99, 235, 0.06)" }}
-                  title={`${s.lbl} · ${t("stat_open_in_library")}`}
+                  onClick={() => void handleLockVault()}
+                  className="icon-btn min-h-[36px] rounded-lg border text-[13px] font-semibold flex items-center justify-center gap-2"
+                  style={{ borderColor: "var(--border-hover)", color: "var(--text)" }}
                 >
-                  <div
-                    className="text-lg font-bold tabular-nums"
-                    style={{
-                      background: "linear-gradient(135deg, var(--accent-bright), var(--cyan))",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                    }}
-                  >
-                    {s.val}
-                  </div>
-                  <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: "var(--text-muted)" }}>
-                    {s.lbl}
-                  </div>
+                  <Lock className="w-3.5 h-3.5" aria-hidden="true" /> {t("lock_now")}
                 </button>
-              ))}
-            </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setTab("settings")}
+                className="icon-btn min-h-[36px] rounded-lg border text-[13px] font-semibold"
+                style={{ borderColor: "var(--amber)", color: "var(--amber)" }}
+              >
+                {t("lock_card_encrypt")}
+              </button>
+            )}
           </div>
 
           {/* Built with Kazma.ai credit (clickable → opens in default browser) */}

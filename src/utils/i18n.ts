@@ -415,6 +415,56 @@ export interface TranslationDict {
   setup_vault_locked: string;
   setup_vault_counts: string;
   health_more_issues: string;
+  home_good_morning: string;
+  home_good_afternoon: string;
+  home_good_evening: string;
+  home_sub_healthy: string;
+  home_sub_attention: string;
+  home_sub_locked: string;
+  kpi_entries: string;
+  kpi_secrets: string;
+  kpi_commands: string;
+  kpi_review: string;
+  kpi_added_week: string;
+  kpi_entries_note: string;
+  kpi_secrets_enc: string;
+  kpi_secrets_plain: string;
+  kpi_commands_note: string;
+  kpi_review_note: string;
+  kpi_review_none: string;
+  kpi_open_title: string;
+  health_card_title: string;
+  health_card_ok: string;
+  health_card_issues: string;
+  health_card_run: string;
+  health_card_details: string;
+  health_card_score: string;
+  mix_title: string;
+  mix_empty: string;
+  mix_commands: string;
+  mix_notes: string;
+  mix_secrets: string;
+  mix_other: string;
+  services_title: string;
+  services_basic: string;
+  services_rules: string;
+  services_ai: string;
+  services_ready: string;
+  services_offline: string;
+  services_watcher: string;
+  services_watching: string;
+  services_idle: string;
+  services_to_review: string;
+  services_no_scan: string;
+  open_btn: string;
+  recent_open_library: string;
+  quick_capture_hint: string;
+  lock_card_unlocked: string;
+  lock_card_autolock: string;
+  lock_card_autolock_off: string;
+  lock_card_plain: string;
+  lock_card_encrypt: string;
+  lock_now: string;
   health_data_label: string;
   health_vault_label: string;
   health_go_emergency: string;
@@ -835,6 +885,56 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     setup_vault_locked: "Locked — unlock to load entries",
     setup_vault_counts: "{entries} entries · {notes} notes",
     health_more_issues: "+{n} more",
+    home_good_morning: "Good morning",
+    home_good_afternoon: "Good afternoon",
+    home_good_evening: "Good evening",
+    home_sub_healthy: "Your vault is healthy.",
+    home_sub_attention: "A few things need a look.",
+    home_sub_locked: "Your vault is locked.",
+    kpi_entries: "Entries",
+    kpi_secrets: "Secrets",
+    kpi_commands: "Commands",
+    kpi_review: "Needs review",
+    kpi_added_week: "+{n} this week",
+    kpi_entries_note: "{n} notes saved",
+    kpi_secrets_enc: "Encrypted at rest",
+    kpi_secrets_plain: "Not encrypted yet",
+    kpi_commands_note: "Ready to copy",
+    kpi_review_note: "Waiting for a name or type",
+    kpi_review_none: "Nothing waiting",
+    kpi_open_title: "Open in Library",
+    health_card_title: "Vault health",
+    health_card_ok: "Everything checks out",
+    health_card_issues: "{n} need a look",
+    health_card_run: "Run check",
+    health_card_details: "Details",
+    health_card_score: "Health score {n} of 100",
+    mix_title: "What's in the vault",
+    mix_empty: "Nothing saved yet",
+    mix_commands: "Commands",
+    mix_notes: "Notes",
+    mix_secrets: "Secrets",
+    mix_other: "Other",
+    services_title: "Background services",
+    services_basic: "Basic",
+    services_rules: "Built-in detection rules",
+    services_ai: "AI engine",
+    services_ready: "Ready",
+    services_offline: "Offline",
+    services_watcher: "Folder watcher",
+    services_watching: "Watching",
+    services_idle: "Idle",
+    services_to_review: "{n} to review",
+    services_no_scan: "No folder scanned yet",
+    open_btn: "Open",
+    recent_open_library: "Open library",
+    quick_capture_hint: "Paste anything. IndexArc finds the secrets, commands and links.",
+    lock_card_unlocked: "Unlocked",
+    lock_card_autolock: "Auto-lock after {n} min idle",
+    lock_card_autolock_off: "Auto-lock is off",
+    lock_card_plain: "Vault is not encrypted",
+    lock_card_encrypt: "Set a master password",
+    lock_now: "Lock now",
     health_data_label: "Data folder",
     health_vault_label: "Vault data",
     health_go_emergency: "Open Emergency Plan (Settings)",
@@ -1253,6 +1353,56 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     setup_vault_locked: "مقفلة — افتحها لتحميل العناصر",
     setup_vault_counts: "{entries} عنصر · {notes} ملاحظة",
     health_more_issues: "+{n} أخرى",
+    home_good_morning: "صباح الخير",
+    home_good_afternoon: "مساء الخير",
+    home_good_evening: "مساء الخير",
+    home_sub_healthy: "خزنتك بحالة جيدة.",
+    home_sub_attention: "بعض الأمور تحتاج نظرة.",
+    home_sub_locked: "خزنتك مقفلة.",
+    kpi_entries: "العناصر",
+    kpi_secrets: "الأسرار",
+    kpi_commands: "الأوامر",
+    kpi_review: "تحتاج مراجعة",
+    kpi_added_week: "+{n} هذا الأسبوع",
+    kpi_entries_note: "{n} ملاحظة محفوظة",
+    kpi_secrets_enc: "مشفّرة على القرص",
+    kpi_secrets_plain: "غير مشفّرة بعد",
+    kpi_commands_note: "جاهزة للنسخ",
+    kpi_review_note: "بانتظار اسم أو نوع",
+    kpi_review_none: "لا شيء بالانتظار",
+    kpi_open_title: "فتح في المكتبة",
+    health_card_title: "صحة الخزنة",
+    health_card_ok: "كل شيء سليم",
+    health_card_issues: "{n} تحتاج نظرة",
+    health_card_run: "فحص",
+    health_card_details: "التفاصيل",
+    health_card_score: "درجة الصحة {n} من 100",
+    mix_title: "محتوى الخزنة",
+    mix_empty: "لا شيء محفوظ بعد",
+    mix_commands: "أوامر",
+    mix_notes: "ملاحظات",
+    mix_secrets: "أسرار",
+    mix_other: "أخرى",
+    services_title: "الخدمات الخلفية",
+    services_basic: "أساسي",
+    services_rules: "قواعد الكشف المدمجة",
+    services_ai: "محرك الذكاء الاصطناعي",
+    services_ready: "جاهز",
+    services_offline: "غير متصل",
+    services_watcher: "مراقب المجلدات",
+    services_watching: "يراقب",
+    services_idle: "خامل",
+    services_to_review: "{n} للمراجعة",
+    services_no_scan: "لم يُفحص أي مجلد بعد",
+    open_btn: "فتح",
+    recent_open_library: "فتح المكتبة",
+    quick_capture_hint: "الصق أي نص، وسيجد IndexArc الأسرار والأوامر والروابط.",
+    lock_card_unlocked: "مفتوحة",
+    lock_card_autolock: "قفل تلقائي بعد {n} دقيقة خمول",
+    lock_card_autolock_off: "القفل التلقائي متوقف",
+    lock_card_plain: "الخزنة غير مشفّرة",
+    lock_card_encrypt: "تعيين كلمة مرور رئيسية",
+    lock_now: "اقفل الآن",
     health_data_label: "مجلد البيانات",
     health_vault_label: "بيانات الخزنة",
     health_go_emergency: "فتح خطة الطوارئ (الإعدادات)",
