@@ -32,7 +32,7 @@ IndexArc is industrial grade when every statement below is true and checked by C
 
 ---
 
-## R0 — Fix-now batch ✅ done (2026-11-02, uncommitted at time of writing)
+## R0 — Fix-now batch ✅ done (2026-11-02, commit bef5c62)
 
 | Item | Where |
 |------|-------|
@@ -54,6 +54,12 @@ IndexArc is industrial grade when every statement below is true and checked by C
 ## R1 — Correctness & data-safety backlog · ~2–3 weeks
 
 **Theme:** close every remaining audit finding that can lose data, leak a secret, or fail open. No new features.
+
+**Status 2026-11-03 (branch `roadmap/r1-data-safety`):** R1.1 611e208 · R1.2 30122ed · R1.3 8876d2a · R1.4 5051e08 · R1.5 206855b — all items below landed with tests, except:
+- *Open (R1.4):* the Gemini SDK calls still use `withTimeout` (the request keeps running after the timeout) and there are no bounded retries. The fetch-based providers already abort via `AbortSignal.timeout`.
+- *Covered elsewhere (R1.4):* process-level crash handlers are registered in `electron-main.cjs`, which hosts the server; a bare `node dist/server.cjs` still has none (dev/headless only).
+- *Also fixed, found by R4:* while locked, `POST /api/settings` accepts only language and font-size fields; `/api/ai/ollama/ensure` returns 423. Ollama probe, embedding fallback and `embed_provider_override` egress bugs fixed. The two quadratic heuristics regexes were replaced.
+- *Still to do for "Exit R1":* the findings table.
 
 ### R1.1 Fail-closed storage
 - **Quarantine only on parse errors**, never on transient I/O (`EBUSY`, `EPERM`, `EACCES` from antivirus/sync tools): retry with backoff, then surface an error. Today a transient read renames `vault.json`, `isLocked()` turns false, and new entries are written in plaintext (`store.ts` `readJsonOrQuarantine`).
