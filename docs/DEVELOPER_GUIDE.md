@@ -257,6 +257,25 @@ A typical end-to-end change touches these layers in order:
 
 ---
 
+## Commit convention
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<optional scope>): <imperative summary, ≤ 72 chars>
+
+<optional body: what and why, wrapped at ~72 chars>
+
+<optional trailers, e.g. Co-Authored-By:, BREAKING CHANGE:>
+```
+
+- **Types:** `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build` (packaging, deps, electron-builder), `ci` (workflows, Dependabot), `chore`.
+- **Scopes** are optional and name the area: `server`, `ui`, `electron`, `security`, `deps`, `scripts`, …
+- One theme per commit. A `!` after the type (`feat!:`) or a `BREAKING CHANGE:` trailer marks a breaking change (major version bump).
+- User-visible changes get a line under `## [Unreleased]` in [`CHANGELOG.md`](../CHANGELOG.md) (Keep a Changelog format); releases are tagged `vMAJOR.MINOR.PATCH` (semver).
+
+---
+
 ## Testing & verification
 
 There is currently **no automated test suite**. Verification relies on:
