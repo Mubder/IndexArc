@@ -9,6 +9,27 @@ Commit messages follow the convention in
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-04
+
+### Added
+- New Home dashboard: a greeting with vault status, four clickable tiles (entries, secrets,
+  commands, needs review) with 14-day trend lines and weekly counts, a vault health score with
+  the top checks, a breakdown of what the vault holds, background service status (AI engine and
+  folder watcher), and a compact "Recently saved" list with masked previews and one-click copy.
+- Sidebar security card: encryption state, the auto-lock setting and a "Lock now" button
+  (replaces the sidebar stats box, which Home now covers).
+- Arabic translations for every new label.
+
+### Changed
+- Visual refresh: ambient background glow, softer borders, glass cards with a gradient edge and
+  hover glow, a gradient primary button, a gradient wordmark, a lit active-tab bar, thin
+  scrollbars, a consistent focus ring and a short fade-in on tab switch (off with reduced motion).
+- Light theme: pastel background, dimmed starfield.
+- Health and setup banners collapse to one line outside Home; the phone menu drawer works and
+  closes after picking a tab; saving Settings confirms immediately.
+- Internal: `App.tsx`, `SettingsTab.tsx` and `ScratchpadTab.tsx` are split into focused
+  components and hooks; AI providers sit behind one adapter interface.
+
 ### Security
 - A locked vault refuses to restore snapshots that contain plaintext data (HTTP 423).
 - Auto-lock counts only real user input; background `GET` polls no longer keep the vault unlocked.

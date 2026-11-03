@@ -28,8 +28,8 @@ npm run desktop      # Electron shell around the built server
 
 Produces:
 
-- `dist-desktop/IndexArc-Portable-2.0.0.exe` — single portable executable  
-- `dist-desktop/IndexArc-Setup-2.0.0.exe` — installer (NSIS) with shortcuts  
+- `dist-desktop/IndexArc-Portable-2.1.0.exe` — single portable executable  
+- `dist-desktop/IndexArc-Setup-2.1.0.exe` — installer (NSIS) with shortcuts  
 
 ```bash
 npm run desktop:win
@@ -50,8 +50,8 @@ npx electron-builder --win portable nsis --x64 --config.directories.output=C:\Us
 
 Successful Windows artifacts from the last build:
 
-- `IndexArc-Portable-2.0.0.exe` (~99 MB) — double-click, no install  
-- `IndexArc-Setup-2.0.0.exe` (~99 MB) — installer with Start Menu shortcut  
+- `IndexArc-Portable-2.1.0.exe` (~99 MB) — double-click, no install  
+- `IndexArc-Setup-2.1.0.exe` (~99 MB) — installer with Start Menu shortcut  
 
 Also copied into the repo as `dist-desktop-release/` when the default `dist-desktop/` folder is locked.
 
@@ -60,7 +60,7 @@ Also copied into the repo as `dist-desktop-release/` when the default `dist-desk
 Data is created **next to the .exe**:
 
 ```
-IndexArc-Portable-2.0.0.exe
+IndexArc-Portable-2.1.0.exe
 data/
   vault.json
   vectors.json
@@ -86,7 +86,7 @@ npm run desktop:mac
 
 Output under `dist-desktop/`:
 
-- `IndexArc-2.0.0-mac-x64.dmg` / `…-arm64.dmg`
+- `IndexArc-2.1.0-mac-x64.dmg` / `…-arm64.dmg`
 - zip archives for both arches  
 
 **Note:** Apple signing/notarization is not configured yet. For distribution outside your own Mac, add certificates under `build.mac` later.
@@ -99,8 +99,8 @@ npm run desktop:linux
 
 Output:
 
-- `IndexArc-2.0.0-linux-x64.AppImage`
-- `IndexArc-2.0.0-linux-x64.tar.gz`
+- `IndexArc-2.1.0-linux-x64.AppImage`
+- `IndexArc-2.1.0-linux-x64.tar.gz`
 
 ## How packaging works
 

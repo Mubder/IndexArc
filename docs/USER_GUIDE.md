@@ -43,8 +43,8 @@ You get two build outputs:
 
 | File | Use |
 |------|-----|
-| `IndexArc-Portable-2.0.0.exe` | Double-click to run. No installation. Ideal for a USB stick. |
-| `IndexArc-Setup-2.0.0.exe` | Installer with Start Menu / desktop shortcuts. |
+| `IndexArc-Portable-2.1.0.exe` | Double-click to run. No installation. Ideal for a USB stick. |
+| `IndexArc-Setup-2.1.0.exe` | Installer with Start Menu / desktop shortcuts. |
 
 - **Portable:** just run the `.exe`. On first run it creates its data folders automatically.
 - **Installer:** run setup, pick a location (default is `C:\Users\<you>\.IndexArc`), and launch from the shortcut.

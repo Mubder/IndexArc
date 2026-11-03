@@ -79,8 +79,8 @@ Produces (signed):
 
 | File | Description |
 |------|-------------|
-| `dist-desktop/IndexArc-Portable-2.0.0.exe` | Single portable executable (no install). Extracts to a temp dir at runtime. |
-| `dist-desktop/IndexArc-Setup-2.0.0.exe` | NSIS installer with Start Menu / desktop shortcuts. |
+| `dist-desktop/IndexArc-Portable-2.1.0.exe` | Single portable executable (no install). Extracts to a temp dir at runtime. |
+| `dist-desktop/IndexArc-Setup-2.1.0.exe` | NSIS installer with Start Menu / desktop shortcuts. |
 
 Unpacked (for debugging):
 
@@ -98,7 +98,7 @@ npm run desktop:pack   # → dist-desktop/win-unpacked/IndexArc.exe
 npm run desktop:mac
 ```
 
-Outputs under `dist-desktop/`: `IndexArc-2.0.0-mac-x64.dmg` / `…-arm64.dmg` plus zip archives. Apple signing/notarization is **not configured** yet — add certificates under `build.mac` for distribution outside your own Mac.
+Outputs under `dist-desktop/`: `IndexArc-2.1.0-mac-x64.dmg` / `…-arm64.dmg` plus zip archives. Apple signing/notarization is **not configured** yet — add certificates under `build.mac` for distribution outside your own Mac.
 
 ---
 
@@ -108,7 +108,7 @@ Outputs under `dist-desktop/`: `IndexArc-2.0.0-mac-x64.dmg` / `…-arm64.dmg` pl
 npm run desktop:linux
 ```
 
-Outputs: `IndexArc-2.0.0-linux-x64.AppImage` and `IndexArc-2.0.0-linux-x64.tar.gz`.
+Outputs: `IndexArc-2.1.0-linux-x64.AppImage` and `IndexArc-2.1.0-linux-x64.tar.gz`.
 
 ---
 
@@ -216,7 +216,7 @@ A quick manual check that an update-style launch keeps data:
 
 1. Ensure a real vault exists (non-empty `data/vault.json`) and the registry root points at it:
    `reg add "HKCU\Software\IndexArc" /v Root /t REG_SZ /d "<path-to-root>" /f`
-2. Launch the freshly built `IndexArc-Portable-2.0.0.exe` (no `INDEXARC_ROOT` env).
+2. Launch the freshly built `IndexArc-Portable-2.1.0.exe` (no `INDEXARC_ROOT` env).
 3. Query `GET http://127.0.0.1:3000/api/status` and confirm `portable_root` points at your vault and `stats.total_saved` matches your entry count.
 
 ---

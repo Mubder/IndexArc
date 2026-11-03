@@ -76,8 +76,8 @@ Download the latest release from GitHub or use the pre-built executables:
 
 | Build Output | Path | Description |
 | :--- | :--- | :--- |
-| **Portable Build** | `dist-desktop/IndexArc-Portable-2.0.0.exe` | Zero installation. Double-click to run directly from USB or any folder. |
-| **Setup Installer** | `dist-desktop/IndexArc-Setup-2.0.0.exe` | Standard Windows installer with Start Menu & Desktop shortcuts. |
+| **Portable Build** | `dist-desktop/IndexArc-Portable-2.1.0.exe` | Zero installation. Double-click to run directly from USB or any folder. |
+| **Setup Installer** | `dist-desktop/IndexArc-Setup-2.1.0.exe` | Standard Windows installer with Start Menu & Desktop shortcuts. |
 
 ---
 

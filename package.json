@@ -1,7 +1,7 @@
 {
   "name": "indexarc",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Portable personal vault — paste secrets, multi-extract, name, ask in AR/EN",
   "author": "IndexArc",
   "type": "module",
