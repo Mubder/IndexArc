@@ -170,6 +170,18 @@ IndexArc is industrial grade when every statement below is true and checked by C
 
 **Exit R4:** CI runs unit, route-matrix, egress, fuzz smoke, and one Electron e2e on every PR.
 
+### R4 progress — landed on `roadmap/r4-verification` (2026-11-03)
+
+- **Testable app factory:** `server/app.ts` exports `createApp({ paths, store, audit, watchers }) → { app, ctx }`, which mounts the security headers, `apiAuthMiddleware`, the `protectedPaths` lock gate and every route module. `server.ts` is otherwise unchanged (it still runs the startup side effects, the auto-lock timer, vite/static, the 404/error handlers and listen). The bundle builds, and `node dist/server.cjs` answers `/api/ping`.
+- **Route lock matrix** (`server/route-matrix.test.ts`): it walks `app._router.stack`, including mounted routers, and finds **66 `/api` routes**. Each route is checked against an explicit `POLICY` table (1 public, 27 token, 38 token+unlocked) in these states: no token → 401; wrong Host → 403 (with or without a token); `Sec-Fetch-Site: cross-site` → 403; vault locked with a token → 423 for gated routes, while the other routes still answer. Before locking, the test seeds secrets into an entry value, its notes, a note body, a note revision and an API key. No locked response may contain any of them. The suite fails on a route without a policy, a stale policy row, a duplicate registration, or disagreement with `protectedPaths`. It also covers the `/api/events` one-time ticket and the dev-only `/api/auth/bootstrap`. Not covered yet: the unlocked-state pass, which would run real handlers.
+- **Egress tests** (`server/egress.test.ts`): they stub `fetch`, including the Gemini SDK's calls, and drive `generateText`, `embedText`, `autoComplete`, `analyzePaste`, `askVault`, `indexEntry`, `/api/ask`, `/rewrite`, `/autocomplete`, `/proofread`, `/analyze` and `/entries/save`. With consent OFF, nothing leaves loopback for any cloud provider, override or remote `local_openai`. With consent ON, no entry value, note or note body reaches a cloud body. **3 bugs found, marked `it.fails`:**
+  1. `checkOllama` probes a non-loopback `ollama_base_url` (`GET /api/tags`) even with consent OFF. The probe carries no data.
+  2. `embedText` falls back to **Gemini** when the user pinned a local provider (`ai_provider` or `llm_provider_override` = `local`) and Ollama is offline. `indexEntry` reaches this on every save. Only metadata is sent.
+  3. `embed_provider_override` is ignored by `indexEntry` and `askVault`, because they pass the resolved LLM provider as the explicit override.
+- **Regex timing guard** (`server/ai/regex-safety.test.ts`): it parses all 68 regex literals in `heuristics.ts` and `folderScan.ts` with the TS compiler and runs each against 47 adversarial ~50k inputs in a worker with a watchdog. The budget is 100 ms per `test()`. **2 quadratic patterns found** in `heuristics.ts` and kept in `KNOWN_SLOW` with `it.fails`: `/\s*(?:&&|\|\||;)\s*/` (`isCommand` split, ~2.2 s at 50k spaces) and `/\s*[=\-_*]{3,}\s*/g` (`stripSectionRule`, ~1.9 s). This test is a stand-in for the `safe-regex` lint rule, which is still open.
+- **Policy notes from the matrix (for review, unchanged):** `POST /api/settings` is writable while the vault is locked. A token holder can flip `ai_cloud_consent` or repoint `ollama_base_url` and `local_openai_base_url` before the user unlocks. `POST /api/ollama/ensure` (multi-GB model pulls) and `/api/emergency/create` are also reachable while locked.
+- Still open: Electron e2e, fuzzing, crypto property tests, UI and a11y, the coverage gate, and CI wiring.
+
 ---
 
 ## R5 — Independent assurance & key handling · ~2 weeks + vendor time
