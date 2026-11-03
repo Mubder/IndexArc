@@ -1,3 +1,4 @@
+// @ts-check
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
@@ -6,15 +7,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   checkOllamaInstalled: () => ipcRenderer.invoke("check-ollama-installed"),
   installOllama: () => ipcRenderer.invoke("install-ollama"),
   startOllama: () => ipcRenderer.invoke("start-ollama"),
-  openExternal: (url) => ipcRenderer.invoke("open-external", url),
+  openExternal: (/** @type {string} */ url) => ipcRenderer.invoke("open-external", url),
   getApiToken: () => ipcRenderer.invoke("get-api-token"),
-  copyText: (text, clearAfterMs) => ipcRenderer.invoke("copy-text", text, clearAfterMs),
-  spellcheckWords: (words) => ipcRenderer.invoke("spellcheck-words", words),
-  spellcheckSuggest: (word) => ipcRenderer.invoke("spellcheck-suggest", word),
-  addCustomWord: (word) => ipcRenderer.invoke("add-custom-word", word),
+  copyText: (/** @type {string} */ text, /** @type {number | undefined} */ clearAfterMs) => ipcRenderer.invoke("copy-text", text, clearAfterMs),
+  spellcheckWords: (/** @type {string[]} */ words) => ipcRenderer.invoke("spellcheck-words", words),
+  spellcheckSuggest: (/** @type {string} */ word) => ipcRenderer.invoke("spellcheck-suggest", word),
+  addCustomWord: (/** @type {string} */ word) => ipcRenderer.invoke("add-custom-word", word),
   // Quit handshake: main asks the renderer to flush unsaved notes before the
   // app exits; the renderer answers when its save queue is drained.
-  onFlushRequest: (cb) => {
+  onFlushRequest: (/** @type {() => void} */ cb) => {
     ipcRenderer.on("flush-request", () => {
       try { cb(); } catch {}
     });
@@ -31,6 +32,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 // for mixed-language text without needing per-language handling.
 const WORD_CHAR = /[\p{L}\p{M}\p{N}_'-]/u;
 
+/**
+ * @param {HTMLInputElement | HTMLTextAreaElement} el
+ * @param {number} pos
+ */
 function selectWordAt(el, pos) {
   const value = el.value;
   if (!value) return;
@@ -51,6 +56,10 @@ function selectWordAt(el, pos) {
 // editor), where there is no .value/.selectionStart to work with — the word
 // boundaries have to be found by walking the actual text node under the
 // click point.
+/**
+ * @param {number} x
+ * @param {number} y
+ */
 function selectWordInContentEditable(x, y) {
   const sel = window.getSelection();
   if (!sel) return;
@@ -88,13 +97,14 @@ function selectWordInContentEditable(x, y) {
 window.addEventListener(
   "contextmenu",
   (e) => {
-    const el = e.target;
+    const el = /** @type {HTMLElement | null} */ (e.target);
     if (!el) return;
     if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
-      if (typeof el.selectionStart !== "number") return;
+      const field = /** @type {HTMLInputElement | HTMLTextAreaElement} */ (el);
+      if (typeof field.selectionStart !== "number") return;
       // Only auto-select when the user hasn't already made a selection.
-      if (el.selectionStart !== el.selectionEnd) return;
-      selectWordAt(el, el.selectionStart);
+      if (field.selectionStart !== field.selectionEnd) return;
+      selectWordAt(field, field.selectionStart);
       return;
     }
     const editable = el.closest && el.closest('[contenteditable="true"]');
