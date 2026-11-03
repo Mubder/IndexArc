@@ -5,7 +5,7 @@ import type {
   EntryStatus,
   VaultEntry,
 } from "../types.js";
-import { analyzePaste, embedText, resolveActiveProvider, isLocalProvider } from "../ai/providers.js";
+import { analyzePaste, embedText, embedModelId, resolveActiveProvider, isLocalProvider } from "../ai/providers.js";
 import { addLog } from "../logs.js";
 import { asString, asStringArray } from "../validate.js";
 import { randomUUID } from "crypto";
@@ -77,6 +77,7 @@ export async function indexEntry(
     entry_id: entry.id,
     text: text.slice(0, 4000),
     embedding,
+    embed_model: embedModelId(settings, active),
     metadata: {
       name: entry.name,
       type: entry.type,
@@ -84,6 +85,35 @@ export async function indexEntry(
       value_preview: entry.value.slice(0, 12),
     },
   });
+}
+
+let reindexRunning: Promise<number> | null = null;
+
+/**
+ * Re-embeds every entry after the embedding model/provider changed — old
+ * vectors live in another model's space and would only add noise. Single
+ * flight, sequential (one provider call at a time), stops if the vault locks.
+ */
+export function reindexAllEntries(store: VaultStore, settings: AppSettings): Promise<number> {
+  if (reindexRunning) return reindexRunning;
+  reindexRunning = (async () => {
+    let done = 0;
+    try {
+      const entries = store.isLocked() ? [] : store.listEntries();
+      addLog("AI_EMBED", `Re-indexing ${entries.length} entr${entries.length === 1 ? "y" : "ies"} for ${embedModelId(settings, await resolveActiveProvider(settings))}`);
+      for (const entry of entries) {
+        if (store.isLocked()) break;
+        await indexEntry(store, settings, entry);
+        done++;
+      }
+    } catch (e: any) {
+      addLog("AI_EMBED", `Re-index stopped: ${e.message}`);
+    } finally {
+      reindexRunning = null;
+    }
+    return done;
+  })();
+  return reindexRunning;
 }
 
 export async function runAnalyze(store: VaultStore, settings: AppSettings, paste: string) {

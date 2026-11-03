@@ -67,6 +67,9 @@ export function entriesRoutes(ctx: RouteContext) {
   r.post("/park", wrapAsync(async (req, res) => {
     const settings = store.getSettings();
     const items = Array.isArray(req.body?.candidates) ? req.body.candidates : [req.body];
+    if (items.length > MAX_SAVE_ITEMS) {
+      return res.status(413).json({ error: `Too many candidates in one park (max ${MAX_SAVE_ITEMS}) — split the batch` });
+    }
     const paste_id = req.body?.paste_id;
     const saved = [];
     for (const c of items) {

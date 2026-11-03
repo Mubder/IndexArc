@@ -219,7 +219,15 @@ class LanguageToolService {
 
   async _ensureAvailable() {
     if (this.mode === "local" && this.localUrl) return true;
-    if (this.mode === "public") return true;
+    // Consent is re-read on EVERY request: revoking languagetool_enabled
+    // used to leave a session that had already picked "public" posting note
+    // text to the public API until restart.
+    if (this.mode === "public") {
+      if (publicApiAllowed()) return true;
+      this.mode = "none";
+      console.log("[langtool] Public API consent revoked — stopped using it");
+      return false;
+    }
     if (this.mode === "none") return false;
 
     // Single-flight: concurrent checks during startup must not spawn a jar
@@ -271,7 +279,7 @@ class LanguageToolService {
     try {
       if (this.mode === "local") {
         result = await this._post(`${this.localUrl}/v2/check`, { text, language });
-      } else if (this.mode === "public") {
+      } else if (this.mode === "public" && publicApiAllowed()) {
         result = await this._post(`${LT_PUBLIC_API}/check`, { text, language });
       } else {
         return [];

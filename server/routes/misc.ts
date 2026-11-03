@@ -88,7 +88,7 @@ export function miscRoutes(ctx: RouteContext) {
 
       let ollama: { online: boolean; models: string[] } = { online: false, models: [] };
       try {
-        ollama = await checkOllama(settings.ollama_base_url);
+        ollama = await checkOllama(settings);
       } catch {
         ollama = { online: false, models: [] };
       }

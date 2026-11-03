@@ -111,7 +111,9 @@ function isCommandLine(line: string): boolean {
   if (COMMAND_RE.test(t)) return true;
   if (COMMANDISH_RE.test(t) && t.length < 500) return true;
   // chained shell: foo && bar (when first segment is a known command)
-  if (/\s(&&|\|\||;)\s/.test(t) && COMMAND_RE.test(t.split(/\s*(?:&&|\|\||;)\s*/)[0] || "")) {
+  // First segment via search+slice: the old split(/\s*(?:&&|\|\||;)\s*/) was
+  // quadratic on long runs of whitespace (~2 s on 50k spaces).
+  if (/\s(&&|\|\||;)\s/.test(t) && COMMAND_RE.test(t.slice(0, t.search(/&&|\|\||;/)).trimEnd())) {
     return true;
   }
   return false;
@@ -270,7 +272,9 @@ function isSectionBanner(line: string): boolean {
 function stripSectionRule(line: string): string {
   return line
     .trim()
-    .replace(/\s*[=\-_*]{3,}\s*/g, " ")
+    // Surrounding whitespace is collapsed by the next replace; matching it
+    // here (\s*…\s*) made the pattern quadratic on long whitespace runs.
+    .replace(/[=\-_*]{3,}/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

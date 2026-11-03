@@ -2,6 +2,7 @@ import { Router } from "express";
 import { addLog, getLogs } from "../logs.js";
 import { sendSSE } from "./sse.js";
 import { isHttpUrl } from "../validate.js";
+import { reindexAllEntries } from "../services/vault.js";
 import type { RouteContext } from "./types.js";
 
 // API keys are write-only: they are accepted by POST and never returned.
@@ -140,7 +141,13 @@ export function settingsRoutes(ctx: RouteContext) {
         patch[k] = String(v);
       }
     }
+    const prev = store.getSettings();
     const next = store.saveSettings(patch as Partial<ReturnType<typeof store.getSettings>>);
+    // A different embedding space makes every stored vector meaningless.
+    const EMBED_FIELDS = ["ai_provider", "embed_provider_override", "ollama_embed_model", "gemini_embed_model", "local_openai_embed_model", "local_openai_llm_model"] as const;
+    if (EMBED_FIELDS.some((k) => patch[k] !== undefined && patch[k] !== prev[k])) {
+      void reindexAllEntries(store, next);
+    }
     // Keep the LanguageTool egress gate in sync with the setting (the shared
     // engine reads the env var, both in this process and in Electron main).
     process.env.INDEXARC_LT_PUBLIC = next.languagetool_enabled ? "1" : "";

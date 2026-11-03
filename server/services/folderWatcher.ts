@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import type { VaultStore } from "../store.js";
 import type { AppSettings, WatchedFolder } from "../types.js";
-import { scanFileIntoSession } from "./folderScan.js";
+import { isIgnoredDirName, scanFileIntoSession } from "./folderScan.js";
 import { addLog } from "../logs.js";
 
 type WatcherHandle = {
@@ -12,6 +12,31 @@ type WatcherHandle = {
   sessionId: string;
   debounce: Map<string, NodeJS.Timeout>;
 };
+
+/** False when any directory between `root` and `file` is on the skip list. */
+export function isWatchedPath(root: string, file: string): boolean {
+  const rel = path.relative(root, file);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return false;
+  const dirs = rel.split(path.sep).slice(0, -1); // path.relative returns native separators
+  return !dirs.some(isIgnoredDirName);
+}
+
+/**
+ * A regular file (not a symlink) whose real path is still inside `root`.
+ * The scan never follows links; the watcher must not either — a link to
+ * C:\Users\me\.ssh\id_rsa dropped into a watched folder would be read.
+ */
+export function isRegularFileInside(root: string, file: string): boolean {
+  try {
+    if (!fs.lstatSync(file).isFile()) return false;
+    const realRoot = fs.realpathSync(root);
+    const real = fs.realpathSync(file);
+    const rel = path.relative(realRoot, real);
+    return !!rel && !rel.startsWith("..") && !path.isAbsolute(rel);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * In-process recursive folder watchers.
@@ -79,6 +104,9 @@ export class FolderWatcherManager {
     // Hidden files are ignored, except .env* (the whole point of the scan).
     const base = path.basename(filePath);
     if (base.startsWith(".") && !base.startsWith(".env")) return;
+    // Same skip list as the one-shot scan: a recursive watch on a project
+    // root otherwise rescans node_modules/.git/dist on every npm install.
+    if (!isWatchedPath(handle.folderPath, filePath)) return;
 
     const existing = handle.debounce.get(filePath);
     if (existing) clearTimeout(existing);
@@ -88,7 +116,7 @@ export class FolderWatcherManager {
       setTimeout(async () => {
         handle.debounce.delete(filePath);
         try {
-          if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return;
+          if (!isRegularFileInside(handle.folderPath, filePath)) return;
           addLog("WATCH", `Change detected: ${path.basename(filePath)}`);
           await scanFileIntoSession(
             this.store,

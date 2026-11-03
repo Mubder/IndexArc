@@ -19,7 +19,7 @@ export function aiRoutes(ctx: RouteContext) {
 
   r.get("/status", wrapAsync(async (_req, res) => {
     const settings = store.getSettings();
-    const ollama = await checkOllama(settings.ollama_base_url);
+    const ollama = await checkOllama(settings);
     const active = await resolveActiveProvider(settings);
     // A locked (encrypted) vault must not 500 this endpoint: the SetupChecker
     // and health UI poll it continuously, and a 500 here used to masquerade
@@ -80,17 +80,26 @@ export function aiRoutes(ctx: RouteContext) {
   // instead of silently treating a possibly-protected note as unprotected.
   // Uses a read-only accessor: getScratchpad() can perform archive-migration
   // writes as a side effect, inappropriate for an authz check.
-  const protectedAiGuard = (tabId: unknown): boolean => {
-    if (typeof tabId !== "string" || !tabId) return false;
+  // The tab_id is client-supplied: omitting it must not skip the check. Text
+  // that appears in any protected note is refused whatever tab it claims.
+  const normalize = (s: string) =>
+    s.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+  const protectedAiGuard = (tabId: unknown, text?: unknown): boolean => {
     if (store.isLocked()) return true; // fail-closed while locked
-    const tab = (store as any).peekScratchpadTabs?.()?.find((t: any) => t.id === tabId);
-    return !!(tab && tab.protected);
+    const tabs: any[] = (store as any).peekScratchpadTabs?.() || [];
+    if (typeof tabId === "string" && tabId) {
+      const tab = tabs.find((t: any) => t.id === tabId);
+      if (tab && tab.protected) return true;
+    }
+    const needle = typeof text === "string" ? normalize(text) : "";
+    if (needle.length < 12) return false; // too short to attribute to a note
+    return tabs.some((t: any) => t.protected && normalize(String(t.content ?? "")).includes(needle));
   };
 
   r.post("/proofread", async (req, res) => {
     const text = String(req.body?.text ?? "").trim();
     if (!text) return res.status(400).json({ error: "Text is required" });
-    if (protectedAiGuard(req.body?.tab_id)) {
+    if (protectedAiGuard(req.body?.tab_id, text)) {
       return res.status(423).json({ error: "This note is protected from AI processing" });
     }
     try {
@@ -153,7 +162,7 @@ export function aiRoutes(ctx: RouteContext) {
     if (!prefix) {
       return res.json({ completion: "", done: true });
     }
-    if (protectedAiGuard(req.body?.tab_id)) {
+    if (protectedAiGuard(req.body?.tab_id, prefix)) {
       return res.json({ completion: "", done: true });
     }
     try {
@@ -175,7 +184,7 @@ export function aiRoutes(ctx: RouteContext) {
 
   r.post("/ollama/ensure", wrapAsync(async (_req, res) => {
     const s = store.getSettings();
-    const ollama = await checkOllama(s.ollama_base_url);
+    const ollama = await checkOllama(s);
     if (!ollama.online) return res.status(503).json({ error: "Ollama is not running" });
     const required = [s.ollama_llm_model, s.ollama_embed_model];
     // Exact-tag presence: a family-prefix match (qwen2.5:0.5b satisfying
@@ -194,7 +203,7 @@ export function aiRoutes(ctx: RouteContext) {
       s.ollama_embed_model && s.ollama_embed_model !== s.ollama_llm_model
         ? await warmOllamaEmbed(s)
         : warmed;
-    const updated = await checkOllama(s.ollama_base_url);
+    const updated = await checkOllama(s);
     // Honest status: a failed multi-GB pull used to report plain "success".
     res.status(missing.length ? 207 : 200).json({
       status: missing.length ? "partial" : "success",
@@ -207,7 +216,7 @@ export function aiRoutes(ctx: RouteContext) {
 
   r.post("/ollama/warm", wrapAsync(async (_req, res) => {
     const s = store.getSettings();
-    const ollama = await checkOllama(s.ollama_base_url, true);
+    const ollama = await checkOllama(s, true);
     if (!ollama.online) {
       return res
         .status(503)
@@ -268,7 +277,7 @@ export function aiRoutes(ctx: RouteContext) {
   });
 
   r.post("/rewrite", async (req, res) => {
-    if (protectedAiGuard(req.body?.tab_id)) {
+    if (protectedAiGuard(req.body?.tab_id, String(req.body?.text ?? ""))) {
       return res.status(423).json({ error: "This note is protected from AI processing" });
     }
     const text = String(req.body?.text ?? "").trim();

@@ -161,6 +161,63 @@ async function readTextFile(filePath: string): Promise<{ ok: true; text: string 
 
 const MAX_DOC_BYTES = 5 * 1024 * 1024; // 5MB for binary documents
 
+/** True for a directory name the scan (and the watcher) never descends into. */
+export function isIgnoredDirName(name: string): boolean {
+  return IGNORE_DIRS.has(name.toLowerCase()) || (name.startsWith(".") && name !== ".env");
+}
+
+// Zip-bomb guard for .docx/.xlsx (both are zip containers): a 5 MB file can
+// inflate to gigabytes inside mammoth/exceljs, which buffer it all in memory.
+export const MAX_ZIP_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
+const MAX_ZIP_ENTRIES = 5000;
+// A hostile document can also keep a parser busy forever.
+export const PARSER_TIMEOUT_MS = 30_000;
+
+/**
+ * Sums the declared uncompressed sizes from a zip's central directory.
+ * Returns a reason string when the archive is malformed, ZIP64 (never
+ * produced by Office for files this small), or over budget; null when OK.
+ */
+export function zipBudgetProblem(buf: Buffer): string | null {
+  // End-of-central-directory record: last 22 bytes + up to 64 KB comment.
+  const min = Math.max(0, buf.length - 22 - 0xffff);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= min; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) return "Not a valid Office (zip) document";
+  const count = buf.readUInt16LE(eocd + 10);
+  const cdOffset = buf.readUInt32LE(eocd + 16);
+  if (count === 0xffff || cdOffset === 0xffffffff) return "ZIP64 documents are not supported";
+  if (count > MAX_ZIP_ENTRIES) return `Too many parts (${count})`;
+  let total = 0;
+  let p = cdOffset;
+  for (let n = 0; n < count; n++) {
+    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) return "Corrupt zip directory";
+    const size = buf.readUInt32LE(p + 24);
+    if (size === 0xffffffff) return "ZIP64 documents are not supported";
+    total += size;
+    if (total > MAX_ZIP_UNCOMPRESSED_BYTES) {
+      return `Expands beyond ${MAX_ZIP_UNCOMPRESSED_BYTES / 1024 / 1024}MB — refusing (possible zip bomb)`;
+    }
+    p += 46 + buf.readUInt16LE(p + 28) + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  return null;
+}
+
+/** Rejects when `work` takes longer than `ms`; the caller reports a skip. */
+export function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+    timer.unref?.();
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
+
 /**
  * Extract searchable text from a file. Handles binary document formats
  * (.docx/.pdf/.xlsx) and JSON-Lines (.jsonl/.ndjson); falls back to the
@@ -197,7 +254,10 @@ export async function extractText(
       if (stat.size === 0) return { ok: false, reason: "Empty file" };
       if (stat.size > MAX_DOC_BYTES)
         return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
-      const res = await mammoth.extractRawText({ path: filePath });
+      const buf = await fs.promises.readFile(filePath);
+      const zipProblem = zipBudgetProblem(buf);
+      if (zipProblem) return { ok: false, reason: zipProblem };
+      const res = await withTimeout(mammoth.extractRawText({ buffer: buf }), PARSER_TIMEOUT_MS, "DOCX parse");
       const text = (res.value || "").trim();
       return text ? { ok: true, text } : { ok: false, reason: "No extractable text" };
     } catch (e: any) {
@@ -219,7 +279,7 @@ export async function extractText(
       const parser = new PDFParse({ data: new Uint8Array(buf) });
       let text = "";
       try {
-        text = ((await parser.getText()).text || "").trim();
+        text = ((await withTimeout(parser.getText(), PARSER_TIMEOUT_MS, "PDF parse")).text || "").trim();
       } finally {
         await parser.destroy().catch(() => {});
       }
@@ -236,9 +296,12 @@ export async function extractText(
       if (stat.size === 0) return { ok: false, reason: "Empty file" };
       if (stat.size > MAX_DOC_BYTES)
         return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
+      const buf = await fs.promises.readFile(filePath);
+      const zipProblem = zipBudgetProblem(buf);
+      if (zipProblem) return { ok: false, reason: zipProblem };
       const ExcelJS = (await import("exceljs")).default;
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.readFile(filePath);
+      await withTimeout(workbook.xlsx.load(buf as any), PARSER_TIMEOUT_MS, "XLSX parse");
       const parts: string[] = [];
       workbook.eachSheet((sheet, sheetId) => {
         parts.push(`## Sheet: ${sheet.name}`);
@@ -331,8 +394,7 @@ export async function walkFiles(
       // files/dirs are skipped (never followed), which is the traversal-safe
       // behavior for a secret scanner.
       if (ent.isDirectory()) {
-        if (IGNORE_DIRS.has(ent.name.toLowerCase())) continue;
-        if (ent.name.startsWith(".") && ent.name !== ".env") continue;
+        if (isIgnoredDirName(ent.name)) continue;
         await walk(full, depth + 1);
       } else if (ent.isFile()) {
         out.push(full);

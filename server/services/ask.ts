@@ -1,7 +1,7 @@
 import type { VaultStore } from "../store.js";
 import type { AppSettings, AskResultItem, VaultEntry } from "../types.js";
 import { expandQueryTerms } from "../ai/heuristics.js";
-import { cosineSimilarity, embedText, resolveActiveProvider, generateText, isLocalProvider } from "../ai/providers.js";
+import { cosineSimilarity, embedText, embedModelId, resolveActiveProvider, generateText, isLocalProvider } from "../ai/providers.js";
 import { addLog } from "../logs.js";
 
 function maskValue(v: string): string {
@@ -268,11 +268,13 @@ export async function askVault(
         } else {
           provider_used = `${active}+keyword`;
         }
+        const queryModel = embedModelId(settings, active);
         const vectors = store.allVectors();
         const byEntry = new Map(vectors.map((v) => [v.entry_id, v]));
         for (const item of scored) {
           const vec = byEntry.get(item.entry.id);
           if (!vec?.embedding?.length) continue;
+          if (vec.embed_model && vec.embed_model !== queryModel) continue; // other model's space
           const sim = cosineSimilarity(qEmb, vec.embedding);
           item.semantic = sim;
           if (sim < SEMANTIC_FLOOR) continue;

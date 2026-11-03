@@ -7,6 +7,7 @@ import { randomUUID } from "crypto";
 
 let lastOllamaCheck: { online: boolean; models: string[] } | null = null;
 let lastOllamaCheckTime = 0;
+let lastOllamaCheckBase = "";
 
 // Base URLs come from settings and end up in fetch targets that carry vault
 // content. Only http(s) with a hostname is accepted; anything else falls
@@ -76,12 +77,22 @@ export function cloudEgressAllowed(settings: AppSettings, provider: string, purp
   return false;
 }
 
-export async function checkOllama(baseUrl: string, force = false): Promise<{ online: boolean; models: string[] }> {
+export async function checkOllama(
+  settings: Pick<AppSettings, "ollama_base_url" | "ai_cloud_consent">,
+  force = false
+): Promise<{ online: boolean; models: string[] }> {
   const now = Date.now();
-  if (!force && lastOllamaCheck && (now - lastOllamaCheckTime < 10000)) {
+  const cleanBase = ollamaBase(settings, "checkOllama");
+  // Even the availability probe is off-device egress when Ollama is remote:
+  // without consent the remote host is simply "offline" and never contacted.
+  if (!isLoopback(cleanBase) && !settings.ai_cloud_consent) {
+    return { online: false, models: [] };
+  }
+  // The cache is per base URL — switching hosts must not reuse the old answer.
+  if (!force && lastOllamaCheck && lastOllamaCheckBase === cleanBase && now - lastOllamaCheckTime < 10000) {
     return lastOllamaCheck;
   }
-  const cleanBase = ollamaBase({ ollama_base_url: baseUrl }, "checkOllama");
+  lastOllamaCheckBase = cleanBase;
   const candidates = [cleanBase];
   if (cleanBase.includes("localhost")) candidates.push(cleanBase.replace("localhost", "127.0.0.1"));
   else if (cleanBase.includes("127.0.0.1")) candidates.push(cleanBase.replace("127.0.0.1", "localhost"));
@@ -114,7 +125,7 @@ export async function resolveActiveProvider(
   // Check for LLM provider override first (allows mixing providers)
   if (settings.llm_provider_override) {
     if (settings.llm_provider_override === "local") {
-      const o = await checkOllama(settings.ollama_base_url);
+      const o = await checkOllama(settings);
       return o.online ? "local" : "heuristic";
     }
     if (settings.llm_provider_override === "api") {
@@ -139,7 +150,7 @@ export async function resolveActiveProvider(
   }
   
   if (settings.ai_provider === "local") {
-    const o = await checkOllama(settings.ollama_base_url);
+    const o = await checkOllama(settings);
     return o.online ? "local" : "heuristic";
   }
   if (settings.ai_provider === "api") {
@@ -161,7 +172,7 @@ export async function resolveActiveProvider(
     return "local_openai";
   }
   // auto
-  const o = await checkOllama(settings.ollama_base_url);
+  const o = await checkOllama(settings);
   if (o.online) return "local";
   if (settings.gemini_api_key) return "api";
   if (settings.openai_api_key) return "openai";
@@ -497,8 +508,10 @@ export async function embedText(
   text: string,
   providerOverride?: "local" | "api" | "openai" | "groq" | "openrouter" | "anthropic" | "local_openai" | "heuristic"
 ): Promise<number[] | null> {
-  // Allow per-request provider override (for flexible LM Studio + Ollama mixing)
-  const active = providerOverride || settings.embed_provider_override || (await resolveActiveProvider(settings));
+  // The user's explicit embedding pin wins over the caller's per-request
+  // provider (callers pass the resolved LLM provider; with embeddings pinned
+  // to local and the LLM in the cloud, entry metadata went to the cloud).
+  const active = settings.embed_provider_override || providerOverride || (await resolveActiveProvider(settings));
   // Egress gate: cloud embeddings of vault-derived text need explicit consent.
   if (!cloudEgressAllowed(settings, active, "embeddings")) return null;
   // The gate above checked `active`; the fallbacks below can reach DIFFERENT
@@ -526,12 +539,21 @@ export async function embedText(
       text
     );
   }
+  // A pinned provider that is unavailable means NO embedding — never a quiet
+  // fall-through to another provider (a "local" pin with Ollama offline
+  // resolves to "heuristic" and used to land on Gemini). Only "auto" with no
+  // overrides may shop around.
+  const pinned =
+    !!settings.embed_provider_override ||
+    !!settings.llm_provider_override ||
+    (!!settings.ai_provider && settings.ai_provider !== "auto");
+  if (pinned) return null;
   // Fallbacks (consent re-checked per provider — see gate comment above).
   if (settings.gemini_api_key && cloudEgressAllowed(settings, "api", "embeddings fallback")) {
     return geminiEmbed(settings, text);
   }
   if (cloudEgressAllowed(settings, "local", "embeddings fallback")) {
-    const o = await checkOllama(settings.ollama_base_url);
+    const o = await checkOllama(settings);
     if (o.online) return ollamaEmbed(settings, text);
   }
   return null;
@@ -1135,6 +1157,19 @@ async function geminiGenerateText(
     addLog("GEMINI", `generateText failed: ${e.message}`);
     return null;
   }
+}
+
+/**
+ * Identifies the embedding space embedText() would use, so vectors from a
+ * different model (same dimension, unrelated geometry) are never compared.
+ */
+export function embedModelId(settings: AppSettings, active: string): string {
+  const p = settings.embed_provider_override || active;
+  if (p === "local") return `local:${settings.ollama_embed_model}`;
+  if (p === "api") return `api:${settings.gemini_embed_model}`;
+  if (p === "openai") return "openai:text-embedding-3-small";
+  if (p === "local_openai") return `local_openai:${settings.local_openai_embed_model || settings.local_openai_llm_model}`;
+  return p;
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {

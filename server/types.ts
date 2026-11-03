@@ -35,6 +35,8 @@ export interface VectorChunk {
   entry_id: string;
   text: string;
   embedding: number[] | null;
+  /** "<provider>:<model>" that produced `embedding` (absent on pre-R1.4 vectors). */
+  embed_model?: string;
   metadata: {
     name: string;
     type: string;
