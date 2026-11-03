@@ -40,24 +40,118 @@ interface VectorsFile {
   chunks: VectorChunk[];
 }
 
-function atomicWrite(filePath: string, data: string) {
+// ── Durable file I/O ──────────────────────────────────────────────────────
+// Antivirus scanners and sync clients (OneDrive, Dropbox) briefly lock files
+// on Windows. Those errors are TRANSIENT: retried, and if they persist they
+// surface as an error — they never read as "file missing/corrupt", which used
+// to quarantine a healthy vault, lift the lock gate and let the next write
+// put plaintext where ciphertext had been (audit M-2).
+const TRANSIENT_IO_CODES = new Set(["EBUSY", "EPERM", "EACCES", "EAGAIN", "EMFILE", "ENFILE"]);
+const IO_RETRIES = 5;
+
+/** Persistent I/O failure on a store file (as opposed to bad content). */
+export class StoreIOError extends Error {
+  constructor(public filePath: string, public code: string | undefined, message: string) {
+    super(message);
+    this.name = "StoreIOError";
+  }
+}
+
+function sleepSync(ms: number) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function withIoRetry<T>(filePath: string, op: () => T): T {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return op();
+    } catch (e: any) {
+      if (!TRANSIENT_IO_CODES.has(e?.code)) throw e;
+      if (attempt >= IO_RETRIES) {
+        throw new StoreIOError(filePath, e.code, `${path.basename(filePath)} is locked by another process (${e.code}) — try again`);
+      }
+      sleepSync(40 * (attempt + 1));
+    }
+  }
+}
+
+/** File content, or null when it doesn't exist. Transient locks are retried. */
+function readFileStrict(filePath: string): string | null {
+  return withIoRetry(filePath, () => {
+    try {
+      return fs.readFileSync(filePath, "utf-8");
+    } catch (e: any) {
+      if (e?.code === "ENOENT") return null;
+      throw e;
+    }
+  });
+}
+
+// Write-temp → fsync → rename → fsync(dir): after a crash or power loss the
+// target holds either the complete old or the complete new content, never a
+// torn mix (a bare rename can reach disk before the data it points to).
+function atomicWrite(filePath: string, data: string | Buffer) {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.tmp`);
-  fs.writeFileSync(tmp, data, "utf-8");
-  fs.renameSync(tmp, filePath);
+  const fd = fs.openSync(tmp, "w");
+  try {
+    fs.writeFileSync(fd, data);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  try {
+    withIoRetry(filePath, () => fs.renameSync(tmp, filePath));
+  } catch (e) {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {}
+    throw e;
+  }
+  fsyncDir(dir);
 }
 
-// Like readJson, but for critical data files: an unparseable file is renamed
-// to *.corrupt-<stamp> (quarantined, never deleted or overwritten) so the
-// user can recover it manually instead of the store silently wiping it.
-function readJsonOrQuarantine<T>(filePath: string, fallback: T, label: string): T {
-  if (!fs.existsSync(filePath)) return fallback;
+function fsyncDir(dir: string) {
+  // Directory fsync persists the rename itself. Windows can't open a
+  // directory for fsync (EPERM/EISDIR) — NTFS journals the rename instead.
   try {
-    // Tolerate a UTF-8 BOM (Windows editors like Notepad add one) — without
-    // this, a hand-edited file parses as "corrupt" and gets quarantined even
-    // though its content is perfectly valid.
-    return JSON.parse(fs.readFileSync(filePath, "utf-8").replace(/^\uFEFF/, "")) as T;
+    const fd = fs.openSync(dir, "r");
+    try {
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {}
+}
+
+function parseJsonText<T>(text: string): T {
+  // Tolerate a UTF-8 BOM (Windows editors like Notepad add one) — without
+  // this, a hand-edited file parses as "corrupt" and gets quarantined even
+  // though its content is perfectly valid.
+  return JSON.parse(text.replace(/^\uFEFF/, "")) as T;
+}
+
+/**
+ * For files whose misreading could downgrade encryption or lose data
+ * (vault, vectors, notes): missing → fallback; unreadable (I/O) or
+ * unparseable → THROWS. Never silently becomes the fallback.
+ */
+function readJsonStrict<T>(filePath: string, fallback: T): T {
+  const text = readFileStrict(filePath);
+  if (text === null) return fallback;
+  return parseJsonText<T>(text);
+}
+
+// Like readJsonStrict, but an UNPARSEABLE file is renamed to
+// *.corrupt-<stamp> (quarantined, never deleted or overwritten) so the user
+// can recover it manually instead of the store silently wiping it. A locked
+// file is NOT corruption: StoreIOError is thrown and the file left alone.
+function readJsonOrQuarantine<T>(filePath: string, fallback: T, label: string): T {
+  const text = readFileStrict(filePath);
+  if (text === null) return fallback;
+  try {
+    return parseJsonText<T>(text);
   } catch (e: any) {
     try {
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -154,9 +248,71 @@ export class VaultStore {
   }
 
   // --- Encryption Support ---
+  // Cached by the vault file's (mtime, size): isLocked() runs on every
+  // protected request and used to re-read and parse all of vault.json.
+  private _encEnabledCache: { mtimeMs: number; size: number; value: boolean } | null = null;
+
   isEncryptionEnabled(): boolean {
-    const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
-    return !!(raw && raw.encrypted);
+    let st: fs.Stats | null = null;
+    try {
+      st = fs.statSync(this.paths.vaultFile);
+    } catch (e: any) {
+      if (e?.code !== "ENOENT") return true; // can't tell → fail CLOSED (locked)
+    }
+    if (!st) {
+      this._encEnabledCache = null;
+      return false;
+    }
+    const c = this._encEnabledCache;
+    if (c && c.mtimeMs === st.mtimeMs && c.size === st.size) return c.value;
+    try {
+      const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
+      const value = !!(raw && raw.encrypted);
+      this._encEnabledCache = raw ? { mtimeMs: st.mtimeMs, size: st.size, value } : null;
+      if (value) this.setEncryptionExpected(true);
+      return value;
+    } catch {
+      // Locked by another process (StoreIOError): treat as encrypted, so the
+      // gate stays CLOSED and no write path decides "plaintext" (audit M-2).
+      return true;
+    }
+  }
+
+  // ── "Encryption expected" marker ─────────────────────────────────────────
+  // Set whenever an encrypted vault has been seen; cleared only by an
+  // explicit remove-password or a restore that brings back a plaintext vault.
+  // While set, the store refuses to write plaintext vault/notes/vectors even
+  // if vault.json has vanished (quarantined, deleted, mid-sync) — otherwise
+  // the next save would quietly start a fresh UNENCRYPTED vault.
+  private encryptionMarkerFile(): string {
+    return path.join(this.paths.configDir, "encryption-expected.json");
+  }
+
+  encryptionExpected(): boolean {
+    try {
+      return fs.existsSync(this.encryptionMarkerFile());
+    } catch {
+      return true;
+    }
+  }
+
+  private setEncryptionExpected(on: boolean): void {
+    const f = this.encryptionMarkerFile();
+    try {
+      if (on && !fs.existsSync(f)) {
+        atomicWrite(f, JSON.stringify({ version: 1, since: new Date().toISOString() }));
+      } else if (!on && fs.existsSync(f)) {
+        fs.unlinkSync(f);
+      }
+    } catch {}
+  }
+
+  private refusePlaintextWrite(label: string): void {
+    if (this.encryptionExpected()) {
+      throw new Error(
+        `Refusing to write ${label} unencrypted: this vault was encrypted but vault.json is missing or unreadable. Restore it from Settings → Emergency Plan, or set a master password again.`
+      );
+    }
   }
 
   isLocked(): boolean {
@@ -184,7 +340,13 @@ export class VaultStore {
     // preserved as *.corrupt-*). Fail CLOSED (RESIDUAL-2): a corrupt vault
     // must not "unlock" into an empty plaintext one that the next write
     // would happily replace. Recovery runs through the Emergency Plan.
-    const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
+    let raw: any;
+    try {
+      raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
+    } catch (e: any) {
+      addLog("SECURITY", `Vault file could not be read (${e?.code || e?.message}) — unlock refused, nothing changed. Try again.`);
+      return false;
+    }
     if (raw === null) {
       addLog("SECURITY", "Vault file unreadable (quarantined as *.corrupt-*) — unlock refused. Restore from Settings → Emergency Plan.");
       return false;
@@ -308,6 +470,7 @@ export class VaultStore {
     // Industrial pattern: stage the old recovery copies into a grace area
     // and delete them only after the new state is VERIFIED (successful
     // unlock ≥24h later). See clearPlaintextGrace / SECURITY.md.
+    this.setEncryptionExpected(true);
     this.stagePlaintextArtifactsForGrace();
     // Synchronous (not debounced): the moment encryption turns on is the
     // moment a ciphertext snapshot must exist, before anything else happens.
@@ -474,16 +637,17 @@ export class VaultStore {
     if (!this.isEncryptionEnabled()) {
       return true;
     }
-    const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
+    let key: Buffer | null = null;
     try {
+      const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
       const kdf = kdfFromEnvelope(raw);
-      const key = await deriveKeyAsync(password, raw.salt, kdf);
+      key = await deriveKeyAsync(password, raw.salt, kdf);
       const decryptedVault = decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
       const vault = JSON.parse(decryptedVault) as VaultFile;
 
       let vectors: VectorsFile = { version: VECTOR_SCHEMA, chunks: [] };
       try {
-        const rawVectors = readJson<any>(this.paths.vectorsFile, null);
+        const rawVectors = readJsonOrQuarantine<any>(this.paths.vectorsFile, null, "vectors.json");
         if (rawVectors && rawVectors.encrypted) {
           const decryptedVectors = decryptString(rawVectors.ciphertext, key, rawVectors.iv, rawVectors.authTag);
           vectors = JSON.parse(decryptedVectors) as VectorsFile;
@@ -495,7 +659,17 @@ export class VaultStore {
       }
 
       // Read companion files while the key is still available, then rewrite
-      // them as plaintext alongside the decrypted vault.
+      // them as plaintext alongside the decrypted vault. Install the verified
+      // key first: when called on a LOCKED vault the readers would otherwise
+      // see "locked → looks empty" and the plaintext rewrite below would
+      // replace every note with nothing.
+      if (this.encryptionKey && this.encryptionKey !== key) {
+        try {
+          this.encryptionKey.fill(0);
+        } catch {}
+      }
+      this.encryptionKey = key;
+      this.encryptionSaltHex = raw.salt;
       const scratch = this.getScratchpad();
       const archive = this.getScratchpadArchive();
       const revs = this.readProtectedJson<any>(this.paths.noteRevisionsFile, {
@@ -504,8 +678,13 @@ export class VaultStore {
       });
       const sessions = this.readSessions();
 
+      try {
+        this.encryptionKey?.fill(0);
+      } catch {}
       this.encryptionKey = null;
       this.encryptionSaltHex = null;
+      // Explicit, password-verified decryption: plaintext is now intended.
+      this.setEncryptionExpected(false);
 
       atomicWrite(this.paths.vaultFile, JSON.stringify(vault, null, 2));
       atomicWrite(this.paths.vectorsFile, JSON.stringify(vectors));
@@ -522,6 +701,10 @@ export class VaultStore {
       return true;
     } catch {
       return false;
+    } finally {
+      try {
+        key?.fill(0);
+      } catch {}
     }
   }
 
@@ -653,7 +836,7 @@ export class VaultStore {
   // --- Vault ---
   private readVault(): VaultFile {
     if (this._entriesCache) return { version: 1, entries: this._entriesCache };
-    const raw = readJson<any>(this.paths.vaultFile, { version: 1, entries: [] });
+    const raw = readJsonStrict<any>(this.paths.vaultFile, { version: 1, entries: [] });
     if (raw.encrypted) {
       if (!this.encryptionKey) {
         throw new Error("Vault is locked");
@@ -684,6 +867,7 @@ export class VaultStore {
       const text = JSON.stringify(vault, null, 2);
       atomicWrite(this.paths.vaultFile, JSON.stringify(envelopePayload(text, this.encryptionKey, salt, 1), null, 2));
     } else {
+      this.refusePlaintextWrite("vault.json");
       atomicWrite(this.paths.vaultFile, JSON.stringify(vault, null, 2));
     }
     // Only after the write succeeded — a failed write must not invalidate
@@ -799,7 +983,7 @@ export class VaultStore {
       }
       return raw as VectorsFile;
     };
-    const raw = readJson<any>(this.paths.vectorsFile, null);
+    const raw = readJsonOrQuarantine<any>(this.paths.vectorsFile, null, "vectors.json");
     if (!raw) return { version: VECTOR_SCHEMA, chunks: [] };
     if (raw.encrypted) {
       if (!this.encryptionKey) {
@@ -816,7 +1000,7 @@ export class VaultStore {
   }
 
   private writeVectors(v: VectorsFile) {
-    const rawDisk = readJson<any>(this.paths.vectorsFile, null);
+    const rawDisk = readJsonOrQuarantine<any>(this.paths.vectorsFile, null, "vectors.json");
     const isDiskEncrypted = rawDisk && rawDisk.encrypted;
 
     if (isDiskEncrypted || this.encryptionKey) {
@@ -827,6 +1011,7 @@ export class VaultStore {
       const text = JSON.stringify(v);
       atomicWrite(this.paths.vectorsFile, JSON.stringify(envelopePayload(text, this.encryptionKey, salt, 1)));
     } else {
+      this.refusePlaintextWrite("vectors.json");
       atomicWrite(this.paths.vectorsFile, JSON.stringify(v));
     }
     this.recordIntegrity(this.paths.vectorsFile);
@@ -858,7 +1043,7 @@ export class VaultStore {
   // Plaintext scratchpad files were the biggest at-rest leak: notes are where
   // users paste secrets, yet they sat outside the encrypted vault.
   private writeProtectedJson(file: string, obj: unknown): void {
-    const rawDisk = readJson<any>(file, null);
+    const rawDisk = readJsonStrict<any>(file, null);
     const isDiskEncrypted = !!(rawDisk && rawDisk.encrypted);
     if (isDiskEncrypted || this.encryptionKey) {
       if (!this.encryptionKey) {
@@ -868,10 +1053,11 @@ export class VaultStore {
       const salt =
         this.encryptionSaltHex ||
         rawDisk?.salt ||
-        readJson<any>(this.paths.vaultFile, null)?.salt ||
+        readJsonStrict<any>(this.paths.vaultFile, null)?.salt ||
         generateSalt();
       atomicWrite(file, JSON.stringify(envelopePayload(JSON.stringify(obj), this.encryptionKey, salt, 2), null, 2));
     } else {
+      this.refusePlaintextWrite(path.basename(file));
       atomicWrite(file, JSON.stringify(obj, null, 2));
     }
     this.recordIntegrity(file);
@@ -886,10 +1072,25 @@ export class VaultStore {
       try {
         return JSON.parse(decryptString(raw.ciphertext, this.encryptionKey, raw.iv, raw.authTag)) as T;
       } catch {
-        return fallback;
+        // Wrong key for this file (e.g. a KDF upgrade interrupted halfway).
+        // Returning the empty fallback used to let the next save overwrite
+        // the only copy (audit M-5). Keep a copy and fail loudly instead.
+        this.preserveUndecryptable(file);
+        throw new Error(`${path.basename(file)} cannot be decrypted with the current key — a copy was preserved; restore from Settings → Emergency Plan`);
       }
     }
     return raw as T;
+  }
+
+  private preserveUndecryptable(file: string): void {
+    try {
+      const dir = path.dirname(file);
+      const base = path.basename(file);
+      if (fs.readdirSync(dir).some((f) => f.startsWith(`${base}.undecryptable-`))) return; // one copy is enough
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      fs.copyFileSync(file, `${file}.undecryptable-${stamp}`);
+      addLog("DATA", `${base} could not be decrypted — preserved as ${base}.undecryptable-${stamp}`);
+    } catch {}
   }
 
   // --- Integrity manifest (tamper/bit-rot EVIDENCE, not protection) ---
@@ -1078,7 +1279,7 @@ export class VaultStore {
       if (fs.existsSync(this.paths.scratchpadFile)) {
         const prev = fs.readFileSync(this.paths.scratchpadFile);
         if (prev.length > 0) {
-          fs.writeFileSync(this.paths.scratchpadFile + ".prev", prev);
+          atomicWrite(this.paths.scratchpadFile + ".prev", prev);
         }
       }
     } catch {}
@@ -1369,7 +1570,7 @@ export class VaultStore {
         .replace("Z", "");
       const dest = path.join(this.paths.backupsDir, `notes-archive-guard-${stamp}.json`);
       fs.mkdirSync(this.paths.backupsDir, { recursive: true });
-      fs.writeFileSync(dest, cur);
+      atomicWrite(dest, cur);
       addLog("DATA", `Pre-write archive guard snapshot → ${path.basename(dest)}`);
     } catch (e: any) {
       addLog("DATA", `Archive guard snapshot failed: ${e?.message || e}`);
@@ -1416,7 +1617,7 @@ export class VaultStore {
       if (fs.existsSync(this.paths.scratchpadArchiveFile)) {
         const prev = fs.readFileSync(this.paths.scratchpadArchiveFile);
         if (prev.length > 0) {
-          fs.writeFileSync(this.paths.scratchpadArchiveFile + ".prev", prev);
+          atomicWrite(this.paths.scratchpadArchiveFile + ".prev", prev);
         }
       }
     } catch {}
@@ -1552,7 +1753,7 @@ export class VaultStore {
         .replace("T", "_")
         .replace("Z", "");
       const dest = path.join(dir, `vault-${stamp}.json`);
-      fs.writeFileSync(dest, raw);
+      atomicWrite(dest, raw);
 
       // Also back up companion files alongside (best effort, same stamp) so a
       // restore brings back everything, not just the secrets.
@@ -1561,7 +1762,7 @@ export class VaultStore {
           if (fs.existsSync(file)) {
             const buf = fs.readFileSync(file);
             if (buf.length > 0) {
-              fs.writeFileSync(path.join(dir, `${prefix}-${stamp}.json`), buf);
+              atomicWrite(path.join(dir, `${prefix}-${stamp}.json`), buf);
             }
           }
         } catch {}
@@ -1854,7 +2055,7 @@ export class VaultStore {
             } catch {}
           }
 
-          fs.writeFileSync(path.join(dir, name), payload, "utf-8");
+          atomicWrite(path.join(dir, name), payload);
           wroteAny = true;
 
           // Prune to keep newest N.
@@ -2020,27 +2221,76 @@ export class VaultStore {
       this.createEmergencySnapshot();
     } catch {}
 
-    const writeB64 = (file: string, b64: string | null) => {
-      if (b64 == null) return;
-      try {
-        const buf = Buffer.from(b64, "base64");
+    // Pre-AUD-003 snapshots have no archive/revisions fields — a null entry
+    // makes restoring that file a no-op (backward compatible), while new
+    // snapshots round-trip them fully.
+    const targets: Array<[string, string | null | undefined]> = [
+      [this.paths.vaultFile, snapshot.files.vault],
+      [this.paths.vectorsFile, snapshot.files.vectors],
+      [this.paths.scratchpadFile, snapshot.files.scratchpad],
+      [this.paths.scratchpadArchiveFile, snapshot.files.scratchpad_archive],
+      [this.paths.noteRevisionsFile, snapshot.files.note_revisions],
+      [this.paths.settingsFile, snapshot.files.settings],
+    ];
+
+    // Two phases so a failure can't leave a MIXED file set (some files from
+    // the snapshot, some from before, possibly under different keys):
+    // 1) stage every file to a fsync'd temp — any failure aborts with the
+    //    live files untouched; 2) rename the staged set into place.
+    const staged: Array<[string, string]> = [];
+    const cleanup = () => {
+      for (const [tmp] of staged) {
+        try {
+          fs.unlinkSync(tmp);
+        } catch {}
+      }
+    };
+    try {
+      for (const [file, b64] of targets) {
+        if (b64 == null) continue;
         const dir = path.dirname(file);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.tmp`);
-        fs.writeFileSync(tmp, buf);
-        fs.renameSync(tmp, file);
-      } catch {}
-    };
+        const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.restore.tmp`);
+        const fd = fs.openSync(tmp, "w");
+        try {
+          fs.writeFileSync(fd, Buffer.from(b64, "base64"));
+          fs.fsyncSync(fd);
+        } finally {
+          fs.closeSync(fd);
+        }
+        staged.push([tmp, file]);
+      }
+    } catch (e: any) {
+      cleanup();
+      addLog("DATA", `Emergency restore aborted while staging (${e?.code || e?.message}) — nothing was changed`);
+      return false;
+    }
+    for (let i = 0; i < staged.length; i++) {
+      const [tmp, file] = staged[i];
+      try {
+        withIoRetry(file, () => fs.renameSync(tmp, file));
+        fsyncDir(path.dirname(file));
+      } catch (e: any) {
+        // Partially applied. The pre-restore safety snapshot taken above is
+        // the way back — say so loudly instead of reporting success.
+        for (const [rest] of staged.slice(i)) {
+          try {
+            fs.unlinkSync(rest);
+          } catch {}
+        }
+        addLog("DATA", `Emergency restore FAILED after ${i}/${staged.length} files (${e?.code || e?.message}). Restore the newest "safety" snapshot from Settings → Emergency Plan.`);
+        this.lock();
+        this.clearCache();
+        return false;
+      }
+    }
 
-    writeB64(this.paths.vaultFile, snapshot.files.vault);
-    writeB64(this.paths.vectorsFile, snapshot.files.vectors);
-    writeB64(this.paths.scratchpadFile, snapshot.files.scratchpad);
-    // Pre-AUD-003 snapshots have no archive/revisions fields — writeB64's
-    // null check makes restoring them a no-op for those files (backward
-    // compatible), while new snapshots round-trip them fully.
-    writeB64(this.paths.scratchpadArchiveFile, snapshot.files.scratchpad_archive);
-    writeB64(this.paths.noteRevisionsFile, snapshot.files.note_revisions);
-    writeB64(this.paths.settingsFile, snapshot.files.settings);
+    // The restored vault decides whether encryption is expected from now on.
+    this._encEnabledCache = null;
+    try {
+      const restored = snapshot.files.vault != null ? JSON.parse(Buffer.from(snapshot.files.vault, "base64").toString("utf-8").replace(/^\uFEFF/, "")) : null;
+      if (restored) this.setEncryptionExpected(!!restored.encrypted);
+    } catch {}
 
     // Critical: drop ALL in-memory state. The store caches entries, settings,
     // folders and notes — without this, the running server keeps serving the
