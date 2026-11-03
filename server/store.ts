@@ -12,7 +12,8 @@ import type {
   WatchedFolder,
 } from "./types.js";
 import { DEFAULT_SETTINGS } from "./types.js";
-import { deriveKeyAsync, generateSalt, decryptString, envelopePayload, kdfFromEnvelope, kdfNeedsUpgrade } from "./crypto.js";
+import { deriveKeyAsync, generateSalt, decryptString, envelopePayload, kdfFromEnvelope, kdfNeedsUpgrade, currentKdf } from "./crypto.js";
+import type { KdfParams } from "./crypto.js";
 import { addLog } from "./logs.js";
 
 /** Thrown when a save would mutate/remove a protected tab (map to HTTP 423). */
@@ -199,6 +200,13 @@ export class VaultStore {
   // never be decrypted again (this exact bug previously broke unlock after
   // setupPassword: writeVault stored a freshly generated salt instead).
   private encryptionSaltHex: string | null = null;
+  // The KDF that produced encryptionKey — written into every envelope so a
+  // session still on a legacy (PBKDF2) key never labels its writes Argon2id.
+  private encryptionKdf: KdfParams | null = null;
+
+  private keyKdf(): KdfParams {
+    return this.encryptionKdf ?? currentKdf();
+  }
   private _settingsCache: AppSettings | null = null;
   private _entriesCache: VaultEntry[] | null = null;
   private _foldersCache: WatchedFolder[] | null = null;
@@ -333,7 +341,37 @@ export class VaultStore {
     }
   }
 
-  async unlock(password: string): Promise<boolean> {
+  // ── Key-state operations are serialized ──────────────────────────────────
+  // unlock / setupPassword / removePassword each await a memory-hard KDF.
+  // Run concurrently (double-click, two windows) they used to interleave:
+  // two setups left the vault encrypted under password A with key B in
+  // memory (audit M-3). One queue, one operation at a time.
+  private keyOpChain: Promise<unknown> = Promise.resolve();
+  // Bumped by every lock(); an unlock that started before a lock must not
+  // re-install its key after the lock happened.
+  private lockEpoch = 0;
+
+  private exclusive<T>(op: () => Promise<T>): Promise<T> {
+    const run = this.keyOpChain.then(op, op);
+    this.keyOpChain = run.catch(() => {});
+    return run;
+  }
+
+  unlock(password: string): Promise<boolean> {
+    return this.exclusive(() => this.unlockImpl(password));
+  }
+
+  setupPassword(password: string): Promise<void> {
+    return this.exclusive(() => this.setupPasswordImpl(password));
+  }
+
+  removePassword(password: string): Promise<boolean> {
+    return this.exclusive(() => this.removePasswordImpl(password));
+  }
+
+  private async unlockImpl(password: string): Promise<boolean> {
+    this.completeInterruptedCommit();
+    const epoch = this.lockEpoch;
     // Fresh install: no vault file → nothing to unlock (LockScreen passes).
     if (!fs.existsSync(this.paths.vaultFile)) return true;
     // An unparseable vault is QUARANTINED by readJsonOrQuarantine (original
@@ -359,8 +397,15 @@ export class VaultStore {
       const key = await deriveKeyAsync(password, raw.salt, kdf);
       const decrypted = decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
       JSON.parse(decrypted); // Verify valid JSON
+      if (epoch !== this.lockEpoch) {
+        // Locked (auto-lock, minimize) while the KDF ran: honour the lock.
+        key.fill(0);
+        addLog("SECURITY", "Unlock discarded: the vault was locked while it was in progress.");
+        return false;
+      }
       this.encryptionKey = key;
       this.encryptionSaltHex = raw.salt;
+      this.encryptionKdf = kdf;
       // The locked period may have cached empty reads — drop them so the
       // freshly decrypted content is served.
       this._scratchpadCache = null;
@@ -374,7 +419,9 @@ export class VaultStore {
           await this.upgradeKdf(password, raw.salt);
         } catch {
           // Migration is best-effort: the unlock itself succeeded, and the
-          // next unlock will retry the upgrade.
+          // next unlock will retry (or roll forward) the upgrade. If the
+          // upgrade had to lock to stay consistent, report that honestly.
+          if (!this.encryptionKey) return false;
         }
       }
       // Verified knowledge of the master password — end the encryption grace
@@ -395,27 +442,125 @@ export class VaultStore {
    * key, and rewrites all envelopes atomically.
    */
   private async upgradeKdf(password: string, saltHex: string): Promise<void> {
+    // Read EVERYTHING under the old key first, as raw file objects (no save
+    // methods: those re-read from disk and would see the half-upgraded set).
     const vault = this.readVault();
     let vectors: VectorsFile = { version: VECTOR_SCHEMA, chunks: [] };
     try {
       vectors = this.readVectors();
     } catch {}
-    const scratch = this.getScratchpad();
-    const archive = this.getScratchpadArchive();
-    const revs = this.readProtectedJson<any>(this.paths.noteRevisionsFile, { version: 1, revisions: {} });
+    const companions = [
+      this.paths.scratchpadFile,
+      this.paths.scratchpadArchiveFile,
+      this.paths.noteRevisionsFile,
+      this.paths.scanSessionsFile,
+    ].map((f) => [f, this.readProtectedJson<any>(f, null)] as const);
 
+    const oldKey = this.encryptionKey;
     const newKey = await deriveKeyAsync(password, saltHex);
-    this.encryptionKey = newKey;
     // Same salt, stronger KDF — the derived key is unrelated to the old one,
-    // so every envelope must be rewritten under the new key now.
-    this.writeVault(vault);
-    this.writeVectors(vectors);
-    this.saveScratchpad(scratch, { force: true });
-    this.saveScratchpadArchive(archive);
-    this.writeProtectedJson(this.paths.noteRevisionsFile, revs);
-    try { this.writeSessions(this.listScanSessions()); } catch {}
+    // so every envelope is rewritten under it. All writes are STAGED and then
+    // committed as one set (see commitStagedWrites): a crash part-way can no
+    // longer leave companion files under the old key (audit M-5).
+    const oldKdf = this.encryptionKdf;
+    this.encryptionKey = newKey;
+    this.encryptionKdf = currentKdf();
+    this.stagedWrites = new Map();
+    try {
+      this.writeVault(vault);
+      this.writeVectors(vectors);
+      for (const [file, obj] of companions) if (obj) this.writeProtectedJson(file, obj);
+      this.commitStagedWrites(this.stagedWrites);
+    } catch (e) {
+      if (fs.existsSync(this.commitMarkerFile())) {
+        // The commit point was passed: some files may already be under the
+        // NEW key. Never fall back to the old key now — roll forward, or
+        // lock (no key in memory, no writes) and let the next unlock finish.
+        try {
+          this.completeInterruptedCommit();
+        } catch {
+          this.lock();
+          throw e;
+        }
+      } else {
+        this.encryptionKey = oldKey;
+        this.encryptionKdf = oldKdf;
+        try {
+          newKey.fill(0);
+        } catch {}
+        throw e;
+      }
+    } finally {
+      this.stagedWrites = null;
+      this.clearCache();
+    }
+    try {
+      oldKey?.fill(0);
+    } catch {}
     addLog("SYSTEM", "Vault re-keyed with current KDF standard (Argon2id) — envelopes upgraded.");
     this.touchEmergencySnapshot();
+  }
+
+  // ── Staged multi-file commits (KDF upgrade) ─────────────────────────────
+  // While stagedWrites is set, persist() collects writes instead of applying
+  // them. commitStagedWrites then: fsyncs every file to a temp, records the
+  // plan in a marker, renames the set into place, removes the marker. A crash
+  // after the marker is written is ROLLED FORWARD on the next unlock
+  // (completeInterruptedCommit); a crash before it leaves the old set intact.
+  private stagedWrites: Map<string, string | Buffer> | null = null;
+
+  private persist(file: string, data: string | Buffer): void {
+    if (this.stagedWrites) this.stagedWrites.set(file, data);
+    else atomicWrite(file, data);
+  }
+
+  private commitMarkerFile(): string {
+    return path.join(this.paths.dataDir, "commit-in-progress.json");
+  }
+
+  private commitStagedWrites(writes: Map<string, string | Buffer>): void {
+    const plan: Array<{ tmp: string; target: string }> = [];
+    try {
+      for (const [target, data] of writes) {
+        const tmp = path.join(path.dirname(target), `.${path.basename(target)}.commit.tmp`);
+        plan.push({ tmp, target });
+        const fd = fs.openSync(tmp, "w");
+        try {
+          fs.writeFileSync(fd, data);
+          fs.fsyncSync(fd);
+        } finally {
+          fs.closeSync(fd);
+        }
+      }
+    } catch (e) {
+      // Before the commit point: discard the staged temps, live set untouched.
+      for (const { tmp } of plan) {
+        try {
+          fs.unlinkSync(tmp);
+        } catch {}
+      }
+      throw e;
+    }
+    atomicWrite(this.commitMarkerFile(), JSON.stringify({ version: 1, files: plan }));
+    this.completeInterruptedCommit();
+  }
+
+  /** Roll a recorded multi-file commit forward. Safe to call any time. */
+  completeInterruptedCommit(): void {
+    const marker = this.commitMarkerFile();
+    let plan: Array<{ tmp: string; target: string }> = [];
+    try {
+      if (!fs.existsSync(marker)) return;
+      plan = JSON.parse(fs.readFileSync(marker, "utf-8")).files || [];
+    } catch {
+      return; // unreadable marker: leave everything for manual inspection
+    }
+    for (const { tmp, target } of plan) {
+      if (fs.existsSync(tmp)) withIoRetry(target, () => fs.renameSync(tmp, target));
+      this.recordIntegrity(target);
+    }
+    fsyncDir(this.paths.dataDir);
+    fs.unlinkSync(marker);
   }
 
   lock(): void {
@@ -426,12 +571,13 @@ export class VaultStore {
     } catch {}
     this.encryptionKey = null;
     this.encryptionSaltHex = null;
+    this.lockEpoch++;
     // Purge ALL decrypted caches — entries, settings (API keys), folders,
     // notes. A locked vault serves nothing from memory.
     this.clearCache();
   }
 
-  async setupPassword(password: string): Promise<void> {
+  private async setupPasswordImpl(password: string): Promise<void> {
     if (this.isEncryptionEnabled()) {
       throw new Error("Vault is already encrypted. Remove the current password first.");
     }
@@ -439,6 +585,7 @@ export class VaultStore {
     const key = await deriveKeyAsync(password, salt);
     this.encryptionKey = key;
     this.encryptionSaltHex = salt;
+    this.encryptionKdf = currentKdf();
 
     const vault = this.readVault();
     let vectors: VectorsFile = { version: VECTOR_SCHEMA, chunks: [] };
@@ -633,7 +780,7 @@ export class VaultStore {
     } catch {}
   }
 
-  async removePassword(password: string): Promise<boolean> {
+  private async removePasswordImpl(password: string): Promise<boolean> {
     if (!this.isEncryptionEnabled()) {
       return true;
     }
@@ -670,6 +817,7 @@ export class VaultStore {
       }
       this.encryptionKey = key;
       this.encryptionSaltHex = raw.salt;
+      this.encryptionKdf = kdf;
       const scratch = this.getScratchpad();
       const archive = this.getScratchpadArchive();
       const revs = this.readProtectedJson<any>(this.paths.noteRevisionsFile, {
@@ -865,10 +1013,10 @@ export class VaultStore {
       // The stored salt MUST be the one the key was derived from.
       const salt = this.encryptionSaltHex || rawDisk?.salt || generateSalt();
       const text = JSON.stringify(vault, null, 2);
-      atomicWrite(this.paths.vaultFile, JSON.stringify(envelopePayload(text, this.encryptionKey, salt, 1), null, 2));
+      this.persist(this.paths.vaultFile, JSON.stringify(envelopePayload(text, this.encryptionKey, salt, 1, this.keyKdf()), null, 2));
     } else {
       this.refusePlaintextWrite("vault.json");
-      atomicWrite(this.paths.vaultFile, JSON.stringify(vault, null, 2));
+      this.persist(this.paths.vaultFile, JSON.stringify(vault, null, 2));
     }
     // Only after the write succeeded — a failed write must not invalidate
     // the cache and silently resurrect the previous disk state.
@@ -1009,10 +1157,10 @@ export class VaultStore {
       }
       const salt = this.encryptionSaltHex || rawDisk?.salt || generateSalt();
       const text = JSON.stringify(v);
-      atomicWrite(this.paths.vectorsFile, JSON.stringify(envelopePayload(text, this.encryptionKey, salt, 1)));
+      this.persist(this.paths.vectorsFile, JSON.stringify(envelopePayload(text, this.encryptionKey, salt, 1, this.keyKdf())));
     } else {
       this.refusePlaintextWrite("vectors.json");
-      atomicWrite(this.paths.vectorsFile, JSON.stringify(v));
+      this.persist(this.paths.vectorsFile, JSON.stringify(v));
     }
     this.recordIntegrity(this.paths.vectorsFile);
   }
@@ -1055,10 +1203,10 @@ export class VaultStore {
         rawDisk?.salt ||
         readJsonStrict<any>(this.paths.vaultFile, null)?.salt ||
         generateSalt();
-      atomicWrite(file, JSON.stringify(envelopePayload(JSON.stringify(obj), this.encryptionKey, salt, 2), null, 2));
+      this.persist(file, JSON.stringify(envelopePayload(JSON.stringify(obj), this.encryptionKey, salt, 2, this.keyKdf()), null, 2));
     } else {
       this.refusePlaintextWrite(path.basename(file));
-      atomicWrite(file, JSON.stringify(obj, null, 2));
+      this.persist(file, JSON.stringify(obj, null, 2));
     }
     this.recordIntegrity(file);
     this.touchEmergencySnapshot();

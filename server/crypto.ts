@@ -180,12 +180,16 @@ export function envelopePayload(
   text: string,
   key: Buffer,
   saltHex: string,
-  version: number
+  version: number,
+  /** The KDF that actually produced `key`. Defaults to the current standard;
+   *  callers holding a key derived with an older KDF MUST pass it, or the
+   *  envelope would claim parameters its key was never derived from. */
+  kdf: KdfParams = currentKdf()
 ): EncryptedPayload & { version: number; kdf: KdfParams } {
   return {
     version,
     encrypted: true as const,
-    kdf: currentKdf(),
+    kdf,
     salt: saltHex,
     ...encryptString(text, key),
   };

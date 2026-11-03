@@ -577,6 +577,9 @@ export async function scanFileIntoSession(
   const name = path.basename(filePath);
   const read = await extractText(filePath);
   if (read.ok === false) {
+    // Re-read: other files may have updated the session while we awaited.
+    const session = store.getScanSession(sessionId);
+    if (!session || session.status !== "review") return null;
     const skipped = [
       ...session.skipped_files.filter((s) => s.path !== filePath),
       { path: filePath, name, reason: read.reason },
@@ -617,16 +620,25 @@ export async function scanFileIntoSession(
     };
   });
 
+  const size = await fs.promises.stat(filePath).then((st) => st.size).catch(() => 0);
+
+  // From here to updateScanSession there is NO await: merge into the session
+  // as it is NOW. Merging into the copy read before extraction let two files
+  // changed together each write "others as of the start + mine", silently
+  // dropping the other file's candidates (audit finding).
+  const current = store.getScanSession(sessionId);
+  if (!current || current.status !== "review") return null;
+
   // replace prior candidates from same file, keep others
-  const others = session.candidates.filter((c) => c.source_file !== filePath);
+  const others = current.candidates.filter((c) => c.source_file !== filePath);
   const merged = dedupeCandidates([...others, ...fileCandidates]);
 
   const processed = [
-    ...session.processed_files.filter((p) => p.path !== filePath),
+    ...current.processed_files.filter((p) => p.path !== filePath),
     {
       path: filePath,
       name,
-      size: await fs.promises.stat(filePath).then((st) => st.size).catch(() => 0),
+      size,
       candidates_found: fileCandidates.length,
       ready: fileCandidates.filter((c) => c.ready).length,
       needs_review: fileCandidates.filter((c) => !c.ready).length,
@@ -634,7 +646,7 @@ export async function scanFileIntoSession(
   ];
 
   const summary: FolderScanSummary = {
-    ...session.summary,
+    ...current.summary,
     files_processed: processed.length,
     candidates_total: merged.length,
     candidates_ready: merged.filter((c) => c.ready).length,
@@ -645,6 +657,6 @@ export async function scanFileIntoSession(
     candidates: merged,
     processed_files: processed,
     summary,
-    brief: buildBrief(summary, session.skipped_files),
+    brief: buildBrief(summary, current.skipped_files),
   });
 }

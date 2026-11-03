@@ -120,3 +120,51 @@ describe("extractText — PDF", () => {
     }
   });
 });
+
+describe("scanFileIntoSession — concurrent watcher updates", () => {
+  it("two files changed together both keep their candidates", async () => {
+    const { VaultStore } = await import("./store.js");
+    const { ensurePortableLayout } = await import("./paths.js");
+    const { scanFileIntoSession } = await import("./services/folderScan.js");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "indexarc-watchrace-"));
+    try {
+      const paths = ensurePortableLayout(root);
+      const store = new VaultStore(paths);
+      const dir = path.join(root, "watched");
+      fs.mkdirSync(dir);
+      const a = path.join(dir, "a.env");
+      const b = path.join(dir, "b.env");
+      fs.writeFileSync(a, "ALPHA_TOKEN=ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+      fs.writeFileSync(b, "BETA_TOKEN=ghp_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n");
+      const now = new Date().toISOString();
+      store.saveScanSession({
+        id: "s1",
+        folder_path: dir,
+        created_at: now,
+        updated_at: now,
+        status: "review",
+        watching: true,
+        summary: {
+          folder_path: dir, files_found: 0, files_processed: 0, files_skipped: 0,
+          candidates_total: 0, candidates_ready: 0, candidates_needs_review: 0,
+          candidates_discarded: 0, provider_used: "heuristic", duration_ms: 0,
+        } as any,
+        processed_files: [],
+        skipped_files: [],
+        candidates: [],
+        brief: "",
+      });
+      const settings = store.getSettings();
+      await Promise.all([
+        scanFileIntoSession(store, settings, "s1", a),
+        scanFileIntoSession(store, settings, "s1", b),
+      ]);
+      const values = store.getScanSession("s1")!.candidates.map((c) => c.value);
+      expect(values.some((v) => v.includes("ghp_aaaa"))).toBe(true);
+      expect(values.some((v) => v.includes("ghp_bbbb"))).toBe(true);
+      expect(store.getScanSession("s1")!.processed_files.length).toBe(2);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
