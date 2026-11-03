@@ -1,43 +1,14 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import type { AnalyzeCandidate, AppSettings } from "../types.js";
 import { heuristicAnalyze } from "./heuristics.js";
 import { addLog } from "../logs.js";
-import { callWithRetry, isHttpUrl } from "../validate.js";
 import { randomUUID } from "crypto";
+import { ADAPTERS, getAdapter, type ActiveProvider, type GenerateRequest } from "./adapters/index.js";
 
-let lastOllamaCheck: { online: boolean; models: string[] } | null = null;
-let lastOllamaCheckTime = 0;
-let lastOllamaCheckBase = "";
-
-// Base URLs come from settings and end up in fetch targets that carry vault
-// content. Only http(s) with a hostname is accepted; anything else falls
-// through to the next provider instead of erroring the request path.
-function safeBaseUrl(url: string | undefined, label: string): string | null {
-  const raw = String(url || "").trim();
-  if (!isHttpUrl(raw)) {
-    addLog("AI", `${label}: invalid base URL (must be http/https) — skipping provider`);
-    return null;
-  }
-  return raw.replace(/\/$/, "");
-}
-
-/**
- * Validated Ollama base URL. Falls back to the loopback default when unset
- * or malformed — every ollama_base_url use must go through this (a raw
- * string used to produce confusing fetch errors, and an attacker-edited
- * non-loopback URL silently became an egress endpoint).
- * Note: consent for a non-loopback URL is still governed by isLocalProvider
- * + cloudEgressAllowed at each call site.
- */
-function ollamaBase(settings: { ollama_base_url?: string }, label: string): string {
-  const raw = String(settings.ollama_base_url || "").trim();
-  if (!raw) return "http://127.0.0.1:11434";
-  if (!isHttpUrl(raw)) {
-    addLog("AI", `${label}: invalid ollama_base_url "${raw.slice(0, 60)}" — using loopback default`);
-    return "http://127.0.0.1:11434";
-  }
-  return raw.replace(/\/$/, "");
-}
+// Provider wire code lives in ./adapters (one file per provider). This module
+// owns provider resolution, the egress gate, and the AI features built on top.
+export { checkOllama, ollamaEmbed, warmOllamaLlm, warmOllamaEmbed, pullOllamaModel } from "./adapters/ollama.js";
+export type { ActiveProvider } from "./adapters/index.js";
 
 // ── Egress consent & locality (audit H2) ──────────────────────────────────
 // A vault must never leak secret-derived text off the machine by default.
@@ -48,19 +19,8 @@ function ollamaBase(settings: { ollama_base_url?: string }, label: string): stri
 // Independently of consent, secret VALUES never enter cloud embedding or
 // LLM input at all (see services/vault.ts + services/ask.ts).
 
-function isLoopback(url: string | undefined): boolean {
-  try {
-    const u = new URL(String(url || ""));
-    return u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "::1";
-  } catch {
-    return false;
-  }
-}
-
 export function isLocalProvider(settings: AppSettings, provider: string): boolean {
-  if (provider === "local") return isLoopback(settings.ollama_base_url || "http://127.0.0.1:11434");
-  if (provider === "local_openai") return isLoopback(settings.local_openai_base_url);
-  return false;
+  return getAdapter(provider)?.isLocal(settings) ?? false;
 }
 
 let consentWarnedAt = 0;
@@ -77,224 +37,38 @@ export function cloudEgressAllowed(settings: AppSettings, provider: string, purp
   return false;
 }
 
-export async function checkOllama(
-  settings: Pick<AppSettings, "ollama_base_url" | "ai_cloud_consent">,
-  force = false
-): Promise<{ online: boolean; models: string[] }> {
-  const now = Date.now();
-  const cleanBase = ollamaBase(settings, "checkOllama");
-  // Even the availability probe is off-device egress when Ollama is remote:
-  // without consent the remote host is simply "offline" and never contacted.
-  if (!isLoopback(cleanBase) && !settings.ai_cloud_consent) {
-    return { online: false, models: [] };
-  }
-  // The cache is per base URL — switching hosts must not reuse the old answer.
-  if (!force && lastOllamaCheck && lastOllamaCheckBase === cleanBase && now - lastOllamaCheckTime < 10000) {
-    return lastOllamaCheck;
-  }
-  lastOllamaCheckBase = cleanBase;
-  const candidates = [cleanBase];
-  if (cleanBase.includes("localhost")) candidates.push(cleanBase.replace("localhost", "127.0.0.1"));
-  else if (cleanBase.includes("127.0.0.1")) candidates.push(cleanBase.replace("127.0.0.1", "localhost"));
-
-  for (const url of candidates) {
-    try {
-      const res = await fetch(`${url}/api/tags`, {
-        signal: AbortSignal.timeout(4000),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { models?: { name: string }[] };
-        lastOllamaCheck = {
-          online: true,
-          models: (data.models || []).map((m) => m.name),
-        };
-        lastOllamaCheckTime = Date.now();
-        return lastOllamaCheck;
-      }
-    } catch {}
-  }
-
-  lastOllamaCheck = { online: false, models: [] };
-  lastOllamaCheckTime = Date.now();
-  return lastOllamaCheck;
-}
-
-export async function resolveActiveProvider(
-  settings: AppSettings
-): Promise<"local" | "api" | "openai" | "groq" | "openrouter" | "anthropic" | "local_openai" | "heuristic"> {
-  // Check for LLM provider override first (allows mixing providers)
-  if (settings.llm_provider_override) {
-    if (settings.llm_provider_override === "local") {
-      const o = await checkOllama(settings);
-      return o.online ? "local" : "heuristic";
-    }
-    if (settings.llm_provider_override === "api") {
-      return settings.gemini_api_key ? "api" : "heuristic";
-    }
-    if (settings.llm_provider_override === "openai") {
-      return settings.openai_api_key ? "openai" : "heuristic";
-    }
-    if (settings.llm_provider_override === "groq") {
-      return settings.groq_api_key ? "groq" : "heuristic";
-    }
-    if (settings.llm_provider_override === "openrouter") {
-      return settings.openrouter_api_key ? "openrouter" : "heuristic";
-    }
-    if (settings.llm_provider_override === "anthropic") {
-      return settings.anthropic_api_key ? "anthropic" : "heuristic";
-    }
-    if (settings.llm_provider_override === "local_openai") {
-      return "local_openai";
-    }
-    if (settings.llm_provider_override === "heuristic") return "heuristic";
-  }
-  
-  if (settings.ai_provider === "local") {
-    const o = await checkOllama(settings);
-    return o.online ? "local" : "heuristic";
-  }
-  if (settings.ai_provider === "api") {
-    return settings.gemini_api_key ? "api" : "heuristic";
-  }
-  if (settings.ai_provider === "openai") {
-    return settings.openai_api_key ? "openai" : "heuristic";
-  }
-  if (settings.ai_provider === "groq") {
-    return settings.groq_api_key ? "groq" : "heuristic";
-  }
-  if (settings.ai_provider === "openrouter") {
-    return settings.openrouter_api_key ? "openrouter" : "heuristic";
-  }
-  if (settings.ai_provider === "anthropic") {
-    return settings.anthropic_api_key ? "anthropic" : "heuristic";
-  }
-  if (settings.ai_provider === "local_openai") {
-    return "local_openai";
-  }
-  // auto
-  const o = await checkOllama(settings);
-  if (o.online) return "local";
-  if (settings.gemini_api_key) return "api";
-  if (settings.openai_api_key) return "openai";
-  if (settings.groq_api_key) return "groq";
-  if (settings.openrouter_api_key) return "openrouter";
-  if (settings.anthropic_api_key) return "anthropic";
-  return "heuristic";
-}
-
-async function ollamaGenerate(
+/**
+ * The one path from a feature to a provider's LLM: the egress gate, then the
+ * adapter. Null when the provider is unknown, blocked, or failed.
+ */
+async function callProvider(
   settings: AppSettings,
-  prompt: string,
-  system: string
+  active: ActiveProvider,
+  req: GenerateRequest,
+  purpose: string
 ): Promise<string | null> {
-  const base = ollamaBase(settings, "ollama");
-  const model = settings.ollama_llm_model;
-  // Cold load of 7B can exceed 20s — give the model time, then keep it resident
-  const timeoutMs = 180_000;
-
-  const attempt = async (useJsonFormat: boolean): Promise<string | null> => {
-    try {
-      addLog("OLLAMA", `generate → ${model}${useJsonFormat ? " (json)" : ""}`);
-      const res = await fetch(`${base}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          prompt,
-          system,
-          stream: false,
-          ...(useJsonFormat ? { format: "json" } : {}),
-          // Keep LLM in VRAM so subsequent pastes aren't "embed-only"
-          keep_alive: "30m",
-          options: {
-            temperature: 0.1,
-            num_predict: 2048,
-            num_ctx: 4096,
-          },
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        addLog("OLLAMA", `generate HTTP ${res.status}: ${body.slice(0, 200)}`);
-        return null;
-      }
-      const data = (await res.json()) as { response?: string; error?: string };
-      if (data.error) {
-        addLog("OLLAMA", `generate error: ${data.error}`);
-        return null;
-      }
-      const text = data.response?.trim() || null;
-      if (text) addLog("OLLAMA", `generate ok (${text.length} chars) — model kept warm 30m`);
-      return text;
-    } catch (e: any) {
-      addLog("OLLAMA", `generate failed: ${e.message}`);
-      return null;
-    }
-  };
-
-  // Prefer structured JSON; fall back to free-form JSON in the prose
-  return (await attempt(true)) || (await attempt(false));
+  const adapter = getAdapter(active);
+  if (!adapter) return null;
+  if (!cloudEgressAllowed(settings, active, purpose)) return null;
+  addLog("AI", `${purpose} via ${adapter.displayName} (${adapter.model(settings)})`);
+  return adapter.generate(settings, req);
 }
 
-/** Load LLM into memory so analyze isn't embed-only */
-export async function warmOllamaLlm(settings: AppSettings): Promise<boolean> {
-  const base = ollamaBase(settings, "ollama");
-  try {
-    addLog("OLLAMA", `Warming LLM ${settings.ollama_llm_model}…`);
-    const res = await fetch(`${base}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: settings.ollama_llm_model,
-        prompt: 'Reply with exactly: {"ok":true}',
-        stream: false,
-        format: "json",
-        keep_alive: "30m",
-        options: { temperature: 0, num_predict: 16 },
-      }),
-      signal: AbortSignal.timeout(180_000),
-    });
-    if (!res.ok) {
-      addLog("OLLAMA", `warm failed HTTP ${res.status}`);
-      return false;
-    }
-    addLog("OLLAMA", `LLM ${settings.ollama_llm_model} is loaded (keep_alive 30m)`);
-    return true;
-  } catch (e: any) {
-    addLog("OLLAMA", `warm failed: ${e.message}`);
-    return false;
+/**
+ * Which provider serves this request: an explicit LLM override, then the
+ * selected provider, then "auto" (first ready adapter in registry order).
+ * A pinned provider that is not ready means heuristics, never another one.
+ */
+export async function resolveActiveProvider(settings: AppSettings): Promise<ActiveProvider> {
+  if (settings.llm_provider_override === "heuristic") return "heuristic";
+  for (const choice of [settings.llm_provider_override, settings.ai_provider]) {
+    const adapter = getAdapter(choice);
+    if (adapter) return (await adapter.ready(settings)) ? adapter.id : "heuristic";
   }
-}
-
-/** Load the embed model into memory so scan/analyze doesn't pull it on demand */
-export async function warmOllamaEmbed(settings: AppSettings): Promise<boolean> {
-  const base = ollamaBase(settings, "ollama");
-  try {
-    addLog("OLLAMA", `Warming embed model ${settings.ollama_embed_model}…`);
-    const res = await fetch(`${base}/api/embed`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: settings.ollama_embed_model,
-        input: "warm",
-        keep_alive: "30m",
-      }),
-      signal: AbortSignal.timeout(180_000),
-    });
-    if (!res.ok) {
-      addLog(
-        "OLLAMA",
-        `embed warm failed HTTP ${res.status} (model may not support embeddings)`
-      );
-      return false;
-    }
-    addLog("OLLAMA", `Embed model ${settings.ollama_embed_model} is loaded (keep_alive 30m)`);
-    return true;
-  } catch (e: any) {
-    addLog("OLLAMA", `embed warm failed: ${e.message}`);
-    return false;
+  for (const adapter of ADAPTERS) {
+    if (adapter.auto && (await adapter.ready(settings))) return adapter.id;
   }
+  return "heuristic";
 }
 
 function isGarbageCandidate(c: AnalyzeCandidate): boolean {
@@ -306,208 +80,10 @@ function isGarbageCandidate(c: AnalyzeCandidate): boolean {
   return false;
 }
 
-export async function ollamaEmbed(
-  settings: AppSettings,
-  text: string
-): Promise<number[] | null> {
-  const base = ollamaBase(settings, "ollama");
-  const cleaned = text.slice(0, 8000).trim();
-  if (!cleaned) return null;
-
-  for (const endpoint of ["/api/embed", "/api/embeddings"] as const) {
-    try {
-      const payload =
-        endpoint === "/api/embed"
-          ? { model: settings.ollama_embed_model, input: cleaned }
-          : { model: settings.ollama_embed_model, prompt: cleaned };
-      const res = await fetch(`${base}${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(30000),
-      });
-      if (!res.ok) continue;
-      const data = (await res.json()) as {
-        embeddings?: number[][];
-        embedding?: number[];
-      };
-      if (data.embeddings?.[0]) return data.embeddings[0];
-      if (data.embedding) return data.embedding;
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
-async function geminiEmbed(settings: AppSettings, text: string): Promise<number[] | null> {
-  if (!settings.gemini_api_key) return null;
-  try {
-    const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
-    const res: any = await callWithRetry(
-      (abortSignal) =>
-        ai.models.embedContent({
-          model: settings.gemini_embed_model,
-          contents: text.slice(0, 8000),
-          config: { abortSignal },
-        }),
-      { timeoutMs: 60_000, label: "Gemini embed" }
-    );
-    const values =
-      res.embedding?.values ||
-      res.embeddings?.[0]?.values ||
-      res.embeddings?.values ||
-      res.embedding;
-    if (Array.isArray(values)) return values as number[];
-  } catch (e: any) {
-    addLog("GEMINI", `embed failed: ${e.message}`);
-  }
-  return null;
-}
-
-async function fetchOpenAiCompatible(
-  url: string,
-  apiKey: string,
-  model: string,
-  prompt: string,
-  system: string,
-  extraHeaders: Record<string, string> = {},
-  useJsonFormat = true
-): Promise<string | null> {
-  try {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...extraHeaders,
-    };
-    if (apiKey) {
-      headers["Authorization"] = `Bearer ${apiKey}`;
-    }
-
-    const body = {
-      model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.1,
-      ...(useJsonFormat ? { response_format: { type: "json_object" } } : {}),
-    };
-
-    const res = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(60000),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      addLog("AI_COMPATIBLE", `HTTP ${res.status}: ${errText.slice(0, 200)}`);
-      return null;
-    }
-
-    const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-      error?: any;
-    };
-
-    if (data.error) {
-      addLog("AI_COMPATIBLE", `API Error: ${JSON.stringify(data.error)}`);
-      return null;
-    }
-
-    return data.choices?.[0]?.message?.content?.trim() || null;
-  } catch (e: any) {
-    addLog("AI_COMPATIBLE", `Fetch failed: ${e.message}`);
-    return null;
-  }
-}
-
-async function anthropicGenerate(
-  settings: AppSettings,
-  prompt: string,
-  system: string
-): Promise<string | null> {
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": settings.anthropic_api_key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: settings.anthropic_llm_model,
-        system,
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 4096,
-        temperature: 0.1,
-      }),
-      signal: AbortSignal.timeout(60000),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      addLog("ANTHROPIC", `HTTP ${res.status}: ${errText.slice(0, 200)}`);
-      return null;
-    }
-
-    const data = (await res.json()) as {
-      content?: { type: string; text: string }[];
-      error?: any;
-    };
-
-    if (data.error) {
-      addLog("ANTHROPIC", `API Error: ${JSON.stringify(data.error)}`);
-      return null;
-    }
-
-    return data.content?.[0]?.text?.trim() || null;
-  } catch (e: any) {
-    addLog("ANTHROPIC", `Fetch failed: ${e.message}`);
-    return null;
-  }
-}
-
-async function fetchOpenAiEmbeddings(
-  url: string,
-  apiKey: string,
-  model: string,
-  text: string
-): Promise<number[] | null> {
-  try {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (apiKey) {
-      headers["Authorization"] = `Bearer ${apiKey}`;
-    }
-
-    const res = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model,
-        input: text.slice(0, 8000),
-      }),
-      signal: AbortSignal.timeout(20000),
-    });
-
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      data?: { embedding: number[] }[];
-    };
-    return data.data?.[0]?.embedding || null;
-  } catch (e: any) {
-    addLog("AI_EMBED", `OpenAI compatible embed failed: ${e.message}`);
-    return null;
-  }
-}
-
 export async function embedText(
   settings: AppSettings,
   text: string,
-  providerOverride?: "local" | "api" | "openai" | "groq" | "openrouter" | "anthropic" | "local_openai" | "heuristic"
+  providerOverride?: ActiveProvider
 ): Promise<number[] | null> {
   // The user's explicit embedding pin wins over the caller's per-request
   // provider (callers pass the resolved LLM provider; with embeddings pinned
@@ -515,31 +91,8 @@ export async function embedText(
   const active = settings.embed_provider_override || providerOverride || (await resolveActiveProvider(settings));
   // Egress gate: cloud embeddings of vault-derived text need explicit consent.
   if (!cloudEgressAllowed(settings, active, "embeddings")) return null;
-  // The gate above checked `active`; the fallbacks below can reach DIFFERENT
-  // providers (e.g. a "heuristic" override with a Gemini key configured), so
-  // each fallback re-checks consent instead of silently egressing.
-  if (active === "local") return ollamaEmbed(settings, text);
-  if (active === "api") return geminiEmbed(settings, text);
-  if (active === "openai") {
-    return fetchOpenAiEmbeddings(
-      "https://api.openai.com/v1/embeddings",
-      settings.openai_api_key,
-      "text-embedding-3-small",
-      text
-    );
-  }
-  if (active === "local_openai") {
-    const baseUrl = safeBaseUrl(settings.local_openai_base_url, "local_openai embeddings");
-    if (!baseUrl) return null;
-    // Use local_openai_embed_model for embeddings, fallback to llm_model
-    const embedModel = settings.local_openai_embed_model || settings.local_openai_llm_model;
-    return fetchOpenAiEmbeddings(
-      `${baseUrl}/embeddings`,
-      settings.local_openai_api_key,
-      embedModel,
-      text
-    );
-  }
+  const adapter = getAdapter(active);
+  if (adapter?.embed) return adapter.embed(settings, text);
   // A pinned provider that is unavailable means NO embedding — never a quiet
   // fall-through to another provider (a "local" pin with Ollama offline
   // resolves to "heuristic" and used to land on Gemini). Only "auto" with no
@@ -549,13 +102,15 @@ export async function embedText(
     !!settings.llm_provider_override ||
     (!!settings.ai_provider && settings.ai_provider !== "auto");
   if (pinned) return null;
-  // Fallbacks (consent re-checked per provider — see gate comment above).
+  // Fallbacks reach DIFFERENT providers than the one gated above, so each
+  // re-checks consent instead of silently egressing.
+  const gemini = getAdapter("api")!;
   if (settings.gemini_api_key && cloudEgressAllowed(settings, "api", "embeddings fallback")) {
-    return geminiEmbed(settings, text);
+    return gemini.embed!(settings, text);
   }
-  if (cloudEgressAllowed(settings, "local", "embeddings fallback")) {
-    const o = await checkOllama(settings);
-    if (o.online) return ollamaEmbed(settings, text);
+  const ollama = getAdapter("local")!;
+  if (cloudEgressAllowed(settings, "local", "embeddings fallback") && (await ollama.ready(settings))) {
+    return ollama.embed!(settings, text);
   }
   return null;
 }
@@ -732,6 +287,35 @@ function extractJsonObject(text: string): any | null {
   return null;
 }
 
+// Gemini's native response schema for paste analysis (other providers get
+// JSON mode plus the format spelled out in ANALYZE_SYSTEM).
+const ANALYZE_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    candidates: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          value: { type: Type.STRING },
+          type: { type: Type.STRING },
+          name: { type: Type.STRING },
+          raw_fragment: { type: Type.STRING },
+          labels: { type: Type.ARRAY, items: { type: Type.STRING } },
+          type_aliases: { type: Type.ARRAY, items: { type: Type.STRING } },
+          family: { type: Type.STRING },
+          needs_type: { type: Type.BOOLEAN },
+          needs_name: { type: Type.BOOLEAN },
+          confidence: { type: Type.NUMBER },
+          model_notes: { type: Type.STRING },
+        },
+        required: ["value", "family"],
+      },
+    },
+  },
+  required: ["candidates"],
+};
+
 export async function analyzePaste(
   paste: string,
   settings: AppSettings
@@ -745,124 +329,18 @@ export async function analyzePaste(
     return { candidates: heuristic, provider_used: "heuristic" };
   }
 
-  // Egress gate: the paste is RAW secret material — the single most sensitive
-  // text in the app. Cloud classification is blocked until ai_cloud_consent
-  // is explicitly ON; loopback providers (Ollama/LM Studio) always pass.
-  if (!cloudEgressAllowed(settings, active, "paste analysis")) {
-    return { candidates: heuristic, provider_used: "heuristic" };
-  }
-
   const userPrompt = `Paste to analyze:\n"""\n${paste.slice(0, 12000)}\n"""\nReturn JSON candidates only.`;
 
   try {
-    let text: string | null = null;
-    let usedLabel = "";
-
-    if (active === "local") {
-      addLog("ANALYZE", `Ollama classify via ${settings.ollama_llm_model}`);
-      text = await ollamaGenerate(settings, userPrompt, ANALYZE_SYSTEM);
-      usedLabel = "ollama+heuristic";
-    } else if (active === "api") {
-      addLog("ANALYZE", `Gemini classify via ${settings.gemini_llm_model}`);
-      const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
-      const response = await callWithRetry((abortSignal) =>
-        ai.models.generateContent({
-        model: settings.gemini_llm_model,
-        contents: userPrompt,
-        config: {
-          abortSignal,
-          systemInstruction: ANALYZE_SYSTEM,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              candidates: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    value: { type: Type.STRING },
-                    type: { type: Type.STRING },
-                    name: { type: Type.STRING },
-                    raw_fragment: { type: Type.STRING },
-                    labels: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    type_aliases: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    family: { type: Type.STRING },
-                    needs_type: { type: Type.BOOLEAN },
-                    needs_name: { type: Type.BOOLEAN },
-                    confidence: { type: Type.NUMBER },
-                    model_notes: { type: Type.STRING },
-                  },
-                  required: ["value", "family"],
-                },
-              },
-            },
-            required: ["candidates"],
-          },
-        },
-        }),
-        { timeoutMs: 120_000, label: "Gemini analyze" }
-      );
-      text = response.text || null;
-      usedLabel = "gemini+heuristic";
-    } else if (active === "openai") {
-      addLog("ANALYZE", `OpenAI classify via ${settings.openai_llm_model}`);
-      text = await fetchOpenAiCompatible(
-        "https://api.openai.com/v1/chat/completions",
-        settings.openai_api_key,
-        settings.openai_llm_model,
-        userPrompt,
-        ANALYZE_SYSTEM,
-        {},
-        true
-      );
-      usedLabel = "openai+heuristic";
-    } else if (active === "groq") {
-      addLog("ANALYZE", `Groq classify via ${settings.groq_llm_model}`);
-      text = await fetchOpenAiCompatible(
-        "https://api.groq.com/openai/v1/chat/completions",
-        settings.groq_api_key,
-        settings.groq_llm_model,
-        userPrompt,
-        ANALYZE_SYSTEM,
-        {},
-        true
-      );
-      usedLabel = "groq+heuristic";
-    } else if (active === "openrouter") {
-      addLog("ANALYZE", `OpenRouter classify via ${settings.openrouter_llm_model}`);
-      text = await fetchOpenAiCompatible(
-        "https://openrouter.ai/api/v1/chat/completions",
-        settings.openrouter_api_key,
-        settings.openrouter_llm_model,
-        userPrompt,
-        ANALYZE_SYSTEM,
-        {
-          "X-Title": "IndexArc",
-        },
-        true
-      );
-      usedLabel = "openrouter+heuristic";
-    } else if (active === "anthropic") {
-      addLog("ANALYZE", `Anthropic classify via ${settings.anthropic_llm_model}`);
-      text = await anthropicGenerate(settings, userPrompt, ANALYZE_SYSTEM);
-      usedLabel = "anthropic+heuristic";
-    } else if (active === "local_openai") {
-      addLog("ANALYZE", `Local OpenAI compatible classify via ${settings.local_openai_llm_model}`);
-      const baseUrl = safeBaseUrl(settings.local_openai_base_url, "local_openai analyze");
-      if (baseUrl) {
-        text = await fetchOpenAiCompatible(
-          `${baseUrl}/chat/completions`,
-          settings.local_openai_api_key,
-          settings.local_openai_llm_model,
-          userPrompt,
-          ANALYZE_SYSTEM,
-          {},
-          true
-        );
-        usedLabel = "local_openai+heuristic";
-      }
-    }
+    // Egress gate inside callProvider: the paste is RAW secret material — the
+    // single most sensitive text in the app. Blocked cloud → heuristics only.
+    const text = await callProvider(
+      settings,
+      active,
+      { mode: "json", prompt: userPrompt, system: ANALYZE_SYSTEM, responseSchema: ANALYZE_SCHEMA },
+      "paste analysis"
+    );
+    const usedLabel = `${getAdapter(active)!.label}+heuristic`;
 
     if (text) {
       const parsed = extractJsonObject(text.trim());
@@ -940,42 +418,6 @@ function mergeCandidates(
   return out;
 }
 
-export async function pullOllamaModel(
-  settings: AppSettings,
-  modelName: string,
-  onProgress?: (msg: string) => void
-): Promise<boolean> {
-  try {
-    const res = await fetch(`${ollamaBase(settings, "ollama pull")}/api/pull`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: modelName }),
-      // Model pulls are legitimately slow, but the operation must not hang forever.
-      signal: AbortSignal.timeout(600_000),
-    });
-    if (!res.ok || !res.body) return false;
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      for (const line of chunk.split("\n").filter((l) => l.trim())) {
-        try {
-          const parsed = JSON.parse(line);
-          if (parsed.status) onProgress?.(String(parsed.status));
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-    return true;
-  } catch (e: any) {
-    addLog("OLLAMA", `pull failed: ${e.message}`);
-    return false;
-  }
-}
-
 export async function generateText(
   settings: AppSettings,
   prompt: string,
@@ -984,181 +426,19 @@ export async function generateText(
    *  the prompt for a specific provider (Ask puts secret values in it only
    *  when that provider is LOCAL) must pin it: re-resolving here could pick a
    *  cloud fallback if the local one went offline in between. */
-  pinnedProvider?: Awaited<ReturnType<typeof resolveActiveProvider>>
+  pinnedProvider?: ActiveProvider
 ): Promise<{ text: string; provider_used: string } | null> {
   const active = pinnedProvider ?? (await resolveActiveProvider(settings));
-  if (active === "heuristic") return null;
-  // Egress gate: cloud LLM calls carrying vault-derived text need explicit
-  // consent. Local (loopback) providers pass untouched.
-  if (!cloudEgressAllowed(settings, active, "text generation")) return null;
-
+  const adapter = getAdapter(active);
+  if (!adapter) return null;
   try {
-    let text: string | null = null;
-    let usedLabel = "";
-
-    if (active === "local") {
-      text = await ollamaGenerateText(settings, prompt, system);
-      usedLabel = `ollama (${settings.ollama_llm_model})`;
-    } else if (active === "api") {
-      text = await geminiGenerateText(settings, prompt, system);
-      usedLabel = `gemini (${settings.gemini_llm_model})`;
-    } else if (active === "openai") {
-      text = await fetchOpenAiCompatible(
-        "https://api.openai.com/v1/chat/completions",
-        settings.openai_api_key,
-        settings.openai_llm_model,
-        prompt,
-        system,
-        {},
-        false
-      );
-      usedLabel = `openai (${settings.openai_llm_model})`;
-    } else if (active === "groq") {
-      text = await fetchOpenAiCompatible(
-        "https://api.groq.com/openai/v1/chat/completions",
-        settings.groq_api_key,
-        settings.groq_llm_model,
-        prompt,
-        system,
-        {},
-        false
-      );
-      usedLabel = `groq (${settings.groq_llm_model})`;
-    } else if (active === "openrouter") {
-      text = await fetchOpenAiCompatible(
-        "https://openrouter.ai/api/v1/chat/completions",
-        settings.openrouter_api_key,
-        settings.openrouter_llm_model,
-        prompt,
-        system,
-        {
-          "X-Title": "IndexArc",
-        },
-        false
-      );
-      usedLabel = `openrouter (${settings.openrouter_llm_model})`;
-    } else if (active === "anthropic") {
-      text = await anthropicGenerate(settings, prompt, system);
-      usedLabel = `anthropic (${settings.anthropic_llm_model})`;
-    } else if (active === "local_openai") {
-      const baseUrl = safeBaseUrl(settings.local_openai_base_url, "local_openai generate");
-      if (!baseUrl) throw new Error("Invalid local_openai_base_url");
-      text = await fetchOpenAiCompatible(
-        `${baseUrl}/chat/completions`,
-        settings.local_openai_api_key,
-        settings.local_openai_llm_model,
-        prompt,
-        system,
-        {},
-        false
-      );
-      usedLabel = `local_openai (${settings.local_openai_llm_model})`;
-    }
-
-    if (text) {
-      return { text, provider_used: usedLabel };
-    }
+    // Egress gate inside callProvider: vault-derived text needs consent for cloud.
+    const text = await callProvider(settings, active, { mode: "text", prompt, system }, "text generation");
+    if (text) return { text, provider_used: `${adapter.label} (${adapter.model(settings)})` };
   } catch (e: any) {
     addLog("GENERATE", `Text generation failed: ...${e.message}`);
   }
-
   return null;
-}
-
-async function ollamaGenerateText(
-  settings: AppSettings,
-  prompt: string,
-  system: string
-): Promise<string | null> {
-  const base = ollamaBase(settings, "ollama");
-  const model = settings.ollama_llm_model;
-  // Long documents need generous context and output budget. Scale with input:
-  // rough token estimate (~4 chars/token) plus headroom for the rewritten text.
-  const inputTokens = Math.ceil(prompt.length / 4) + 64;
-  const outputTokens = Math.max(1024, inputTokens * 2);
-  const numCtx = Math.min(32768, Math.max(8192, inputTokens + outputTokens + 512));
-  const timeoutMs = 180_000;
-
-  const attempt = async (useLargeBudget: boolean): Promise<string | null> => {
-    try {
-      addLog("OLLAMA", `generateText → ${model} (ctx ${numCtx}, predict ${useLargeBudget ? outputTokens * 2 : outputTokens})`);
-      const res = await fetch(`${base}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          prompt,
-          system,
-          stream: false,
-          keep_alive: "30m",
-          options: {
-            temperature: 0.3,
-            num_predict: useLargeBudget ? outputTokens * 2 : outputTokens,
-            num_ctx: numCtx,
-          },
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        addLog("OLLAMA", `generateText HTTP ${res.status}: ${body.slice(0, 200)}`);
-        return null;
-      }
-      const data = (await res.json()) as {
-        response?: string;
-        error?: string;
-        done_reason?: string;
-      };
-      if (data.error) {
-        addLog("OLLAMA", `generateText error: ${data.error}`);
-        return null;
-      }
-      const text = data.response?.trim();
-      if (!text) {
-        addLog("OLLAMA", `generateText returned empty response (done_reason=${data.done_reason || "unknown"})`);
-        return null;
-      }
-      addLog("OLLAMA", `generateText ok (${text.length} chars, done_reason=${data.done_reason || "unknown"})`);
-      return text;
-    } catch (e: any) {
-      addLog("OLLAMA", `generateText failed: ${e.message}`);
-      return null;
-    }
-  };
-
-  // Some models return an empty response when they hit the output budget early.
-  // Retry once with a larger budget before giving up.
-  const first = await attempt(false);
-  if (first) return first;
-  return attempt(true);
-}
-
-async function geminiGenerateText(
-  settings: AppSettings,
-  prompt: string,
-  system: string
-): Promise<string | null> {
-  if (!settings.gemini_api_key) return null;
-  try {
-    const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
-    const response = await callWithRetry(
-      (abortSignal) =>
-        ai.models.generateContent({
-          model: settings.gemini_llm_model,
-          contents: prompt,
-          config: {
-            abortSignal,
-            systemInstruction: system,
-            temperature: 0.3,
-          },
-        }),
-      { timeoutMs: 120_000, label: "Gemini generateText" }
-    );
-    return response.text || null;
-  } catch (e: any) {
-    addLog("GEMINI", `generateText failed: ${e.message}`);
-    return null;
-  }
 }
 
 /**
@@ -1167,11 +447,7 @@ async function geminiGenerateText(
  */
 export function embedModelId(settings: AppSettings, active: string): string {
   const p = settings.embed_provider_override || active;
-  if (p === "local") return `local:${settings.ollama_embed_model}`;
-  if (p === "api") return `api:${settings.gemini_embed_model}`;
-  if (p === "openai") return "openai:text-embedding-3-small";
-  if (p === "local_openai") return `local_openai:${settings.local_openai_embed_model || settings.local_openai_llm_model}`;
-  return p;
+  return getAdapter(p)?.embedModelId?.(settings) ?? p;
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {
@@ -1242,123 +518,18 @@ export async function autoComplete(
   if (!text) return null;
 
   const active = await resolveActiveProvider(settings);
-  if (active === "heuristic") {
-    return null;
-  }
-
-  // Egress gate: the prefix is live note content — frequently the beginning
-  // of a secret being typed. Un-consented cloud autocomplete is blocked.
-  if (!cloudEgressAllowed(settings, active, "autocomplete")) {
-    return null;
-  }
-
-  const prompt = `${AUTO_COMPLETION_SYSTEM}\n\nUser Text:\n${text}`;
+  if (active === "heuristic") return null;
 
   try {
-    let raw: string | null = null;
-
-    if (active === "local") {
-      const base = safeBaseUrl(settings.ollama_base_url, "ollama autocomplete") || "http://127.0.0.1:11434";
-      const res = await fetch(`${base}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: settings.ollama_llm_model,
-          prompt,
-          stream: false,
-          keep_alive: "5m",
-          options: {
-            temperature: 0.2,
-            num_predict: maxTokens,
-            num_ctx: 2048,
-          },
-        }),
-        signal: AbortSignal.timeout(15000),
-      });
-      if (res.ok) {
-        const data = await res.json() as { response?: string };
-        raw = data.response || null;
-      }
-    } else if (active === "local_openai") {
-      const baseUrl = safeBaseUrl(settings.local_openai_base_url, "local_openai autocomplete");
-      if (!baseUrl) {
-        raw = null;
-      } else {
-        const res = await fetch(`${baseUrl}/chat/completions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: settings.local_openai_llm_model,
-            messages: [
-              { role: "system", content: AUTO_COMPLETION_SYSTEM },
-              { role: "user", content: text },
-            ],
-            max_tokens: maxTokens,
-            temperature: 0.2,
-          }),
-          signal: AbortSignal.timeout(15000),
-        });
-        if (res.ok) {
-          const data = await res.json() as { choices?: { message?: { content?: string } }[] };
-          raw = data.choices?.[0]?.message?.content || null;
-        }
-      }
-    } else if (active === "api") {
-      const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
-      // Autocomplete is latency-bound: a retry would land after the user typed on.
-      const response = await callWithRetry(
-        (abortSignal) =>
-          ai.models.generateContent({
-            model: settings.gemini_llm_model,
-            contents: `${AUTO_COMPLETION_SYSTEM}\n\nUser Text:\n${text}`,
-            config: {
-              abortSignal,
-              temperature: 0.2,
-              maxOutputTokens: maxTokens,
-            },
-          }),
-        { timeoutMs: 60_000, label: "Gemini autocomplete", retries: 0 }
-      );
-      raw = response.text || null;
-    } else if (active === "openai") {
-      raw = await fetchOpenAiCompatible(
-        "https://api.openai.com/v1/chat/completions",
-        settings.openai_api_key,
-        settings.openai_llm_model,
-        text,
-        AUTO_COMPLETION_SYSTEM,
-        {},
-        false
-      );
-    } else if (active === "groq") {
-      raw = await fetchOpenAiCompatible(
-        "https://api.groq.com/openai/v1/chat/completions",
-        settings.groq_api_key,
-        settings.groq_llm_model,
-        text,
-        AUTO_COMPLETION_SYSTEM,
-        {},
-        false
-      );
-    } else if (active === "openrouter") {
-      raw = await fetchOpenAiCompatible(
-        "https://openrouter.ai/api/v1/chat/completions",
-        settings.openrouter_api_key,
-        settings.openrouter_llm_model,
-        text,
-        AUTO_COMPLETION_SYSTEM,
-        {
-          "X-Title": "IndexArc",
-        },
-        false
-      );
-    } else if (active === "anthropic") {
-      raw = await anthropicGenerate(settings, text, AUTO_COMPLETION_SYSTEM);
-    }
-
-    if (raw) {
-      return extractContinuation(text, raw);
-    }
+    // Egress gate inside callProvider: the prefix is live note content —
+    // frequently the beginning of a secret being typed.
+    const raw = await callProvider(
+      settings,
+      active,
+      { mode: "complete", prompt: text, system: AUTO_COMPLETION_SYSTEM, maxTokens },
+      "autocomplete"
+    );
+    if (raw) return extractContinuation(text, raw);
   } catch (e: any) {
     addLog("AUTOCOMPLETE", `Failed: ${e.message}`);
   }

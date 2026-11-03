@@ -2,6 +2,7 @@ import type { VaultStore } from "../store.js";
 import type { AppSettings, AskResultItem, VaultEntry } from "../types.js";
 import { expandQueryTerms } from "../ai/heuristics.js";
 import { cosineSimilarity, embedText, embedModelId, resolveActiveProvider, generateText, isLocalProvider } from "../ai/providers.js";
+import { getAdapter } from "../ai/adapters/index.js";
 import { addLog } from "../logs.js";
 
 function maskValue(v: string): string {
@@ -261,13 +262,7 @@ export async function askVault(
     try {
       const qEmb = await embedText(settings, q, active);
       if (qEmb) {
-        if (active === "local") {
-          provider_used = "ollama+keyword";
-        } else if (active === "api") {
-          provider_used = "gemini+keyword";
-        } else {
-          provider_used = `${active}+keyword`;
-        }
+        provider_used = `${getAdapter(active)?.label ?? active}+keyword`;
         const queryModel = embedModelId(settings, active);
         const vectors = store.allVectors();
         const byEntry = new Map(vectors.map((v) => [v.entry_id, v]));
