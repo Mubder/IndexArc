@@ -330,7 +330,8 @@ describe("R4 route lock matrix", () => {
 
   it("wrong Host → 403 for every /api route (DNS-rebinding guard), even with a valid token", async () => {
     for (const r of apiRoutes()) {
-      for (const headers of [{}, { "X-IndexArc-Token": token }]) {
+      const variants: Record<string, string>[] = [{}, { "X-IndexArc-Token": token }];
+      for (const headers of variants) {
         const res = await send(r.method, concrete(r.path), { host: `evil.example:${port}`, headers });
         expect(res.status, key(r)).toBe(403);
       }
