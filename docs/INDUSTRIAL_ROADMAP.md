@@ -201,6 +201,9 @@ IndexArc is industrial grade when every statement below is true and checked by C
 - Split `ScratchpadTab.tsx` (4k lines, 52 `useState`) into editor, tabs, AI actions, spellcheck and persistence modules; `App.tsx` (1.7k) and `SettingsTab.tsx` (1.1k) likewise.
 - One state store for vault/session state (e.g. Zustand) so lock purging is one call, not a list of setters.
 - Virtualize the Library list.
+- **Progress (2026-11-04, `roadmap/r1-data-safety`):** step 1 of the split. `ScratchpadTab.tsx` 4,069 → ~2,160 lines. Pure helpers moved to `src/components/scratchpad/` (`revisions.ts`, `constants.ts`, `noteTabs.ts`, `domText.ts`, `CompareCell.tsx`). Nine render sections became components there (`NoteTabStrip`, `EditorPanel`, `FormattingToolbar`, `ArchiveSection`, `ArchivedNotePreview`, `RevisionHistoryModal`, `ProtectModal`, `RescueModal`, `CompareModal`). The moved JSX is verbatim, and props are exactly the component locals each block used, typed from the compiler. Checked in the built app: typing, tabs, bold, compare (with swap), revision history, rescue, protect, colour picker, archive → view → restore, rename, spelling menu; no console errors.
+  - **Next:** move the remaining logic in `ScratchpadTab.tsx` (spellcheck, autocomplete, protect/pin, archive) into hooks to get under ~800 lines; then `App.tsx`, `SettingsTab.tsx` (and `EditorPanel.tsx`, now 564 lines); the state store; Library virtualization.
+  - **Existing quirk seen (not changed):** after archiving a tab, the remaining tabs show their stored title (e.g. "Scratch 1") until the next edit re-derives the title from the content.
 
 **Exit R3:** benchmarks green at 10k entries; no file over ~800 lines in `src/components`; window stays responsive during unlock, scan and Ask.
 

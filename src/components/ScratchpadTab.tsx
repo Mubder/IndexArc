@@ -65,549 +65,39 @@ import { sanitizeNoteHtml, textToNoteHtml } from "../sanitize";
 import { enqueueScratchpadSave, drainScratchpadSaves, setScratchpadConflictHandler, setScratchpadFailureHandler, setSyncedScratchpadTabs, forceSaveScratchpadTab, mergeSyncedScratchpadTab } from "../scratchpadSaveQueue";
 import { takeHandoffNote, REOPEN_NOTE_EVENT } from "../noteHandoff";
 import { ensureHtmlParagraphs, htmlToPlainText } from "../lib/noteHtml";
-import { buildCompareRows, compareStats, noteToLines, type CompareSide } from "../lib/noteDiff";
+import { buildCompareRows, compareStats, noteToLines } from "../lib/noteDiff";
 import { registerFlushHook, enqueueTabsSnapshot } from "../lib/flushOnExit";
 import { normalizeServerTab } from "../lib/serverTabs";
 import { isArabicText, findDuplicateHits } from "../utils";
 
-export interface NoteRevision {
-  id: string;
-  tabId: string;
-  timestamp: number;
-  title: string;
-  content: string;
-  charCount: number;
-  wordCount: number;
-  reason?: string;
-}
+import { type NoteRevision, getNoteRevisions, saveNoteRevision } from "./scratchpad/revisions";
+import { REWRITE_STYLES, REWRITE_STYLE_KEYS, HIGHLIGHT_COLORS, TEXT_COLORS } from "./scratchpad/constants";
+import { smartFormatParagraphs, uid, dropLegacyLocalTabs, loadTabs } from "./scratchpad/noteTabs";
+import {
+  getSelectionOffsets,
+  setSelectionOffsets,
+  extractSpellWords,
+  getWordAtPoint,
+  measureCaretPos,
+  detectBaseDir,
+  scrollContainerToReveal,
+  type SpellRect,
+  collectMisspellRects,
+  safeGetHTML,
+  sanitizeToken,
+} from "./scratchpad/domText";
+import { NoteTabStrip } from "./scratchpad/NoteTabStrip";
+import { EditorPanel } from "./scratchpad/EditorPanel";
+import { FormattingToolbar } from "./scratchpad/FormattingToolbar";
+import { ArchiveSection } from "./scratchpad/ArchiveSection";
+import { ArchivedNotePreview } from "./scratchpad/ArchivedNotePreview";
+import { RevisionHistoryModal } from "./scratchpad/RevisionHistoryModal";
+import { ProtectModal } from "./scratchpad/ProtectModal";
+import { RescueModal } from "./scratchpad/RescueModal";
+import { CompareModal } from "./scratchpad/CompareModal";
 
-const STORAGE_KEY = "indexarc_scratchpad_tabs";
-
-// Revisions live on the SERVER (data/note_revisions.json) — the durable,
-// encrypted store. The browser keeps no copy (the old idb-keyval/localStorage
-// revisions died with the client-persistence cleanup).
-export async function getNoteRevisions(tabId: string): Promise<NoteRevision[]> {
-  try {
-    const res = await fetch(`/api/scratchpad/tabs/${encodeURIComponent(tabId)}/revisions`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.revisions)) return data.revisions;
-    }
-  } catch {}
-  return [];
-}
-
-export async function saveNoteRevision(rev: NoteRevision, _maxKeep = 30): Promise<void> {
-  try {
-    const existing = await getNoteRevisions(rev.tabId);
-    if (existing.length > 0 && existing[0].content === rev.content) return;
-    await fetch(`/api/scratchpad/tabs/${encodeURIComponent(rev.tabId)}/revisions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(rev),
-    });
-  } catch {}
-}
-const REWRITE_STYLES: RewriteStyle[] = ["professional", "casual", "human", "technical", "concise", "formal"];
-const REWRITE_STYLE_KEYS: Record<RewriteStyle, Parameters<typeof getTranslation>[1]> = {
-  professional: "rewrite_style_professional",
-  casual: "rewrite_style_casual",
-  human: "rewrite_style_human",
-  technical: "rewrite_style_technical",
-  concise: "rewrite_style_concise",
-  formal: "rewrite_style_formal",
-};
-
-const HIGHLIGHT_COLORS = [
-  { hex: "#fef08a", key: "highlight_yellow" },
-  { hex: "#86efac", key: "highlight_green" },
-  { hex: "#93c5fd", key: "highlight_blue" },
-  { hex: "#fca5a5", key: "highlight_red" },
-  { hex: "#d8b4fe", key: "highlight_purple" },
-];
-
-const TEXT_COLORS = [
-  { hex: "#ffffff", key: "text_color_white" },
-  { hex: "#f87171", key: "text_color_red" },
-  { hex: "#fb923c", key: "text_color_orange" },
-  { hex: "#facc15", key: "text_color_yellow" },
-  { hex: "#4ade80", key: "text_color_green" },
-  { hex: "#38bdf8", key: "text_color_blue" },
-  { hex: "#c084fc", key: "text_color_purple" },
-];
-
-export function smartFormatParagraphs(content: string): string {
-  if (!content || !content.trim()) return "<p></p>";
-
-  // 1. Convert block closers and <br> tags to newlines
-  let text = content
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|h[1-6]|li|tr|blockquote|article|section)>/gi, "\n\n")
-    .replace(/<[^>]+>/g, ""); // Strip remaining HTML tags
-
-  // 2. Decode HTML entities
-  text = text
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-
-  // 3. Normalize line breaks and spaces
-  text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-
-  // 4. Intelligently insert breaks for combined single-block text:
-  // (a) Split on bullet characters and numbered list items (e.g., " 1. ", " 2) ", " - ", " • ")
-  text = text
-    .replace(/(\s+)(\d+[\.\)]\s+)/g, "\n\n$2")
-    .replace(/(\s+)(\(\d+\)\s+)/g, "\n\n$2")
-    .replace(/(\s+)([-*•–—]\s+)/g, "\n\n$2");
-
-  // (b) Split on header/field colons (e.g. " Note: ", " Title: ", " ملاحظة: ")
-  text = text
-    .replace(/(\s+)([A-Za-z\u0600-\u06FF\s]{2,25}:(?:\s+))/g, "\n\n$2");
-
-  // (c) Split after sentence terminators (. ! ? ؟ ؛ ;) followed by space
-  text = text
-    .replace(/([\.\!\?؟؛](\s+))/g, "$1\n\n");
-
-  // 5. Build clean HTML <p> tags from the resulting lines
-  const paragraphs = text
-    .split(/\n+/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-
-  if (paragraphs.length === 0) return "<p></p>";
-
-  return paragraphs
-    .map((p) => {
-      const escaped = p
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
-      return `<p>${escaped}</p>`;
-    })
-    .join("");
-}
-
-function uid(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return `t_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-}
-
-// Legacy plaintext copy of notes from before the server became the only
-// durable store. Removed once the server holds the notes, so it doesn't sit
-// unencrypted in Chromium's LevelDB indefinitely.
-function dropLegacyLocalTabs(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {}
-}
-
-function loadTabs(): ScratchTab[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) {
-        return parsed
-          .filter((x: any) => !x.archived)
-          .map((x: any) => {
-            const t = normalizeServerTab(x);
-            t.content = ensureHtmlParagraphs(t.content || "");
-            return t;
-          });
-      }
-    }
-  } catch {}
-  return [{ id: uid(), title: "Scratch 1", content: "<p></p>" }];
-}
-// --- Caret/selection offset helpers -------------------------------------
-// We snapshot the editor's selection as a (start, end) character offset
-// pair over its textContent. This survives DOM replacement (unlike Range
-// objects, which point at detached nodes after innerHTML is reassigned) and
-// lets our owned history stack restore the selection on undo/redo.
-
-function getSelectionOffsets(root: HTMLElement): [number, number] {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || !root.contains(sel.anchorNode)) {
-    return [0, 0];
-  }
-  const range = sel.getRangeAt(0);
-  const pre = range.cloneRange();
-  pre.selectNodeContents(root);
-  pre.setEnd(range.startContainer, range.startOffset);
-  const start = pre.toString().length;
-  const end = start + range.toString().length;
-  return [start, end];
-}
-
-function setSelectionOffsets(root: HTMLElement, start: number, end: number) {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-  let node: Text | null;
-  let counted = 0;
-  let startNode: Text | null = null;
-  let startOff = 0;
-  let endNode: Text | null = null;
-  let endOff = 0;
-  while ((node = walker.nextNode() as Text | null)) {
-    const len = node.nodeValue?.length ?? 0;
-    if (!startNode && counted + len >= start) {
-      startNode = node;
-      startOff = Math.min(start - counted, len);
-    }
-    if (!endNode && counted + len >= end) {
-      endNode = node;
-      endOff = Math.min(end - counted, len);
-    }
-    if (startNode && endNode) break;
-    counted += len;
-  }
-  // If end fell past the last text node, clamp to the end of the editor.
-  if (!endNode) {
-    const last = root.lastChild;
-    if (last && last.nodeType === Node.TEXT_NODE) {
-      endNode = last as Text;
-      endOff = last.nodeValue?.length ?? 0;
-    } else if (startNode) {
-      endNode = startNode;
-      endOff = startOff;
-    }
-  }
-  if (!startNode) return; // nothing to select
-  const sel = window.getSelection();
-  if (!sel) return;
-  const range = document.createRange();
-  range.setStart(startNode, startOff);
-  range.setEnd(endNode ?? startNode, endNode ? endOff : startOff);
-  sel.removeAllRanges();
-  sel.addRange(range);
-}
-
-// ── Spellcheck tokenization (shared with server/electron via same rules) ──
-// Word = run of Arabic letters, or Latin letters with internal ' / -
-const SPELL_WORD_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+|[A-Za-z]+(?:['\u2019-][A-Za-z]+)*/g;
-const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
-const LATIN_WORD_RE = /^[A-Za-z]+(?:['\u2019-][A-Za-z]+)*$/;
-const CLEAN_TOKEN_RE = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\u0640\u064B-\u0652\u0670]/g;
-
-function sanitizeToken(token: string): string {
-  return token.replace(CLEAN_TOKEN_RE, "");
-}
-
-function isArabicToken(token: string): boolean {
-  return ARABIC_RE.test(token) && !/[A-Za-z]/.test(token);
-}
-
-function isLatinToken(token: string): boolean {
-  return LATIN_WORD_RE.test(token);
-}
-
-function extractSpellWords(text: string): string[] {
-  const words: string[] = [];
-  try {
-    const segmenter = new Intl.Segmenter(["en", "ar"], { granularity: "word" });
-    for (const segment of segmenter.segment(text)) {
-      if (!segment.isWordLike) continue;
-      const clean = sanitizeToken(segment.segment);
-      if (!clean || clean.length <= 1) continue;
-      if (isArabicToken(clean) || isLatinToken(clean)) words.push(clean);
-    }
-  } catch {
-    const matches = text.match(SPELL_WORD_RE) || [];
-    for (const m of matches) {
-      const clean = sanitizeToken(m);
-      if (!clean || clean.length <= 1) continue;
-      if (isArabicToken(clean) || isLatinToken(clean)) words.push(clean);
-    }
-  }
-  return Array.from(new Set(words));
-}
-
-function getWordAtPoint(root: HTMLElement, x: number, y: number): { word: string; range: Range } | null {
-  let range: Range | null = null;
-  if (document.caretRangeFromPoint) {
-    range = document.caretRangeFromPoint(x, y);
-  } else if ((document as any).caretPositionFromPoint) {
-    const pos = (document as any).caretPositionFromPoint(x, y);
-    if (pos && pos.offsetNode) {
-      range = document.createRange();
-      range.setStart(pos.offsetNode, pos.offset);
-      range.setEnd(pos.offsetNode, pos.offset);
-    }
-  }
-  if (!range || !range.startContainer || !root.contains(range.startContainer)) {
-    return null;
-  }
-
-  const node = range.startContainer;
-  if (node.nodeType !== Node.TEXT_NODE) return null;
-
-  const text = node.nodeValue || "";
-  const offset = range.startOffset;
-
-  let start = offset;
-  while (start > 0 && /[\w\u0600-\u06FF\u0750-\u077F''\u2019-]/.test(text[start - 1])) {
-    start--;
-  }
-  let end = offset;
-  while (end < text.length && /[\w\u0600-\u06FF\u0750-\u077F''\u2019-]/.test(text[end])) {
-    end++;
-  }
-
-  const word = text.slice(start, end).trim();
-  if (!word || word.length <= 1) return null;
-
-  const wordRange = document.createRange();
-  wordRange.setStart(node, start);
-  wordRange.setEnd(node, end);
-
-  return { word, range: wordRange };
-}
-
-function measureCaretPos(editor: HTMLElement): { top: number; left: number } | null {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || !editor.contains(sel.anchorNode)) return null;
-
-  const range = sel.getRangeAt(0);
-  const editorBox = editor.getBoundingClientRect();
-  const rects = range.getClientRects();
-
-  if (rects && rects.length > 0) {
-    const lastRect = rects[rects.length - 1];
-    if (lastRect.width >= 0 && lastRect.height >= 0) {
-      return {
-        top: lastRect.top - editorBox.top,
-        left: lastRect.right - editorBox.left,
-      };
-    }
-  }
-
-  try {
-    const cl = range.cloneRange();
-    const span = document.createElement("span");
-    span.appendChild(document.createTextNode("\u200b"));
-    cl.insertNode(span);
-    const box = span.getBoundingClientRect();
-    if (span.parentNode) span.parentNode.removeChild(span);
-    return {
-      top: box.top - editorBox.top,
-      left: box.left - editorBox.left,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** First strong character decides a paragraph/note's natural base direction. */
-function detectBaseDir(text: string): "ltr" | "rtl" {
-  for (const ch of text) {
-    const code = ch.codePointAt(0) ?? 0;
-    // Arabic / Hebrew blocks → RTL
-    if (
-      (code >= 0x0590 && code <= 0x05ff) ||
-      (code >= 0x0600 && code <= 0x06ff) ||
-      (code >= 0x0750 && code <= 0x077f) ||
-      (code >= 0x08a0 && code <= 0x08ff) ||
-      (code >= 0xfb1d && code <= 0xfdff) ||
-      (code >= 0xfe70 && code <= 0xfeff)
-    ) {
-      return "rtl";
-    }
-    // Latin / common LTR letters
-    if (
-      (code >= 0x0041 && code <= 0x005a) ||
-      (code >= 0x0061 && code <= 0x007a) ||
-      (code >= 0x00c0 && code <= 0x024f)
-    ) {
-      return "ltr";
-    }
-  }
-  return "ltr";
-}
-
-/** Scroll a page container (main) so `el` sits near the top of the viewport. */
-function scrollContainerToReveal(el: HTMLElement) {  const main = el.closest("main") as HTMLElement | null;
-  if (main) {
-    const mainRect = main.getBoundingClientRect();
-    const elRect = el.getBoundingClientRect();
-    const delta = elRect.top - mainRect.top - 12;
-    if (Math.abs(delta) > 2) {
-      main.scrollBy({ top: delta, behavior: "smooth" });
-    }
-    return;
-  }
-  el.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-interface SpellRect {
-  key: string;
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-}
-
-/**
- * Measure misspelled words from the LIVE editor DOM using Range#getClientRects().
- * A cloned HTML overlay reflows differently under RTL/BIDI (especially when
- * misspell <span>s get unicode-bidi:isolate), which left red squiggles floating
- * on the empty side of dual-language notes. Positioning from real glyph boxes
- * always tracks the painted text.
- */
-function collectMisspellRects(
-  editor: HTMLElement,
-  misspelled: Set<string>
-): SpellRect[] {
-  if (!misspelled.size) return [];
-  const editorBox = editor.getBoundingClientRect();
-  const out: SpellRect[] = [];
-  let keySeq = 0;
-
-  const pushRangeRects = (range: Range) => {
-    let list: DOMRectList | DOMRect[];
-    try {
-      list = range.getClientRects();
-    } catch {
-      return;
-    }
-    for (let i = 0; i < list.length; i++) {
-      const r = list[i];
-      if (!r || r.width < 1 || r.height < 1) continue;
-      // Skip rects clearly outside the editor (collapsed off-screen fragments)
-      if (r.bottom < editorBox.top - 2 || r.top > editorBox.bottom + 2) continue;
-      out.push({
-        key: `u${keySeq++}`,
-        top: r.top - editorBox.top,
-        left: r.left - editorBox.left,
-        width: r.width,
-        height: Math.max(2, r.height),
-      });
-    }
-  };
-
-  const walkText = (node: Text) => {
-    const text = node.nodeValue || "";
-    if (!text) return;
-
-    type Seg = { start: number; end: number; raw: string };
-    const segs: Seg[] = [];
-    try {
-      const segmenter = new Intl.Segmenter(["en", "ar"], { granularity: "word" });
-      for (const s of segmenter.segment(text)) {
-        if (!s.isWordLike) continue;
-        segs.push({
-          start: s.index,
-          end: s.index + s.segment.length,
-          raw: s.segment,
-        });
-      }
-    } catch {
-      for (const m of text.matchAll(new RegExp(SPELL_WORD_RE.source, "g"))) {
-        const start = m.index ?? 0;
-        segs.push({ start, end: start + m[0].length, raw: m[0] });
-      }
-    }
-
-    for (const seg of segs) {
-      const clean = sanitizeToken(seg.raw);
-      if (!clean || clean.length <= 1) continue;
-      if (!(isArabicToken(clean) || isLatinToken(clean))) continue;
-      if (!misspelled.has(clean)) continue;
-      try {
-        const range = document.createRange();
-        range.setStart(node, seg.start);
-        range.setEnd(node, Math.min(seg.end, text.length));
-        pushRangeRects(range);
-      } catch {
-        /* range may fail if node detaches mid-measure */
-      }
-    }
-  };
-
-  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
-  let n: Node | null;
-  while ((n = walker.nextNode())) {
-    walkText(n as Text);
-  }
-  return out;
-}
-
-/** Safely read HTML from a TipTap editor. Returns "" if the editor is
- *  destroyed/null (e.g. during React StrictMode remount or editor
- *  recreation) — `getHTML()` on a destroyed editor throws internally. */
-function safeGetHTML(editor: any): string {
-  try {
-    if (!editor || editor.isDestroyed) return "";
-    return editor.getHTML();
-  } catch {
-    return "";
-  }
-}
-
-/** One half of a compare-view row. Red tint = only in the left note,
- *  green tint = only in the right note; "changed" rows carry word-level
- *  highlights. The empty opposite half keeps the two columns aligned. */
-function CompareCell({
-  side,
-  variant,
-  dir,
-}: {
-  side: CompareSide | null;
-  variant: "left" | "right";
-  dir: "ltr" | "rtl";
-}) {
-  if (!side) {
-    return (
-      <div
-        className="px-3 py-[3px] min-h-[26px] text-xs leading-relaxed"
-        style={{ background: "rgba(255,255,255,0.015)" }}
-      />
-    );
-  }
-  const tone =
-    side.kind === "equal"
-      ? "transparent"
-      : side.kind === "changed"
-        ? variant === "left" ? "rgba(248,113,113,0.08)" : "rgba(52,211,153,0.08)"
-        : variant === "left" ? "rgba(248,113,113,0.18)" : "rgba(52,211,153,0.18)";
-  const gutter =
-    side.kind === "equal" ? "transparent" : variant === "left" ? "#f87171" : "#34d399";
-  return (
-    <div
-      dir={dir}
-      className="px-3 py-[3px] min-h-[26px] text-xs leading-relaxed whitespace-pre-wrap break-words"
-      style={{
-        background: tone,
-        borderInlineStart: `2px solid ${gutter}`,
-        color: side.kind === "equal" ? "var(--text-muted)" : "var(--text)",
-      }}
-    >
-      {side.kind === "changed" && side.tokens ? (
-        side.tokens.map((tok, i) =>
-          tok.type === "equal" ? (
-            <span key={i}>{tok.text}</span>
-          ) : (
-            <span
-              key={i}
-              style={{
-                background:
-                  tok.type === "delete" ? "rgba(248,113,113,0.4)" : "rgba(52,211,153,0.4)",
-                borderRadius: 3,
-                color: "#fff",
-              }}
-            >
-              {tok.text}
-            </span>
-          )
-        )
-      ) : (
-        side.text || "\u00a0"
-      )}
-    </div>
-  );
-}
+// Re-exported: these used to live here.
+export { type NoteRevision, getNoteRevisions, saveNoteRevision, smartFormatParagraphs };
 
 export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ settings }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
@@ -2416,127 +1906,27 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           </span>
         </div>
       )}
-      {/* Internal tabs — unified pill strip */}
-      <div className="scratchpad-tab-strip flex items-center gap-1.5 flex-wrap">
-        {[...tabs.filter((t) => !t.archived)].sort((a, b) => {
-          const ap = (a as any).pinned ? 1 : 0;
-          const bp = (b as any).pinned ? 1 : 0;
-          if (ap !== bp) return bp - ap; // pinned first
-          return ((b as any).pinned_at || 0) - ((a as any).pinned_at || 0);
-        }).map((tab) => {
-          const isActive = tab.id === activeId;
-          const renaming = renameId === tab.id;
-          const tabProtected = (tab as any).protected;
-          const tabPinned = (tab as any).pinned;
-          return (
-            <div
-              key={tab.id}
-              draggable
-              onClick={() => setActiveId(tab.id)}
-              onDragStart={(e) => {
-                setDragId(tab.id);
-                e.dataTransfer.effectAllowed = "move";
-                try { e.dataTransfer.setData("text/plain", tab.id); } catch {}
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                if (overId !== tab.id) setOverId(tab.id);
-              }}
-              onDragLeave={() => {
-                if (overId === tab.id) setOverId(null);
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                const fromId = dragId ?? e.dataTransfer.getData("text/plain");
-                if (fromId) reorderTab(fromId, tab.id);
-                setDragId(null);
-                setOverId(null);
-              }}
-              onDragEnd={() => {
-                setDragId(null);
-                setOverId(null);
-              }}
-className="scratchpad-tab group cursor-pointer"
-               data-active={isActive}
-               style={{
-                 opacity: dragId === tab.id ? 0.5 : 1,
-                 transform: overId === tab.id ? "translateY(-1px)" : undefined,
-               }}
-               title={t("scratchpad_drag_to_reorder")}
-            >
-              {renaming ? (
-                <input
-                  autoFocus
-                  ref={renameInputRef}
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitRename(tab.id);
-                    if (e.key === "Escape") { setRenameId(null); setRenameValue(""); }
-                  }}
-                  onBlur={() => commitRename(tab.id)}
-                  className="bg-transparent outline-none text-xs w-full truncate"
-                  style={{ color: "var(--text)" }}
-                />
-              ) : (
-                <span
-                  onDoubleClick={(e) => { e.stopPropagation(); startRename(tab.id); }}
-                  className="truncate flex-1 min-w-0 flex items-center gap-1"
-                  title={tab.title}
-                >
-                  {tabPinned && <span title={t("pin_pinned" as any) || "Pinned"}>📌</span>}
-                  {tabProtected && <span title={t("protect_protected" as any) || "Protected"}>🔒</span>}
-                  <span className="truncate">{tab.title}</span>
-                </span>
-              )}
-              {!tabProtected && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); startRename(tab.id); }}
-                className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity flex-shrink-0"
-                aria-label={t("scratchpad_rename")}
-                title={t("scratchpad_rename")}
-              >
-                <Pencil className="w-3 h-3" />
-              </button>
-              )}
-              {!tabProtected && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); archiveTab(tab.id); }}
-                className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity flex-shrink-0"
-                aria-label={t("scratchpad_archive")}
-                title={t("scratchpad_archive")}
-              >
-                <Archive className="w-3 h-3" />
-              </button>
-              )}
-              {!tabProtected && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
-                className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity flex-shrink-0"
-                aria-label="Close tab"
-                title="Close tab"
-              >
-                <X className="w-3 h-3" />
-              </button>
-              )}
-            </div>
-          );
-        })}
-        <button
-          type="button"
-          onClick={addTab}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-sm font-medium transition-all flex-shrink-0"
-          style={{ color: "var(--text-muted)", border: "1px dashed var(--border)" }}
-          title={t("scratchpad_add")}
-        >
-          <Plus className="w-3.5 h-3.5" />
-        </button>
-      </div>
+      <NoteTabStrip
+        activeId={activeId}
+        addTab={addTab}
+        archiveTab={archiveTab}
+        closeTab={closeTab}
+        commitRename={commitRename}
+        dragId={dragId}
+        overId={overId}
+        renameId={renameId}
+        renameInputRef={renameInputRef}
+        renameValue={renameValue}
+        reorderTab={reorderTab}
+        setActiveId={setActiveId}
+        setDragId={setDragId}
+        setOverId={setOverId}
+        setRenameId={setRenameId}
+        setRenameValue={setRenameValue}
+        startRename={startRename}
+        t={t}
+        tabs={tabs}
+      />
 
       {/* Save-health alarm — saves are NOT landing; typing exists only in
           this window. Never let this fail silently again. */}
@@ -2563,756 +1953,93 @@ className="scratchpad-tab group cursor-pointer"
         className="rounded-2xl p-4 space-y-3"
         style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
       >
-        {/* Toolbar — grouped action clusters with uniform button sizing:
-            Note | AI | Tools …(spacer)… Rephrase. Groups stay together when
-            the bar wraps; every control is h-8 so the row stays aligned. */}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-          {/* ── Note actions ── */}
-          <div className="flex items-center gap-1.5">
-            {hasSecret ? (
-              <button
-                type="button"
-                onClick={handleSaveSecret}
-                disabled={b.save}
-                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: "var(--emerald-bg)", color: "var(--emerald)", border: "1px solid rgba(52, 211, 153, 0.2)" }}
-              >
-                {b.save ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <KeyRound className="w-3.5 h-3.5 shrink-0" />}
-                {b.save ? t("scratchpad_saving") : t("scratchpad_save_secret")}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSaveNote}
-                disabled={b.save}
-                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
-              >
-                {b.save ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Save className="w-3.5 h-3.5 shrink-0" />}
-                {b.save ? t("scratchpad_saving") : t("scratchpad_save_note")}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
-              style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
-            >
-              <Copy className="w-3.5 h-3.5 shrink-0" />
-              {copied ? t("scratchpad_copied") : t("scratchpad_copy")}
-            </button>
-            {!activeIsProtected && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm("Are you sure you want to clear this note's content?")) {
-                    recordSnapshot(activeId, active?.content || "", "Before Clear");
-                    setContent(activeId, "");
-                  }
-                }}
-                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
-                style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
-              >
-                <Trash2 className="w-3.5 h-3.5 shrink-0" />
-                {t("scratchpad_clear")}
-              </button>
-            )}
-          </div>
+        <EditorPanel
+          active={active}
+          activeCharCount={activeCharCount}
+          activeId={activeId}
+          activeIsPinned={activeIsPinned}
+          activeIsProtected={activeIsProtected}
+          activeReadingTime={activeReadingTime}
+          activeWordCount={activeWordCount}
+          analyze={analyze}
+          b={b}
+          bidiMode={bidiMode}
+          canScrollDown={canScrollDown}
+          canScrollUp={canScrollUp}
+          contextMenu={contextMenu}
+          copied={copied}
+          detectedDir={detectedDir}
+          enablePredictions={enablePredictions}
+          ghostCompletion={ghostCompletion}
+          handleAddToDictionary={handleAddToDictionary}
+          handleApplySuggestion={handleApplySuggestion}
+          handleCopy={handleCopy}
+          handleIgnoreWord={handleIgnoreWord}
+          handleOpenRevisions={handleOpenRevisions}
+          handleProofread={handleProofread}
+          handleRephrase={handleRephrase}
+          handleSaveNote={handleSaveNote}
+          handleSaveSecret={handleSaveSecret}
+          handleSmartSplitParagraphs={handleSmartSplitParagraphs}
+          handleUndoRephrase={handleUndoRephrase}
+          hasSecret={hasSecret}
+          highlightColor={highlightColor}
+          noteFontSize={noteFontSize}
+          noteOverflows={noteOverflows}
+          onContextMenu={onContextMenu}
+          onKeyDown={onKeyDown}
+          openCompare={openCompare}
+          openRescue={openRescue}
+          recordSnapshot={recordSnapshot}
+          rephraseUndo={rephraseUndo}
+          scrollEditor={scrollEditor}
+          setContent={setContent}
+          setContextMenu={setContextMenu}
+          setGhostCompletion={setGhostCompletion}
+          setProtectConfirmInput={setProtectConfirmInput}
+          setProtectError={setProtectError}
+          setProtectModal={setProtectModal}
+          setSlashOpen={setSlashOpen}
+          setStyle={setStyle}
+          settings={settings}
+          shellRef={shellRef}
+          slashOpen={slashOpen}
+          spellRects={spellRects}
+          statusMsg={statusMsg}
+          style={style}
+          t={t}
+          tabs={tabs}
+          tiptap={tiptap}
+          togglePin={togglePin}
+          togglePredictions={togglePredictions}
+          triggerAutocomplete={triggerAutocomplete}
+        />
 
-          <div className="w-px h-5 shrink-0" style={{ background: "var(--border)" }} />
-
-          {/* ── AI actions ── */}
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => analyze(activeId, htmlToPlainText(active?.content || ""))}
-              disabled={b.analyze || !htmlToPlainText(active?.content || "").trim()}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
-            >
-              {b.analyze ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 shrink-0" />}
-              {b.analyze ? t("scratchpad_detecting") : t("scratchpad_detect")}
-            </button>
-            {settings?.enable_ai_proofreader !== false && !activeIsProtected && (
-              <button
-                type="button"
-                onClick={handleProofread}
-                disabled={b.proofread || !(active?.content || "").trim()}
-                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: "transparent", color: "var(--amber)", border: "1px solid rgba(245, 158, 11, 0.2)" }}
-                title={t("scratchpad_proofread")}
-              >
-                {b.proofread ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Wand2 className="w-3.5 h-3.5 shrink-0" />}
-                {t("scratchpad_proofread")}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={togglePredictions}
-              title={enablePredictions ? "AI Predictions Enabled (Click to Disable)" : "AI Predictions Disabled (Click to Enable)"}
-              aria-pressed={enablePredictions}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
-              style={{
-                background: enablePredictions ? "rgba(99, 102, 241, 0.15)" : "transparent",
-                color: enablePredictions ? "var(--accent-bright)" : "var(--text-muted)",
-                border: `1px solid ${enablePredictions ? "rgba(99, 102, 241, 0.4)" : "var(--border)"}`,
-              }}
-            >
-              {enablePredictions ? <Zap className="w-3.5 h-3.5 shrink-0" /> : <ZapOff className="w-3.5 h-3.5 shrink-0" />}
-              <span>Predictions: <strong>{enablePredictions ? "ON" : "OFF"}</strong></span>
-            </button>
-          </div>
-
-          <div className="w-px h-5 shrink-0" style={{ background: "var(--border)" }} />
-
-          {/* ── Note tools ── */}
-          <div className="flex items-center gap-1.5">
-            {!activeIsProtected && (
-              <button
-                type="button"
-                onClick={handleSmartSplitParagraphs}
-                disabled={!(active?.content || "").trim()}
-                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: "rgba(56, 189, 248, 0.1)", color: "#38bdf8", border: "1px solid rgba(56, 189, 248, 0.3)" }}
-                title="Restore multi-line paragraphs & auto-format structure"
-              >
-                <AlignJustify className="w-3.5 h-3.5 shrink-0" />
-                <span>Format Paragraphs</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleOpenRevisions}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
-              style={{ background: "rgba(245, 158, 11, 0.12)", color: "#fbbf24", border: "1px solid rgba(245, 158, 11, 0.3)" }}
-              title={t("scratchpad_history_title")}
-            >
-              <History className="w-3.5 h-3.5 shrink-0" />
-              <span>{t("scratchpad_history")}</span>
-            </button>
-            <button
-              type="button"
-              onClick={openCompare}
-              disabled={tabs.length < 2}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ background: "rgba(99, 102, 241, 0.12)", color: "#a5b4fc", border: "1px solid rgba(99, 102, 241, 0.3)" }}
-              title={t("scratchpad_compare_title")}
-            >
-              <ArrowLeftRight className="w-3.5 h-3.5 shrink-0" />
-              <span>{t("scratchpad_compare")}</span>
-            </button>
-            <button
-              type="button"
-              onClick={openRescue}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
-              style={{ background: "rgba(52, 211, 153, 0.12)", color: "#6ee7b7", border: "1px solid rgba(52, 211, 153, 0.3)" }}
-              title={t("scratchpad_rescue_title")}
-            >
-              <LifeBuoy className="w-3.5 h-3.5 shrink-0" />
-              <span>{t("scratchpad_rescue")}</span>
-            </button>
-          </div>
-
-          <div className="flex-1" />
-
-          {/* ── Rephrase (right side) ── */}
-          <div className="flex items-center gap-1.5">
-            {(rephraseUndo[activeId]?.length ?? 0) > 0 && (
-              <button
-                type="button"
-                onClick={handleUndoRephrase}
-                disabled={b.rewrite}
-                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
-                title={t("scratchpad_rephrase_undo")}
-              >
-                <Undo2 className="w-3.5 h-3.5 shrink-0" />
-                {t("scratchpad_rephrase_undo")}
-              </button>
-            )}
-            <select
-              value={style}
-              onChange={(e) => setStyle(e.target.value as RewriteStyle)}
-              className="h-8 rounded-lg px-2.5 text-xs font-medium focus:outline-none cursor-pointer"
-              style={{
-                background: "var(--bg-input, #18181b)",
-                border: "1px solid var(--border, #3f3f46)",
-                color: "var(--text, #ffffff)",
-              }}
-            >
-              {REWRITE_STYLES.map((s) => (
-                <option
-                  key={s}
-                  value={s}
-                  style={{
-                    backgroundColor: "#18181b",
-                    color: "#ffffff",
-                  }}
-                >
-                  {t(REWRITE_STYLE_KEYS[s] as Parameters<typeof getTranslation>[1]) || s}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={handleRephrase}
-              disabled={b.rewrite || !(active?.content || "").trim()}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ background: "var(--bg-active)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
-            >
-              {b.rewrite ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Wand2 className="w-3.5 h-3.5 shrink-0" />}
-              {b.rewrite ? t("scratchpad_rewriting") : t("scratchpad_rephrase")}
-            </button>
-          </div>
-        </div>
-
-        {statusMsg && (
-          <p className="text-xs" style={{ color: "var(--accent-bright)" }}>
-            {statusMsg}
-          </p>
-        )}
-
-        <div
-          ref={shellRef}
-          className="note-editor-shell"
-          style={
-            {
-              ["--note-font-size" as string]: `${noteFontSize}px`,
-            } as React.CSSProperties
-          }
-        >
-          {/* Frame is height-locked to the viewport. Jump FABs pin to its
-              top/bottom corners so they stay reachable on very long notes. */}
-          <div className="note-editor-frame">
-            {tiptap ? (
-              <div
-                onContextMenu={onContextMenu}
-                onKeyDown={onKeyDown}
-                onPaste={() => {
-                  // Insertion itself is handled by ProseMirror (see
-                  // editorProps.handlePaste for plain-text mode) — this only
-                  // triggers AI detection after the paste lands.
-                  setTimeout(() => { try { analyze(activeId, safeGetHTML(tiptap)); } catch {} }, 80);
-                }}
-                className="relative w-full"
-              >
-                <EditorContent editor={tiptap} className="note-editor-wrap" />
-                {tiptap && !tiptap.state.selection.empty && (
-                  <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 p-1 rounded-full" style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border-glow)", boxShadow: "0 8px 24px rgba(0,0,0,0.22)" }}>
-                    <button type="button" onClick={() => tiptap.chain().focus().toggleBold().run()} className="p-1.5 rounded-full" style={{ background: tiptap.isActive("bold") ? "var(--accent)" : "transparent", color: tiptap.isActive("bold") ? "#fff" : "var(--text-muted)" }} title="Bold"><Bold className="w-3.5 h-3.5" /></button>
-                    <button type="button" onClick={() => tiptap.chain().focus().toggleItalic().run()} className="p-1.5 rounded-full" style={{ background: tiptap.isActive("italic") ? "var(--accent)" : "transparent", color: tiptap.isActive("italic") ? "#fff" : "var(--text-muted)" }} title="Italic"><Italic className="w-3.5 h-3.5" /></button>
-                    <button type="button" onClick={() => tiptap.chain().focus().toggleUnderline().run()} className="p-1.5 rounded-full" style={{ background: tiptap.isActive("underline") ? "var(--accent)" : "transparent", color: tiptap.isActive("underline") ? "#fff" : "var(--text-muted)" }} title="Underline"><Underline className="w-3.5 h-3.5" /></button>
-                    <span className="w-px h-4 mx-1" style={{ background: "var(--border)" }} />
-                    <button type="button" onClick={() => tiptap.chain().focus().toggleHighlight({ color: highlightColor }).run()} className="p-1.5 rounded-full" style={{ color: "var(--text-dim)" }} title="Highlight"><Highlighter className="w-3.5 h-3.5" /></button>
-                  </div>
-                )}
-                {slashOpen && (
-                  <div className="absolute left-3 bottom-14 z-20 flex flex-col gap-1 p-1.5 rounded-xl shadow-2xl" style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border-glow)", minWidth: 180 }}>
-                    <div className="px-2 py-1 text-[10px] font-semibold" style={{ color: "var(--text-muted)" }}>Slash commands — type "/"</div>
-                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleHeading({ level: 1 }).run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs flex items-center gap-2" style={{ color: "var(--text)" }}><span className="font-bold">H1</span> Heading 1</button>
-                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleHeading({ level: 2 }).run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs flex items-center gap-2" style={{ color: "var(--text)" }}><span className="font-bold">H2</span> Heading 2</button>
-                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleBulletList().run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs" style={{ color: "var(--text)" }}>• Bullet list</button>
-                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleBlockquote().run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs" style={{ color: "var(--text)" }}>❝ Quote</button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="note-editor relative z-10 w-full p-4 text-sm" style={{ color: "var(--text-muted)" }}>
-                Loading editor…
-              </div>
-            )}
-            {spellRects.length > 0 && (
-              <div
-                aria-hidden="true"
-                className="spell-rect-layer"
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  zIndex: 15,
-                  pointerEvents: "none",
-                  overflow: "hidden",
-                  borderRadius: "0.75rem",
-                }}
-              >
-                {spellRects.map((r) => (
-                  <span
-                    key={r.key}
-                    className="spell-rect-underline"
-                    style={{
-                      position: "absolute",
-                      top: r.top + r.height - 3,
-                      left: r.left,
-                      width: r.width,
-                      height: 3,
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-
-            {/* Non-intrusive floating prediction overlay badge (Zero DOM mutations) */}
-            {ghostCompletion && enablePredictions && (
-              <div
-                className="absolute bottom-3 right-4 z-30 flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs backdrop-blur-md shadow-2xl animate-in fade-in zoom-in-95 pointer-events-auto"
-                style={{
-                  background: "rgba(15, 23, 42, 0.92)",
-                  border: "1px solid rgba(99, 102, 241, 0.4)",
-                  boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.6)",
-                }}
-              >
-                <Zap className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="text-muted">Prediction:</span>
-                <span className="font-medium text-white italic">{ghostCompletion}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    // ProseMirror transaction, not raw DOM insertNode — see
-                    // handleApplySuggestion for why that duplicates text and
-                    // why the legacy onEditorInput must not run afterwards.
-                    const view = tiptap && !tiptap.isDestroyed ? tiptap.view : null;
-                    if (view) {
-                      try {
-                        view.dispatch(view.state.tr.insertText(" " + ghostCompletion));
-                        triggerAutocomplete(tiptap.getText());
-                      } catch {}
-                      setGhostCompletion("");
-                    }
-                  }}
-                  className="ml-1 px-2 py-0.5 rounded font-mono text-[10px] font-bold hover:brightness-125 transition-all cursor-pointer"
-                  style={{
-                    background: "rgba(99, 102, 241, 0.25)",
-                    border: "1px solid rgba(99, 102, 241, 0.5)",
-                    color: "var(--accent-bright)",
-                  }}
-                >
-                  Tab ↹ Accept
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGhostCompletion("")}
-                  className="text-muted hover:text-white text-xs px-1 cursor-pointer"
-                  title="Dismiss"
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-
-            {/* Custom Spelling Context Menu Popup */}
-            {contextMenu && (
-              <div
-                className="fixed z-50 rounded-xl shadow-2xl p-2 w-64 space-y-1 text-xs backdrop-blur-md animate-in fade-in zoom-in-95"
-                style={{
-                  top: Math.min(contextMenu.y, window.innerHeight - 280),
-                  left: Math.min(contextMenu.x, window.innerWidth - 270),
-                  background: "var(--bg-surface)",
-                  border: "1px solid var(--border-glow)",
-                  boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)",
-                }}
-              >
-                <div className="px-2 py-1 font-semibold text-muted border-b border-border flex items-center justify-between">
-                  <span>Spelling: <strong className="text-white">{contextMenu.word}</strong></span>
-                  <button onClick={() => setContextMenu(null)} className="opacity-60 hover:opacity-100">✕</button>
-                </div>
-
-                {contextMenu.loading ? (
-                  <div className="flex items-center gap-2 px-2 py-2 text-muted italic">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-accent-bright" />
-                    <span>Finding suggestions...</span>
-                  </div>
-                ) : contextMenu.suggestions.length > 0 ? (
-                  <div className="space-y-0.5 max-h-40 overflow-y-auto">
-                    {contextMenu.suggestions.map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => handleApplySuggestion(s)}
-                        className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg hover:text-accent-bright font-medium transition-colors flex items-center gap-1.5"
-                      >
-                        <Sparkles className="w-3 h-3 text-amber" />
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="px-2 py-1 text-muted italic">No suggestions</p>
-                )}
-
-                <div className="border-t border-border pt-1 space-y-0.5">
-                  <button
-                    onClick={() => handleAddToDictionary(contextMenu.word)}
-                    className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-surface-highlight hover:text-emerald font-medium transition-colors flex items-center gap-1.5"
-                  >
-                    <BookPlus className="w-3.5 h-3.5 text-emerald" />
-                    Add "{contextMenu.word}" to Dictionary
-                  </button>
-
-                  <button
-                    onClick={() => handleIgnoreWord(contextMenu.word)}
-                    className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-surface-highlight hover:text-muted font-medium transition-colors flex items-center gap-1.5"
-                  >
-                    <EyeOff className="w-3.5 h-3.5 text-muted" />
-                    Ignore "{contextMenu.word}"
-                  </button>
-                </div>
-              </div>
-            )}
-            {/* Always-visible corners of the editor frame (not mid-document). */}
-            {noteOverflows && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => scrollEditor("top")}
-                  className={`note-jump-btn note-jump-btn--top p-2 transition-all hover:opacity-100 ${
-                    canScrollUp ? "opacity-95" : "opacity-50"
-                  }`}
-                  style={{
-                    background: "var(--bg-surface-solid)",
-                    color: "var(--accent-bright)",
-                    border: "1px solid var(--border-glow)",
-                  }}
-                  title={t("scratchpad_go_to_top")}
-                  aria-label={t("scratchpad_go_to_top")}
-                >
-                  <ArrowUp className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => scrollEditor("bottom")}
-                  className={`note-jump-btn note-jump-btn--bottom p-2 transition-all hover:opacity-100 ${
-                    canScrollDown ? "opacity-95" : "opacity-50"
-                  }`}
-                  style={{
-                    background: "var(--bg-surface-solid)",
-                    color: "var(--accent-bright)",
-                    border: "1px solid var(--border-glow)",
-                  }}
-                  title={t("scratchpad_go_to_bottom")}
-                  aria-label={t("scratchpad_go_to_bottom")}
-                >
-                  <ArrowDown className="w-4 h-4" />
-                </button>
-              </>
-            )}
-          </div>
-
-          {/* Pro Status Bar */}
-          <div className="editor-status-bar select-none">
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1">
-                <strong className="text-white tabular-nums">{activeWordCount}</strong>
-                <span className="opacity-75">{settings?.ui_language === "ar" ? "كلمة" : "words"}</span>
-              </span>
-              <span className="opacity-30">•</span>
-              <span className="flex items-center gap-1">
-                <strong className="text-white tabular-nums">{activeCharCount}</strong>
-                <span className="opacity-75">{settings?.ui_language === "ar" ? "حرف" : "chars"}</span>
-              </span>
-              <span className="opacity-30">•</span>
-              <span className="flex items-center gap-1">
-                <span>~</span>
-                <strong className="text-white tabular-nums">{activeReadingTime}</strong>
-                <span className="opacity-75">{settings?.ui_language === "ar" ? "دقيقة قراءة" : "min read"}</span>
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="opacity-30">•</span>
-              <span className="uppercase text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded" style={{ background: "var(--accent-bg)", color: "var(--accent-bright)" }}>
-                {bidiMode === "auto" ? `AUTO (${detectedDir.toUpperCase()})` : bidiMode.toUpperCase()}
-              </span>
-              <button
-                onClick={togglePin}
-                title={activeIsPinned ? (t("pin_unpin" as any) || "Unpin note") : (t("pin_pin" as any) || "Pin note")}
-                className="px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all"
-                style={{
-                  background: activeIsPinned ? "var(--accent-bg)" : "var(--bg-input)",
-                  color: activeIsPinned ? "var(--accent-bright)" : "var(--text-muted)",
-                  border: "1px solid " + (activeIsPinned ? "var(--border-glow)" : "var(--border)"),
-                }}
-              >
-                {activeIsPinned ? "📌" : "📍"} {activeIsPinned ? (t("pin_pinned" as any) || "Pinned") : (t("pin_pin" as any) || "Pin")}
-              </button>
-              <button
-                onClick={() => {
-                  setProtectConfirmInput("");
-                  setProtectError("");
-                  setProtectModal({ mode: activeIsProtected ? "off" : "on", tabId: activeId });
-                }}
-                title={activeIsProtected ? (t("protect_unprotect_title" as any) || "Remove protection") : (t("protect_title" as any) || "Protect this note from edit/delete")}
-                className="px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all"
-                style={{
-                  background: activeIsProtected ? "rgba(248,113,113,0.12)" : "var(--bg-input)",
-                  color: activeIsProtected ? "#f87171" : "var(--text-muted)",
-                  border: "1px solid " + (activeIsProtected ? "rgba(248,113,113,0.4)" : "var(--border)"),
-                }}
-              >
-                {activeIsProtected ? "🔒" : "🛡️"} {activeIsProtected ? (t("protect_protected" as any) || "Protected") : (t("protect_protect" as any) || "Protect")}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Formatting toolbar — unified pill */}
-        <div
-          ref={toolbarRef}
-          onMouseDown={(e) => e.preventDefault()}
-          className="scratchpad-toolbar"
-        >
-          {/* Dual-language BIDI */}
-          <div
-            className="scratchpad-toolbar-group"
-            title={t("scratchpad_bidi_hint")}
-          >
-            {(
-              [
-                { mode: "auto" as const, icon: Languages, labelKey: "scratchpad_bidi_auto" as const },
-                { mode: "ltr" as const, icon: AlignLeft, labelKey: "scratchpad_bidi_ltr" as const },
-                { mode: "rtl" as const, icon: AlignRight, labelKey: "scratchpad_bidi_rtl" as const },
-              ]
-            ).map(({ mode, icon: Icon, labelKey }) => {
-              const activeBidi = bidiMode === mode;
-              const title =
-                mode === "auto"
-                  ? `${t(labelKey)} (${detectedDir.toUpperCase()})`
-                  : t(labelKey);
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setBidiMode(mode)}
-                  className="p-1.5 transition-all"
-                  style={{
-                    color: activeBidi ? "var(--accent-bright)" : "var(--text-dim)",
-                    background: activeBidi ? "var(--accent-bg)" : "transparent",
-                  }}
-                  title={title}
-                  aria-label={title}
-                  aria-pressed={activeBidi}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
-
-          {/* Jump top/bottom — always in the toolbar so long notes never hide them */}
-          <button
-            type="button"
-            onClick={() => scrollEditor("top")}
-            disabled={!noteOverflows && !canScrollUp}
-            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{ color: "var(--text-dim)" }}
-            title={t("scratchpad_go_to_top")}
-            aria-label={t("scratchpad_go_to_top")}
-          >
-            <ArrowUp className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => scrollEditor("bottom")}
-            disabled={!noteOverflows && !canScrollDown}
-            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{ color: "var(--text-dim)" }}
-            title={t("scratchpad_go_to_bottom")}
-            aria-label={t("scratchpad_go_to_bottom")}
-          >
-            <ArrowDown className="w-3.5 h-3.5" />
-          </button>
-
-          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
-
-          {/* Undo / Redo */}
-          <button
-            type="button"
-            onClick={historyUndo}
-            disabled={(() => { try { return !tiptap?.can?.().undo?.(); } catch { return true; } })()}
-            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{ color: "var(--text-dim)" }}
-            title={t("scratchpad_undo")}
-          >
-            <Undo className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={historyRedo}
-            disabled={(() => { try { return !tiptap?.can?.().redo?.(); } catch { return true; } })()}
-            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{ color: "var(--text-dim)" }}
-            title={t("scratchpad_redo")}
-          >
-            <Redo className="w-3.5 h-3.5" />
-          </button>
-
-          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
-
-          {/* Bold / Italic / Underline */}
-          <button
-            type="button"
-            onClick={() => execFormat("bold")}
-            
-            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
-            style={{ color: "var(--text-dim)" }}
-            title={t("scratchpad_bold")}
-          >
-            <Bold className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => execFormat("italic")}
-            
-            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
-            style={{ color: "var(--text-dim)" }}
-            title={t("scratchpad_italic")}
-          >
-            <Italic className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => execFormat("underline")}
-            
-            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
-            style={{ color: "var(--text-dim)" }}
-            title={t("scratchpad_underline")}
-          >
-            <Underline className="w-3.5 h-3.5" />
-          </button>
-
-          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
-
-          {/* Text color */}
-          <div className="relative">
-            <div className="flex items-center">
-              <button
-                type="button"
-                onClick={() => execFormat("foreColor", textColor)}
-                
-                className="p-1.5 rounded-l-lg transition-all hover:opacity-100 opacity-70"
-                style={{ color: "var(--text-dim)" }}
-                title={t("scratchpad_text_color")}
-              >
-                <Palette className="w-3.5 h-3.5" />
-                <span
-                  className="absolute bottom-0.5 left-2 w-2 h-0.5 rounded-full"
-                  style={{ background: textColor }}
-                />
-              </button>
-              <button
-                type="button"
-                onClick={() => { setShowTextColorPicker((s) => !s); setShowHighlightPicker(false); }}
-                
-                className="px-0.5 py-1.5 rounded-r-lg transition-all hover:opacity-100 opacity-70 text-[8px]"
-                style={{ color: "var(--text-dim)" }}
-              >
-                ▾
-              </button>
-            </div>
-            {showTextColorPicker && (
-              <div
-                className="absolute bottom-full left-0 mb-1 flex gap-1 p-1.5 rounded-lg z-50"
-                style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border)" }}
-                onMouseDown={(e) => e.preventDefault()}
-              >
-                {TEXT_COLORS.map((c) => (
-                  <button
-                    key={c.hex}
-                    type="button"
-                    onClick={() => { setTextColor(c.hex); execFormat("foreColor", c.hex); }}
-                    
-                    className="w-5 h-5 rounded-full border-2 transition-all"
-                    style={{
-                      background: c.hex,
-                      borderColor: textColor === c.hex ? "var(--accent-bright)" : "transparent",
-                    }}
-                    title={t(c.key as Parameters<typeof getTranslation>[1])}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Highlight color */}
-          <div className="relative">
-            <div className="flex items-center">
-              <button
-                type="button"
-                onClick={() => execFormat("hiliteColor", highlightColor)}
-                
-                className="p-1.5 rounded-l-lg transition-all hover:opacity-100 opacity-70"
-                style={{ color: "var(--text-dim)" }}
-                title={t("scratchpad_highlight")}
-              >
-                <Highlighter className="w-3.5 h-3.5" />
-                <span
-                  className="absolute bottom-0.5 left-2 w-2 h-0.5 rounded-full"
-                  style={{ background: highlightColor }}
-                />
-              </button>
-              <button
-                type="button"
-                onClick={() => { setShowHighlightPicker((s) => !s); setShowTextColorPicker(false); }}
-                
-                className="px-0.5 py-1.5 rounded-r-lg transition-all hover:opacity-100 opacity-70 text-[8px]"
-                style={{ color: "var(--text-dim)" }}
-              >
-                ▾
-              </button>
-            </div>
-            {showHighlightPicker && (
-              <div
-                className="absolute bottom-full left-0 mb-1 flex gap-1 p-1.5 rounded-lg z-50"
-                style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border)" }}
-                onMouseDown={(e) => e.preventDefault()}
-              >
-                {HIGHLIGHT_COLORS.map((c) => (
-                  <button
-                    key={c.hex}
-                    type="button"
-                    onClick={() => { setHighlightColor(c.hex); execFormat("hiliteColor", c.hex); }}
-                    
-                    className="w-5 h-5 rounded-full border-2 transition-all"
-                    style={{
-                      background: c.hex,
-                      borderColor: highlightColor === c.hex ? "var(--accent-bright)" : "transparent",
-                    }}
-                    title={t(c.key as Parameters<typeof getTranslation>[1])}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
-
-          {/* Clear formatting */}
-          <button
-            type="button"
-            onClick={() => execFormat("removeFormat")}
-            
-            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
-            style={{ color: "var(--text-dim)" }}
-            title={t("scratchpad_clear_format")}
-          >
-            <Eraser className="w-3.5 h-3.5" />
-          </button>
-
-          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
-
-          {/* Paste mode toggle */}
-          <button
-            type="button"
-            onClick={() => setPastePlain((v) => !v)}
-            className="p-1.5 rounded-lg transition-all hover:opacity-100 opacity-70"
-            style={{
-              color: pastePlain ? "var(--accent-bright)" : "var(--text-dim)",
-              background: pastePlain ? "var(--accent-bg)" : "transparent",
-              border: pastePlain ? "1px solid var(--border-glow)" : "1px solid transparent",
-            }}
-            title={pastePlain ? t("paste_plain_on") : t("paste_plain_off")}
-          >
-            <ClipboardPaste className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <FormattingToolbar
+          bidiMode={bidiMode}
+          canScrollDown={canScrollDown}
+          canScrollUp={canScrollUp}
+          detectedDir={detectedDir}
+          execFormat={execFormat}
+          highlightColor={highlightColor}
+          historyRedo={historyRedo}
+          historyUndo={historyUndo}
+          noteOverflows={noteOverflows}
+          pastePlain={pastePlain}
+          scrollEditor={scrollEditor}
+          setBidiMode={setBidiMode}
+          setHighlightColor={setHighlightColor}
+          setPastePlain={setPastePlain}
+          setShowHighlightPicker={setShowHighlightPicker}
+          setShowTextColorPicker={setShowTextColorPicker}
+          setTextColor={setTextColor}
+          showHighlightPicker={showHighlightPicker}
+          showTextColorPicker={showTextColorPicker}
+          t={t}
+          textColor={textColor}
+          tiptap={tiptap}
+          toolbarRef={toolbarRef}
+        />
 
         {/* Detection status, moved to underneath the text box. */}
         {detection ? (
@@ -3327,359 +2054,36 @@ className="scratchpad-tab group cursor-pointer"
         )}
       </div>
 
-      {/* Archived tabs — Cold Reference Archive */}
-      {(archivedCount > 0 || (archivedTabs && archivedTabs.length > 0)) && (
-        <div
-          className="rounded-2xl overflow-hidden"
-          style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
-        >
-          <button
-            type="button"
-            onClick={toggleShowArchived}
-            className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold"
-            style={{ color: "var(--text-dim)" }}
-          >
-            <span className="flex items-center gap-2">
-              <Archive className="w-3.5 h-3.5 text-amber-400/80" />
-              <span>{t("scratchpad_archived")} ({archivedCount})</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 font-mono text-zinc-400">Cold Storage</span>
-            </span>
-            <span className="text-zinc-500">{showArchived ? "▾" : "▸"}</span>
-          </button>
-          {showArchived && (
-            <div className="px-4 pb-3 flex flex-col gap-1.5">
-              {loadingArchived && (
-                <div className="py-4 flex items-center justify-center gap-2 text-xs text-zinc-400">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Loading archive...</span>
-                </div>
-              )}
-              {!loadingArchived && archivedTabs && archivedTabs.length === 0 && (
-                <div className="py-2 text-center text-xs text-zinc-500">No archived notes</div>
-              )}
-              {!loadingArchived && archivedTabs && archivedTabs.map((tab) => (
-                <div
-                  key={tab.id}
-                  className="flex items-center gap-2 py-1.5 px-2.5 rounded-lg group transition-colors"
-                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}
-                >
-                  <span
-                    className="flex-1 truncate text-xs cursor-pointer hover:underline"
-                    style={{ color: "var(--text-muted)" }}
-                    onClick={() => setPreviewArchivedTab(tab)}
-                    title="Click to preview (read-only)"
-                  >
-                    {tab.title || "Untitled"}
-                  </span>
-                  {tab.archivedAt && (
-                    <span className="text-[10px] text-zinc-500 hidden sm:inline">
-                      {new Date(tab.archivedAt).toLocaleDateString()}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setPreviewArchivedTab(tab)}
-                    className="opacity-70 hover:opacity-100 transition-opacity text-xs px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-zinc-300"
-                    title="View note"
-                  >
-                    View
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => restoreTab(tab.id)}
-                    className="opacity-70 hover:opacity-100 transition-opacity text-emerald-400 hover:text-emerald-300 p-1"
-                    aria-label={t("scratchpad_restore")}
-                    title={t("scratchpad_restore")}
-                  >
-                    <ArchiveRestore className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => deleteArchivedTab(tab.id, tab.title)}
-                    className="opacity-70 hover:opacity-100 transition-opacity text-red-400 hover:text-red-300 p-1"
-                    aria-label={t("scratchpad_delete")}
-                    title={t("scratchpad_delete")}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      <ArchiveSection
+        archivedCount={archivedCount}
+        archivedTabs={archivedTabs}
+        deleteArchivedTab={deleteArchivedTab}
+        loadingArchived={loadingArchived}
+        restoreTab={restoreTab}
+        setPreviewArchivedTab={setPreviewArchivedTab}
+        showArchived={showArchived}
+        t={t}
+        toggleShowArchived={toggleShowArchived}
+      />
 
-      {/* Archived Note Preview Modal (Passive Reference Viewer) */}
-      {previewArchivedTab && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
-          onClick={() => setPreviewArchivedTab(null)}
-        >
-          <div
-            className="w-full max-w-2xl max-h-[85vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl"
-            style={{
-              background: "#121214",
-              border: "1px solid rgba(255,255,255,0.12)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div
-              className="flex items-center justify-between px-5 py-3.5 border-b"
-              style={{ borderColor: "rgba(255,255,255,0.08)" }}
-            >
-              <div className="flex items-center gap-2.5">
-                <Archive className="w-4 h-4 text-amber-400" />
-                <h3 className="text-sm font-semibold text-zinc-100 truncate max-w-md">
-                  {previewArchivedTab.title || "Archived Note"}
-                </h3>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
-                  Reference Only
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPreviewArchivedTab(null)}
-                className="p-1 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-white/5 transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      <ArchivedNotePreview
+        deleteArchivedTab={deleteArchivedTab}
+        previewArchivedTab={previewArchivedTab}
+        restoreTab={restoreTab}
+        setPreviewArchivedTab={setPreviewArchivedTab}
+        setStatus={setStatus}
+      />
 
-            {/* Note Meta */}
-            <div
-              className="px-5 py-2 border-b flex items-center justify-between text-[11px] text-zinc-400"
-              style={{ borderColor: "rgba(255,255,255,0.05)", background: "rgba(255,255,255,0.02)" }}
-            >
-              <div className="flex items-center gap-3">
-                {previewArchivedTab.archivedAt && (
-                  <span>Archived on {new Date(previewArchivedTab.archivedAt).toLocaleString()}</span>
-                )}
-                <span>•</span>
-                <span>{htmlToPlainText(previewArchivedTab.content || "").length} characters</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    void copyTextToClipboard(htmlToPlainText(previewArchivedTab.content || ""));
-                    setStatus("Copied to clipboard");
-                  }}
-                  className="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-zinc-300 transition-colors flex items-center gap-1.5"
-                >
-                  <Copy className="w-3 h-3" />
-                  <span>Copy</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Read-Only Content Body */}
-            <div
-              className="flex-1 overflow-y-auto p-5 text-sm leading-[1.6] select-text"
-              style={{ color: "#d4d4d8" }}
-              dangerouslySetInnerHTML={{ __html: sanitizeNoteHtml(previewArchivedTab.content) || "<p class='text-zinc-500'>Empty note</p>" }}
-            />
-
-            {/* Footer Actions */}
-            <div
-              className="flex items-center justify-between px-5 py-3 border-t"
-              style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(0,0,0,0.3)" }}
-            >
-              <button
-                type="button"
-                onClick={() => deleteArchivedTab(previewArchivedTab.id, previewArchivedTab.title)}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors flex items-center gap-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete Permanently</span>
-              </button>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPreviewArchivedTab(null)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-white/5 transition-colors"
-                >
-                  Close
-                </button>
-                <button
-                  type="button"
-                  onClick={() => restoreTab(previewArchivedTab.id)}
-                  className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 transition-colors flex items-center gap-1.5 shadow-sm"
-                >
-                  <ArchiveRestore className="w-3.5 h-3.5" />
-                  <span>Restore to Active Notes</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Revision History Modal */}
-      {showRevisions && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
-          onClick={() => setShowRevisions(false)}
-        >
-          <div
-            className="w-full max-w-2xl max-h-[85vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl"
-            style={{
-              background: "#121214",
-              border: "1px solid rgba(255,255,255,0.12)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div
-              className="px-5 py-4 flex items-center justify-between border-b"
-              style={{ borderColor: "rgba(255,255,255,0.08)", background: "#18181b" }}
-            >
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
-                  <History className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">
-                    {t("scratchpad_history_title")}
-                  </h3>
-                  <p className="text-xs text-neutral-400">
-                    {active?.title || "Note"} &bull; {revisionsList.length} {revisionsList.length === 1 ? "version" : "versions"} saved
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowRevisions(false)}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="flex-1 flex overflow-hidden min-h-[340px]">
-              {/* Revision list sidebar */}
-              <div
-                className="w-64 border-r overflow-y-auto flex flex-col p-2 gap-1.5"
-                style={{ borderColor: "rgba(255,255,255,0.08)", background: "#141416" }}
-              >
-                {revisionsList.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-neutral-500">
-                    {t("scratchpad_history_empty")}
-                  </div>
-                ) : (
-                  revisionsList.map((rev, idx) => {
-                    const isSelected = selectedRevision?.id === rev.id;
-                    const dateStr = new Date(rev.timestamp).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    });
-                    const dateFull = new Date(rev.timestamp).toLocaleDateString([], {
-                      month: "short",
-                      day: "numeric",
-                    });
-                    return (
-                      <button
-                        key={rev.id}
-                        type="button"
-                        onClick={() => setSelectedRevision(rev)}
-                        className={`text-left p-2.5 rounded-xl text-xs transition-all flex flex-col gap-1 cursor-pointer ${
-                          isSelected
-                            ? "bg-amber-500/15 border border-amber-500/40 text-white shadow-sm"
-                            : "hover:bg-white/5 border border-transparent text-neutral-300"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-amber-300">
-                            {idx === 0 ? "Latest Snapshot" : `Version ${revisionsList.length - idx}`}
-                          </span>
-                          <span className="text-[10px] text-neutral-400">{dateStr}</span>
-                        </div>
-                        <div className="text-[10px] text-neutral-400 flex items-center justify-between">
-                          <span>{dateFull}</span>
-                          <span>{rev.charCount} chars</span>
-                        </div>
-                        {rev.reason && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-neutral-400 self-start font-mono">
-                            {rev.reason}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* Revision content preview */}
-              <div className="flex-1 flex flex-col overflow-hidden bg-[#0e0e10]">
-                {selectedRevision ? (
-                  <>
-                    <div
-                      className="px-4 py-2 text-xs border-b flex items-center justify-between"
-                      style={{ borderColor: "rgba(255,255,255,0.08)" }}
-                    >
-                      <span className="text-neutral-400">
-                        Preview: <strong className="text-white">{selectedRevision.charCount} characters</strong>
-                      </span>
-                      <span className="text-[11px] text-neutral-500">
-                        {new Date(selectedRevision.timestamp).toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="flex-1 p-4 overflow-y-auto font-sans text-xs text-neutral-200 leading-[1.6] select-text">
-                      <div
-                        dangerouslySetInnerHTML={{
-                          __html: sanitizeNoteHtml(selectedRevision.content) || "<em>Empty</em>",
-                        }}
-                        className="prose prose-invert max-w-none text-xs"
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex items-center justify-center text-xs text-neutral-500">
-                    Select a version to preview
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div
-              className="px-5 py-3 border-t flex items-center justify-between"
-              style={{ borderColor: "rgba(255,255,255,0.08)", background: "#18181b" }}
-            >
-              <span className="text-xs text-neutral-400">
-                Auto-saved snapshots protect your work from accidental undos or wipes.
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowRevisions(false)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-neutral-300 hover:bg-white/10 transition-colors cursor-pointer"
-                >
-                  Close
-                </button>
-                {selectedRevision && (
-                  <button
-                    type="button"
-                    onClick={() => handleRestoreRevision(selectedRevision)}
-                    className="px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
-                    style={{
-                      background: "#f59e0b",
-                      color: "#000000",
-                    }}
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    {t("scratchpad_history_restore")}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <RevisionHistoryModal
+        active={active}
+        handleRestoreRevision={handleRestoreRevision}
+        revisionsList={revisionsList}
+        selectedRevision={selectedRevision}
+        setSelectedRevision={setSelectedRevision}
+        setShowRevisions={setShowRevisions}
+        showRevisions={showRevisions}
+        t={t}
+      />
 
       {/* Accidental Clear / Undo Alert Toast */}
       {clearedAlert && (
@@ -3715,353 +2119,42 @@ className="scratchpad-tab group cursor-pointer"
         </div>
       )}
 
-      {/* Protect / Unprotect modal — portaled to <body> so nothing in the
-          scratchpad tree (overlays, selection rules, drag handlers) can make
-          the confirm field inert. */}
-      {protectModal &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-[90] flex items-center justify-center p-4"
-            style={{ background: "rgba(2,6,23,0.7)", backdropFilter: "blur(4px)" }}
-            onMouseDown={(e) => {
-              if (e.target === e.currentTarget) {
-                setProtectModal(null);
-                setProtectError("");
-              }
-            }}
-          >
-            <div
-              className="w-full max-w-md rounded-2xl p-5 space-y-3"
-              style={{ background: "var(--bg-surface-solid, var(--bg-surface))", border: "1px solid var(--border)", boxShadow: "0 24px 60px rgba(0,0,0,0.45)" }}
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => e.stopPropagation()}
-            >
-              {protectModal.mode === "on" ? (
-                <>
-                  <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: "var(--text)" }}>
-                    🛡️ {t("protect_confirm_title" as any) || "Protect this note?"}
-                  </h3>
-                  <p className="text-xs leading-relaxed" style={{ color: "var(--text-dim)" }}>
-                    {t("protect_confirm_msg" as any) || "A protected note cannot be edited, renamed, deleted, archived, or sent to AI. You can remove protection anytime with your confirmation word."}
-                  </p>
-                  <div className="flex justify-end gap-2 pt-1">
-                    <button
-                      onClick={() => { setProtectModal(null); setProtectError(""); }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium"
-                      style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
-                    >
-                      {t("identify_cancel_btn") || "Cancel"}
-                    </button>
-                    <button
-                      onClick={submitProtect}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold"
-                      style={{ background: "rgba(248,113,113,0.15)", border: "1px solid rgba(248,113,113,0.4)", color: "#f87171" }}
-                    >
-                      🔒 {t("protect_enable" as any) || "Protect note"}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: "var(--text)" }}>
-                    🔓 {t("protect_remove_title" as any) || "Remove protection"}
-                  </h3>
-                  <p className="text-xs leading-relaxed" style={{ color: "var(--text-dim)" }}>
-                    {t("protect_remove_msg" as any) || "Type UNPROTECT (or your master password if the vault is encrypted) to allow edits and deletion again."}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <input
-                      ref={protectInputRef}
-                      autoFocus
-                      type={protectShowInput ? "text" : "password"}
-                      value={protectConfirmInput}
-                      onChange={(e) => { setProtectConfirmInput(e.target.value); setProtectError(""); }}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === "Enter") submitProtect();
-                        if (e.key === "Escape") { setProtectModal(null); setProtectError(""); }
-                      }}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      autoComplete="off"
-                      spellCheck={false}
-                      placeholder="UNPROTECT"
-                      aria-label={t("protect_remove_title" as any) || "Confirmation word or master password"}
-                      className="flex-1 rounded-lg px-3 py-2 text-sm outline-none"
-                      style={{
-                        background: "var(--bg-input)",
-                        border: "1px solid var(--border-glow)",
-                        color: "var(--text)",
-                        fontFamily: "var(--font-mono)",
-                        cursor: "text",
-                        caretColor: "var(--accent-bright)",
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setProtectShowInput((v) => !v)}
-                      className="px-2 py-2 rounded-lg text-xs"
-                      title={protectShowInput ? "Hide" : "Show"}
-                      style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text-muted)" }}
-                    >
-                      {protectShowInput ? "🙈" : "👁"}
-                    </button>
-                  </div>
-                  {protectError && (
-                    <p className="text-xs" style={{ color: "#f87171" }}>{protectError}</p>
-                  )}
-                  <div className="flex justify-end gap-2 pt-1">
-                    <button
-                      onClick={() => { setProtectModal(null); setProtectError(""); }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium"
-                      style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
-                    >
-                      {t("identify_cancel_btn") || "Cancel"}
-                    </button>
-                    <button
-                      onClick={submitProtect}
-                      disabled={!protectConfirmInput.trim()}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-50"
-                      style={{ background: "var(--accent-bg)", border: "1px solid var(--border-glow)", color: "var(--accent-bright)" }}
-                    >
-                      {t("protect_remove_btn" as any) || "Remove protection"}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>,
-          document.body
-        )}
+      <ProtectModal
+        protectConfirmInput={protectConfirmInput}
+        protectError={protectError}
+        protectInputRef={protectInputRef}
+        protectModal={protectModal}
+        protectShowInput={protectShowInput}
+        setProtectConfirmInput={setProtectConfirmInput}
+        setProtectError={setProtectError}
+        setProtectModal={setProtectModal}
+        setProtectShowInput={setProtectShowInput}
+        submitProtect={submitProtect}
+        t={t}
+      />
 
-      {/* Rescue unsaved notes from orphaned revision snapshots. */}
-      {rescueOpen &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
-            onClick={() => setRescueOpen(false)}
-          >
-            <div
-              className="w-full max-w-3xl max-h-[85vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl"
-              style={{ background: "#121214", border: "1px solid rgba(255,255,255,0.12)" }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div
-                className="px-5 py-4 flex items-center justify-between border-b"
-                style={{ borderColor: "rgba(255,255,255,0.08)", background: "#18181b" }}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
-                    <LifeBuoy className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">{t("scratchpad_rescue_title")}</h3>
-                    <p className="text-xs text-neutral-400 max-w-lg">{t("scratchpad_rescue_desc")}</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setRescueOpen(false)}
-                  className="p-1.5 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+      <RescueModal
+        rescueList={rescueList}
+        rescueLoading={rescueLoading}
+        rescueOpen={rescueOpen}
+        rescueQuery={rescueQuery}
+        restoreOrphan={restoreOrphan}
+        setRescueOpen={setRescueOpen}
+        setRescueQuery={setRescueQuery}
+        t={t}
+      />
 
-              {/* Search + list */}
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2" style={{ background: "#0e0e10" }}>
-                <input
-                  type="text"
-                  value={rescueQuery}
-                  onChange={(e) => setRescueQuery(e.target.value)}
-                  placeholder="Search snapshots…"
-                  className="px-3 py-2 rounded-lg text-xs"
-                  style={{ background: "#1e1e22", border: "1px solid rgba(255,255,255,0.12)", color: "var(--text)" }}
-                />
-                {rescueLoading ? (
-                  <div className="flex items-center justify-center gap-2 py-10 text-xs text-neutral-500">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Scanning snapshots…</span>
-                  </div>
-                ) : rescueList.length === 0 ? (
-                  <div className="py-10 text-center text-xs text-neutral-500">{t("scratchpad_rescue_empty")}</div>
-                ) : (
-                  (() => {
-                    const q = rescueQuery.trim().toLowerCase();
-                    const filtered = q
-                      ? rescueList.filter(
-                          (o) =>
-                            String(o.title || "").toLowerCase().includes(q) ||
-                            htmlToPlainText(String(o.lastContent || "")).toLowerCase().includes(q)
-                        )
-                      : rescueList;
-                    if (filtered.length === 0) {
-                      return <div className="py-10 text-center text-xs text-neutral-500">{t("scratchpad_rescue_empty")}</div>;
-                    }
-                    return filtered.map((o) => {
-                      const when = new Date(Number(o.timestamp) || 0);
-                      const dayStr = when.toLocaleDateString([], { month: "short", day: "numeric" });
-                      const timeStr = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-                      const preview = htmlToPlainText(String(o.lastContent || "")).trim().slice(0, 140);
-                      return (
-                        <div
-                          key={o.tabId}
-                          className="p-3 rounded-xl flex flex-col gap-2"
-                          style={{ background: "#17171a", border: "1px solid rgba(255,255,255,0.08)" }}
-                        >
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-bold text-white truncate max-w-[280px]">{o.title || "Note"}</span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-md font-mono" style={{ background: "rgba(255,255,255,0.07)", color: "#a1a1aa" }}>
-                              {dayStr} {timeStr}
-                            </span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-md font-mono" style={{ background: "rgba(99,102,241,0.15)", color: "#a5b4fc" }}>
-                              {o.revisionCount} snapshot{o.revisionCount === 1 ? "" : "s"}
-                            </span>
-                            <div className="flex-1" />
-                            <button
-                              type="button"
-                              onClick={() => { void restoreOrphan(o.tabId, String(o.lastContent || "")); }}
-                              className="px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer"
-                              style={{ background: "rgba(52,211,153,0.18)", color: "#6ee7b7", border: "1px solid rgba(52,211,153,0.4)" }}
-                            >
-                              {t("scratchpad_rescue_restore")}
-                            </button>
-                          </div>
-                          {preview && (
-                            <p className="text-[11px] leading-relaxed text-neutral-400 line-clamp-2" dir="auto">{preview}</p>
-                          )}
-                        </div>
-                      );
-                    });
-                  })()
-                )}
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
-
-      {/* Compare two notes side by side with highlighted differences. */}
-      {compareOpen &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
-            onClick={() => setCompareOpen(false)}
-          >
-            <div
-              className="w-full max-w-6xl max-h-[88vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl"
-              style={{ background: "#121214", border: "1px solid rgba(255,255,255,0.12)" }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div
-                className="px-5 py-4 flex items-center justify-between border-b"
-                style={{ borderColor: "rgba(255,255,255,0.08)", background: "#18181b" }}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-300">
-                    <ArrowLeftRight className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">{t("scratchpad_compare_title")}</h3>
-                    <p className="text-xs text-neutral-400 max-w-xl">{t("scratchpad_compare_desc")}</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setCompareOpen(false)}
-                  className="p-1.5 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Note pickers + change stats */}
-              <div
-                className="px-5 py-3 flex flex-wrap items-center gap-2 border-b"
-                style={{ borderColor: "rgba(255,255,255,0.08)", background: "#141416" }}
-              >
-                <select
-                  value={compareA}
-                  onChange={(e) => setCompareA(e.target.value)}
-                  className="px-2.5 py-1.5 rounded-lg text-xs max-w-[220px] truncate"
-                  style={{ background: "#1e1e22", border: "1px solid rgba(248,113,113,0.35)", color: "#fca5a5" }}
-                >
-                  {tabs.map((x) => (
-                    <option key={x.id} value={x.id}>{x.title}</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => { setCompareA(compareB); setCompareB(compareA); }}
-                  title="Swap sides"
-                  className="p-1.5 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer"
-                >
-                  <ArrowLeftRight className="w-3.5 h-3.5" />
-                </button>
-                <select
-                  value={compareB}
-                  onChange={(e) => setCompareB(e.target.value)}
-                  className="px-2.5 py-1.5 rounded-lg text-xs max-w-[220px] truncate"
-                  style={{ background: "#1e1e22", border: "1px solid rgba(52,211,153,0.35)", color: "#6ee7b7" }}
-                >
-                  {tabs.map((x) => (
-                    <option key={x.id} value={x.id}>{x.title}</option>
-                  ))}
-                </select>
-                <div className="flex-1" />
-                {compareData && (
-                  <div className="flex items-center gap-2 text-[11px] font-semibold font-mono">
-                    <span className="px-2 py-0.5 rounded-md" style={{ background: "rgba(248,113,113,0.15)", color: "#fca5a5" }}>
-                      −{compareData.stats.removed}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-md" style={{ background: "rgba(52,211,153,0.15)", color: "#6ee7b7" }}>
-                      +{compareData.stats.added}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-md" style={{ background: "rgba(255,255,255,0.06)", color: "#a1a1aa" }}>
-                      ={compareData.stats.unchanged}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Diff body */}
-              <div className="flex-1 overflow-auto" style={{ background: "#0e0e10" }}>
-                {!compareData ? (
-                  <div className="h-full flex items-center justify-center p-8 text-center text-xs text-neutral-500">
-                    {t("scratchpad_compare_pick_two")}
-                  </div>
-                ) : compareData.stats.added === 0 && compareData.stats.removed === 0 ? (
-                  <div className="h-full flex items-center justify-center p-8">
-                    <div
-                      className="px-4 py-3 rounded-xl text-xs font-semibold"
-                      style={{ background: "rgba(52,211,153,0.12)", color: "#6ee7b7", border: "1px solid rgba(52,211,153,0.3)" }}
-                    >
-                      {t("scratchpad_compare_identical")}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="min-w-0">
-                    {compareData.rows.map((row, i) => (
-                      <div
-                        key={i}
-                        className="grid grid-cols-2"
-                        style={{ borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.04)" }}
-                      >
-                        <CompareCell side={row.left} variant="left" dir={compareData.dirA} />
-                        <CompareCell side={row.right} variant="right" dir={compareData.dirB} />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
+      <CompareModal
+        compareA={compareA}
+        compareB={compareB}
+        compareData={compareData}
+        compareOpen={compareOpen}
+        setCompareA={setCompareA}
+        setCompareB={setCompareB}
+        setCompareOpen={setCompareOpen}
+        t={t}
+        tabs={tabs}
+      />
     </div>
   );
 };
