@@ -787,6 +787,29 @@ function startBackendServer() {
     return;
   }
 
+  // dist/ is unpacked (outside asar integrity), so verify it against the
+  // manifest packed inside app.asar before require()-ing any of it. Dev runs
+  // (unpackaged) rebuild dist/ freely and skip this.
+  if (app.isPackaged) {
+    const { verifyDist, MANIFEST_NAME } = require("./shared/verify-dist.cjs");
+    const check = verifyDist(distDir, path.join(__dirname, MANIFEST_NAME));
+    if (!check.ok) {
+      const msg =
+        "The application files failed their integrity check (" +
+        check.reason +
+        "):\n\n" +
+        check.problems.slice(0, 10).join("\n") +
+        "\n\nThe installation is incomplete or has been modified. Reinstall IndexArc from a trusted download.";
+      console.error("[embedded-server] " + msg);
+      try {
+        dialog.showErrorBox("IndexArc — build incomplete", msg);
+      } catch {}
+      app.exit(1);
+      return;
+    }
+    console.log(`[embedded-server] dist integrity OK (${check.checked} files)`);
+  }
+
   // Ensure portable folders exist next to exe / project
   for (const sub of ["data", "config", "logs", "tmp"]) {
     const d = path.join(portableRoot, sub);

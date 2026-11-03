@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-manifest.json
 dist-desktop/
 dist-desktop-release/
 dist-desktop-out/

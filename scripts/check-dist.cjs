@@ -6,11 +6,21 @@ const fs = require("fs");
 const path = require("path");
 
 // pdf.worker.mjs: pdf.js loads it from beside server.cjs (PDF folder scans).
-const required = ["dist/index.html", "dist/server.cjs", "dist/pdf.worker.mjs"];
+// dist-manifest.json: sha256 of every dist file, packed inside app.asar and
+// checked by electron-main.cjs before the server bundle loads.
+const { verifyDist } = require("../shared/verify-dist.cjs");
+const required = ["dist/index.html", "dist/server.cjs", "dist/pdf.worker.mjs", "dist-manifest.json"];
 let ok = true;
 for (const f of required) {
   if (!fs.existsSync(path.join(process.cwd(), f))) {
     console.error(`[build-check] MISSING ${f}`);
+    ok = false;
+  }
+}
+if (ok) {
+  const res = verifyDist(path.join(process.cwd(), "dist"), path.join(process.cwd(), "dist-manifest.json"));
+  if (!res.ok) {
+    console.error(`[build-check] ${res.reason}:\n  ${res.problems.join("\n  ")}`);
     ok = false;
   }
 }
@@ -20,4 +30,4 @@ if (!ok) {
   );
   process.exit(1);
 }
-console.log("[build-check] dist OK (index.html + server.cjs + pdf.worker.mjs present)");
+console.log("[build-check] dist OK (index.html + server.cjs + pdf.worker.mjs present, manifest matches)");
