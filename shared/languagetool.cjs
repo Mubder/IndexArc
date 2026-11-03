@@ -8,7 +8,25 @@ const fs = require("fs");
 const path = require("path");
 
 const LT_JAR_NAME = "languagetool.jar";
-const LT_PORT = 8081;
+
+/** A free loopback port, chosen by the OS. A fixed port (8081) meant any
+ *  process already listening there received note text as "LanguageTool". */
+function freeLoopbackPort() {
+  return new Promise((resolve, reject) => {
+    const srv = require("net").createServer();
+    srv.unref();
+    srv.on("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+/** True only for a real LanguageTool /v2/check answer. */
+function looksLikeLanguageTool(res) {
+  return !!res && Array.isArray(res.matches) && /languagetool/i.test(String(res.software && res.software.name));
+}
 const LT_PUBLIC_API = "https://languagetool.org/api/v2";
 
 // EGRESS GATE (audit H2): the public LanguageTool API posts note words to
@@ -123,13 +141,21 @@ class LanguageToolService {
       return false;
     }
 
+    let port;
+    try {
+      port = await freeLoopbackPort();
+    } catch {
+      console.log("[langtool] No free loopback port");
+      return false;
+    }
+
     return new Promise((resolve) => {
       try {
+        // No --allow-origin: only this process talks to it, never a browser.
         this.serverProcess = spawn(javaPath, [
           "-jar", jarPath,
           "--server",
-          "--port", String(LT_PORT),
-          "--allow-origin", "*",
+          "--port", String(port),
         ], {
           detached: false,
           stdio: ["ignore", "ignore", "ignore"],
@@ -162,17 +188,22 @@ class LanguageToolService {
             this.localUrl = null;
             this.mode = "none";
             resolve(false);
+            return; // don't probe once we've given up
           }
           try {
-            await this._httpRequest({
-              hostname: "localhost",
-              port: LT_PORT,
+            const child = this.serverProcess;
+            const probe = await this._httpRequest({
+              hostname: "127.0.0.1",
+              port,
               path: "/v2/check",
               method: "POST",
               headers: { "Content-Type": "application/json" },
             }, JSON.stringify({ text: "test", language: "en-US" }));
+            // Handshake: our child must still be running and the answer
+            // must come from LanguageTool — not whatever grabbed the port.
+            if (!child || child.exitCode !== null || child !== this.serverProcess || !looksLikeLanguageTool(probe)) return;
             clearInterval(checkInterval);
-            this.localUrl = `http://localhost:${LT_PORT}`;
+            this.localUrl = `http://127.0.0.1:${port}`;
             this.mode = "local";
             console.log(`[langtool] Local server started at ${this.localUrl}`);
             resolve(true);
@@ -257,6 +288,7 @@ class LanguageToolService {
   async _post(url, body) {
     const urlObj = new URL(url);
     return this._httpRequest({
+      protocol: urlObj.protocol, // https for the public API (was always plain http)
       hostname: urlObj.hostname,
       port: urlObj.port || (urlObj.protocol === "https:" ? 443 : 80),
       path: urlObj.pathname + urlObj.search,

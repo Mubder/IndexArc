@@ -65,11 +65,23 @@ export function settingsRoutes(ctx: RouteContext) {
       "enable_ai_proofreader",
       "auto_lock_minutes",
       "lock_on_minimize",
+      "clipboard_clear_seconds",
       "ai_cloud_consent",
       "languagetool_enabled",
       "llm_provider_override",
       "embed_provider_override",
     ];
+    // While locked only cosmetic fields may change (lock screen language and
+    // font size). Anything else — consent, endpoints, providers, keys — could
+    // otherwise be re-pointed by any token-holder before the user unlocks,
+    // and the next paste would go wherever it says (R4 route-matrix finding).
+    const LOCKED_OK = new Set(["ui_language", "font_size_en", "font_size_ar"]);
+    if (store.isLocked()) {
+      const blocked = Object.keys(body).filter((k) => (allowed as string[]).includes(k) && !LOCKED_OK.has(k));
+      if (blocked.length) {
+        return res.status(423).json({ error: `Vault is locked — unlock to change: ${blocked.join(", ")}` });
+      }
+    }
     const patch: Record<string, unknown> = {};
     for (const k of allowed) {
       if (body[k] === undefined) continue;
@@ -82,6 +94,13 @@ export function settingsRoutes(ctx: RouteContext) {
     // Egress flags are strictly boolean — never trust whatever shape arrives.
     for (const k of ["ai_cloud_consent", "languagetool_enabled", "enable_live_spellcheck", "enable_ai_proofreader", "lock_on_minimize"] as const) {
       if (patch[k] !== undefined) patch[k] = Boolean(patch[k]);
+    }
+    if (patch.clipboard_clear_seconds !== undefined) {
+      const n = Number(patch.clipboard_clear_seconds);
+      if (!Number.isFinite(n) || n < 0 || n > 600) {
+        return res.status(400).json({ error: "clipboard_clear_seconds must be 0-600" });
+      }
+      patch.clipboard_clear_seconds = Math.round(n);
     }
     if (patch.auto_lock_minutes !== undefined) {
       const n = Number(patch.auto_lock_minutes);

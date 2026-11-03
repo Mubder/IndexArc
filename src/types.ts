@@ -139,6 +139,7 @@ export interface Settings {
   ai_cloud_consent?: boolean;
   languagetool_enabled?: boolean;
   auto_lock_minutes?: number;
+  clipboard_clear_seconds?: number;
   lock_on_minimize?: boolean;
   // Write-only key fields: GET /api/settings never returns key material — it
   // returns these booleans instead. Key inputs in the UI keep drafts locally

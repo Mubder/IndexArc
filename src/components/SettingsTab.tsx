@@ -370,6 +370,19 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           />
           <span className="text-xs" style={{ color: "var(--text)" }}>{t("autolock_minimize_label")}</span>
         </label>
+        <label className="block text-xs space-y-1">
+          <span style={{ color: "var(--text-dim)" }}>{t("clipboard_clear_label")}</span>
+          <input
+            type="number"
+            min={0}
+            max={600}
+            value={settings.clipboard_clear_seconds ?? 45}
+            onChange={(e) => onPatchSettings({ clipboard_clear_seconds: Math.max(0, Math.min(600, Number(e.target.value) || 0)) })}
+            className="w-28 rounded-lg px-2 py-1.5 text-sm"
+            style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
+          />
+          <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{t("clipboard_clear_desc")}</p>
+        </label>
       </div>
 
       {/* Egress consent — audit H2: cloud AI and the public LanguageTool API

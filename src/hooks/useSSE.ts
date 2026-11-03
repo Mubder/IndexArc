@@ -13,23 +13,26 @@ export function useSSE(onMessage: (msg: SSEMessage) => void) {
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
+  // One flag for the hook's lifetime: each reconnect used to get its own
+  // `cancelled`, which unmount never set — a reconnect mid-ticket-fetch then
+  // opened an EventSource nobody would ever close.
+  const unmountedRef = useRef(false);
 
   const connect = useCallback(() => {
     if (sourceRef.current) {
       sourceRef.current.close();
     }
 
-    let cancelled = false;
-
     // The SSE endpoint is authenticated with a one-time ticket (EventSource
     // cannot send headers). Retry until the server is up / token is available.
     (async () => {
       const ticket = await fetchSseTicket();
-      if (cancelled) return;
+      if (unmountedRef.current) return;
       if (!ticket) {
         reconnectRef.current = setTimeout(connect, 3000);
         return;
       }
+      if (unmountedRef.current) return;
       const es = new EventSource(`/api/events?ticket=${encodeURIComponent(ticket)}`);
       sourceRef.current = es;
 
@@ -53,19 +56,16 @@ export function useSSE(onMessage: (msg: SSEMessage) => void) {
       es.onerror = () => {
         es.close();
         sourceRef.current = null;
-        if (!cancelled) reconnectRef.current = setTimeout(connect, 3000);
+        if (!unmountedRef.current) reconnectRef.current = setTimeout(connect, 3000);
       };
     })();
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   useEffect(() => {
-    const cancel = connect();
+    unmountedRef.current = false;
+    connect();
     return () => {
-      cancel?.();
+      unmountedRef.current = true;
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
       sourceRef.current?.close();
     };

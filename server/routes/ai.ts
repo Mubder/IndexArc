@@ -183,6 +183,9 @@ export function aiRoutes(ctx: RouteContext) {
   // — `/status` already returns `ollama_models` and nothing called this.
 
   r.post("/ollama/ensure", wrapAsync(async (_req, res) => {
+    // Multi-GB downloads are not something a token-holder may start before
+    // the user has even unlocked (R4 route-matrix finding).
+    if (store.isLocked()) return res.status(423).json({ error: "Vault is locked" });
     const s = store.getSettings();
     const ollama = await checkOllama(s);
     if (!ollama.online) return res.status(503).json({ error: "Ollama is not running" });

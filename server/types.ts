@@ -85,6 +85,8 @@ export interface AppSettings {
   auto_lock_minutes?: number;
   /** Lock when the app window is minimized/hidden. */
   lock_on_minimize?: boolean;
+  /** Seconds before a copied secret is wiped from the clipboard (0 = never). */
+  clipboard_clear_seconds?: number;
   enable_ai_proofreader?: boolean;
   /**
    * EGRESS CONSENT (audit H2): cloud AI providers (Gemini/OpenAI/Groq/
@@ -128,6 +130,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enable_live_spellcheck: true,
   auto_lock_minutes: 5,
   lock_on_minimize: false,
+  clipboard_clear_seconds: 45,
   enable_ai_proofreader: true,
   ai_cloud_consent: false,
   languagetool_enabled: false,

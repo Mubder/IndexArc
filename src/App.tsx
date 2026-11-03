@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { copyTextToClipboard } from "./lib/clipboard";
+import { copyTextToClipboard, setSecretClipboardClearSeconds } from "./lib/clipboard";
 import {
   Layers,
   Search,
@@ -497,6 +497,9 @@ export default function App() {
   // Lock-on-minimize: when the window is hidden and the setting is on, lock.
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  useEffect(() => {
+    setSecretClipboardClearSeconds(settings?.clipboard_clear_seconds);
+  }, [settings?.clipboard_clear_seconds]);
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === "hidden" && settingsRef.current?.lock_on_minimize) {

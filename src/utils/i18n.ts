@@ -182,6 +182,8 @@ export interface TranslationDict {
   scratchpad_close_failed: string;
   autolock_desc: string;
   autolock_minimize_label: string;
+  clipboard_clear_label: string;
+  clipboard_clear_desc: string;
   autolock_section_title: string;
 
   candidates_title: string;
@@ -579,6 +581,8 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     autolock_minutes_label: "Lock after inactivity (minutes, 0 = off)",
     autolock_desc: "Locks the vault automatically after the chosen number of minutes without activity. Requires vault encryption.",
     autolock_minimize_label: "Lock when the window is minimized",
+    clipboard_clear_label: "Clear copied secrets from the clipboard after (seconds)",
+    clipboard_clear_desc: "Only cleared if the clipboard still holds the copied value. 0 = never.",
 
     candidates_title: "Extraction Candidates",
     save_selected_btn: "Save Selected to Vault",
@@ -973,6 +977,8 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     autolock_minutes_label: "القفل بعد فترة عدم النشاط (بالدقائق، 0 = إيقاف)",
     autolock_desc: "يقفل الخزنة تلقائيًا بعد عدد الدقائق المحدد دون نشاط. يتطلب تشفير الخزنة.",
     autolock_minimize_label: "القفل عند تصغير النافذة",
+    clipboard_clear_label: "مسح الأسرار المنسوخة من الحافظة بعد (ثوانٍ)",
+    clipboard_clear_desc: "تُمسح فقط إذا كانت الحافظة لا تزال تحتوي على القيمة المنسوخة. 0 = أبداً.",
 
     candidates_title: "المرشحون المستخرجون",
     save_selected_btn: "حفظ العناصر المحددة في الخزنة",

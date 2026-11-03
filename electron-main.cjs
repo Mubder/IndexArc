@@ -447,23 +447,38 @@ function downloadFile(url, dest, maxBytes = 2 * 1024 * 1024 * 1024) {
 // it: status must be Valid and the signer must be Ollama. Executing
 // unverifiable code downloaded over the network is the one path in this app
 // that turns a network attacker into code execution — it stays gated.
-function verifyAuthenticode(file, expectedSubjectPart) {
+function verifyAuthenticode(file, expectedOrg) {
   const safePath = file.replace(/'/g, "''");
+  // Report status + subject as JSON and decide here: the old
+  // `-notlike '*Ollama*'` accepted ANY valid cert whose subject merely
+  // contained the word (e.g. "CN=Not Ollama Ltd").
   const script =
     `$sig = Get-AuthenticodeSignature -FilePath '${safePath}'; ` +
-    `if ($sig.Status -ne 'Valid') { exit 2 }; ` +
-    `if ($sig.SignerCertificate.Subject -notlike '*${expectedSubjectPart}*') { exit 3 }; ` +
-    `exit 0`;
+    `@{ status = [string]$sig.Status; subject = [string]$sig.SignerCertificate.Subject } | ConvertTo-Json -Compress`;
   try {
-    execFileSync(
+    const out = execFileSync(
       "powershell.exe",
       ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-      { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }
+      { windowsHide: true, stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" }
     );
-    return true;
+    const { status, subject } = JSON.parse(out);
+    return status === "Valid" && signerMatches(subject, expectedOrg);
   } catch {
     return false;
   }
+}
+
+/** CN and O of an X.500 subject must both be exactly `org` (an optional Inc./LLC suffix allowed). */
+function signerMatches(subject, org) {
+  if (typeof subject !== "string") return false;
+  const rdn = {};
+  for (const part of subject.match(/(?:[^,"]|"[^"]*")+/g) || []) {
+    const i = part.indexOf("=");
+    if (i < 0) continue;
+    rdn[part.slice(0, i).trim().toUpperCase()] = part.slice(i + 1).trim().replace(/^"|"$/g, "");
+  }
+  const ok = (v) => typeof v === "string" && new RegExp(`^${org}(,? (Inc[.]?|LLC))?$`, "i").test(v);
+  return ok(rdn.CN) && ok(rdn.O);
 }
 
 async function installOllama() {
@@ -494,11 +509,48 @@ async function installOllama() {
   }
 }
 
-ipcMain.handle("check-ollama-installed", async () => {
+// Every IPC handler checks WHO is calling: only the main window's top frame,
+// showing our own local server, may reach the bridge (get-api-token hands out
+// the vault pairing token). A subframe or any other webContents is refused.
+function isAppUrl(url) {
+  try {
+    const u = new URL(url);
+    return (
+      u.protocol === "http:" &&
+      (u.hostname === "127.0.0.1" || u.hostname === "localhost") &&
+      u.port === String(Number(process.env.INDEXARC_ACTUAL_PORT) || PORT)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isTrustedSender(e) {
+  try {
+    if (!mainWindow || mainWindow.isDestroyed() || e.sender !== mainWindow.webContents) return false;
+    const frame = e.senderFrame;
+    if (!frame || frame !== e.sender.mainFrame) return false;
+    return isAppUrl(frame.url);
+  } catch {
+    return false;
+  }
+}
+
+function handleTrusted(channel, fn) {
+  ipcMain.handle(channel, (e, ...args) => {
+    if (!isTrustedSender(e)) {
+      console.log(`[security] Refused IPC "${channel}" from an untrusted sender`);
+      return null;
+    }
+    return fn(e, ...args);
+  });
+}
+
+handleTrusted("check-ollama-installed", async () => {
   return !!findOllamaPath();
 });
 
-ipcMain.handle("start-ollama", async () => {
+handleTrusted("start-ollama", async () => {
   try {
     const res = await fetch("http://127.0.0.1:11434/api/tags", {
       signal: AbortSignal.timeout(2000),
@@ -515,11 +567,11 @@ ipcMain.handle("start-ollama", async () => {
   }
 });
 
-ipcMain.handle("install-ollama", async () => {
+handleTrusted("install-ollama", async () => {
   return await installOllama();
 });
 
-ipcMain.handle("open-external", async (_e, url) => {
+handleTrusted("open-external", async (_e, url) => {
   try {
     if (typeof url !== "string") return false;
     const parsed = new URL(url);
@@ -536,7 +588,7 @@ ipcMain.handle("open-external", async (_e, url) => {
 // (server/auth.ts). The renderer fetches it once through this bridge and
 // presents it as the X-IndexArc-Token header on every /api call — a plain
 // web page can never obtain it, which is what blocks rebinding/CSRF.
-ipcMain.handle("get-api-token", () => process.env.INDEXARC_API_TOKEN || null);
+handleTrusted("get-api-token", () => process.env.INDEXARC_API_TOKEN || null);
 
 // Copy via the OS clipboard in the MAIN process. navigator.clipboard in a
 // packaged Electron window rejects silently on focus changes (the click
@@ -546,7 +598,7 @@ ipcMain.handle("get-api-token", () => process.env.INDEXARC_API_TOKEN || null);
 // — but only if the clipboard still holds exactly what we put there, so a
 // newer copy by the user is never clobbered.
 let clipboardClearTimer = null;
-ipcMain.handle("copy-text", (_e, text, clearAfterMs) => {
+handleTrusted("copy-text", (_e, text, clearAfterMs) => {
   if (typeof text !== "string" || text.length === 0 || text.length > 1024 * 1024) return false;
   try {
     clipboard.writeText(text);
@@ -569,11 +621,11 @@ ipcMain.handle("copy-text", (_e, text, clearAfterMs) => {
 
 // Check a batch of words (English and/or Arabic, mixed-language notes are
 // the whole point) and return the ones that are misspelled.
-ipcMain.handle("spellcheck-words", async (_e, words) => {
+handleTrusted("spellcheck-words", async (_e, words) => {
   return await findMisspelled(words, arSpell, enSpell);
 });
 
-ipcMain.handle("spellcheck-suggest", async (_e, word) => {
+handleTrusted("spellcheck-suggest", async (_e, word) => {
   if (typeof word !== "string" || !word.trim()) return [];
   const w = word.trim();
   if (isArabicToken(w)) {
@@ -582,7 +634,7 @@ ipcMain.handle("spellcheck-suggest", async (_e, word) => {
   return await suggestEnglishWord(w, enSpell, 6);
 });
 
-ipcMain.handle("add-custom-word", async (_e, word) => {
+handleTrusted("add-custom-word", async (_e, word) => {
   if (typeof word === "string" && word.trim()) {
     addCustomWord(word.trim(), getUserDictPath(), arSpell, enSpell);
   }
@@ -863,17 +915,8 @@ function createWindow() {
   // vetoed outright — this is the last line between a web page and the
   // preload bridge.
   mainWindow.webContents.on("will-navigate", (e, url) => {
-    try {
-      const u = new URL(url);
-      const ok =
-        u.protocol === "http:" &&
-        (u.hostname === "127.0.0.1" || u.hostname === "localhost") &&
-        u.port === String(Number(process.env.INDEXARC_ACTUAL_PORT) || PORT);
-      if (!ok) {
-        console.log(`[security] Blocked navigation to ${url}`);
-        e.preventDefault();
-      }
-    } catch {
+    if (!isAppUrl(url)) {
+      console.log(`[security] Blocked navigation to ${url}`);
       e.preventDefault();
     }
   });
@@ -884,6 +927,9 @@ function createWindow() {
     mainWindow.webContents.session.setPermissionRequestHandler(
       (_webContents, _permission, callback) => callback(false)
     );
+    // Synchronous permission CHECKS (navigator.permissions.query, some
+    // device APIs) bypass the request handler — deny those too.
+    mainWindow.webContents.session.setPermissionCheckHandler(() => false);
   } catch (_) {
     /* permission handler is best-effort */
   }
@@ -1044,7 +1090,7 @@ function createWindow() {
   createTray();
 }
 
-ipcMain.handle("select-folder", async () => {
+handleTrusted("select-folder", async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ["openDirectory"],
     title: "Select Folder",

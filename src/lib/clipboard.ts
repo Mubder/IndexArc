@@ -10,10 +10,18 @@
 //   3. hidden-textarea + execCommand (last resort, synchronous)
 // Returns whether ANY path actually succeeded — callers must surface failure.
 //
-// `sensitive` (secret values): the clipboard is cleared after
-// SECRET_CLIPBOARD_CLEAR_MS if it still holds the copied value — standard
-// password-manager hygiene so a token doesn't sit on the clipboard forever.
+// `sensitive` (secret values): the clipboard is cleared after the configured
+// delay (Settings → clipboard_clear_seconds, default 45 s) if it still holds
+// the copied value — password-manager hygiene so a token doesn't sit on the
+// clipboard forever.
 export const SECRET_CLIPBOARD_CLEAR_MS = 45_000;
+let secretClearMs = SECRET_CLIPBOARD_CLEAR_MS;
+
+/** Called whenever settings load/change; 0 disables clearing. */
+export function setSecretClipboardClearSeconds(seconds: number | undefined): void {
+  const n = Number(seconds);
+  secretClearMs = Number.isFinite(n) && n >= 0 ? Math.min(600, n) * 1000 : SECRET_CLIPBOARD_CLEAR_MS;
+}
 
 export async function copyTextToClipboard(
   text: string,
@@ -21,7 +29,7 @@ export async function copyTextToClipboard(
 ): Promise<boolean> {
   const value = String(text ?? "");
   if (!value) return false;
-  const clearAfterMs = opts.sensitive ? SECRET_CLIPBOARD_CLEAR_MS : 0;
+  const clearAfterMs = opts.sensitive ? secretClearMs : 0;
 
   const bridge = window.electronAPI;
   if (bridge?.copyText) {
