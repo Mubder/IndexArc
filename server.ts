@@ -34,12 +34,44 @@ try {
 } catch {
   /* best-effort */
 }
-// Electron's will-quit calls this (the server runs inside the main process)
-// so a pending debounced emergency snapshot is flushed to the machine-level
-// locations before the process dies — e.g. when the user quits to run a
-// reinstall that would wipe the install folder.
-(globalThis as any).__indexarcFlushEmergency = () => store.flushEmergencySnapshot();
 const watchers = new FolderWatcherManager(store, () => store.getSettings());
+
+// Under Electron the server runs in a utilityProcess and talks to the shell
+// over parentPort; standalone (`node dist/server.cjs`, tsx) it is undefined.
+const parentPort: { postMessage(m: unknown): void; on(ev: "message", cb: (e: { data: any }) => void): void } | undefined =
+  (process as any).parentPort;
+
+let shuttingDown = false;
+function shutdown(code: number) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  // Flush a pending debounced emergency snapshot to the machine-level
+  // locations — the user may be quitting to run a reinstall that wipes the
+  // install folder.
+  try {
+    store.flushEmergencySnapshot();
+  } catch {
+    /* best-effort */
+  }
+  watchers.stopAll();
+  process.exit(code);
+}
+
+parentPort?.on("message", (e) => {
+  if (e?.data?.type === "shutdown") shutdown(0);
+});
+
+// Crash handlers. Messages only — a stack can carry absolute paths and
+// fragments of request data. An uncaught exception leaves the process in an
+// unknown state: flush and exit; the shell restarts the server.
+process.on("unhandledRejection", (reason: any) => {
+  addLog("ERROR", `Unhandled rejection: ${reason?.message || String(reason)}`);
+});
+process.on("uncaughtException", (err: any) => {
+  addLog("ERROR", `Uncaught exception: ${err?.message || String(err)} — restarting server`);
+  console.error("[server] uncaught exception:", err?.message || err);
+  shutdown(1);
+});
 const { app } = createApp({ paths, store, audit, watchers });
 
 addLog("SYSTEM", `IndexArc Vault portable root: ${paths.root}`);
@@ -223,11 +255,11 @@ async function startServer() {
   // Bind with conflict recovery: another app squatting the preferred port
   // must neither crash us nor (worse) let the shell load the squatter's UI.
   // Walk up to +20 ports, then fall back to an OS-assigned ephemeral port.
-  // The ACTUAL port is exported via env for the Electron shell, which also
+  // The ACTUAL port is reported over parentPort to the Electron shell, which also
   // verifies this server's identity before loading it (see /api/ping).
   const listenReady = (server: import("http").Server) => {
     const addr = server.address() as { port: number };
-    process.env.INDEXARC_ACTUAL_PORT = String(addr.port);
+    parentPort?.postMessage({ type: "listening", port: addr.port });
     addLog("SYSTEM", `Vault server listening on http://${HOST}:${addr.port}`);
     console.log(`IndexArc Vault → http://${HOST}:${addr.port}`);
     console.log(`Portable root → ${paths.root}`);

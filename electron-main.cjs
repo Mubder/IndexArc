@@ -129,7 +129,14 @@ function logCrash(tag, e) {
 process.on("uncaughtException", (e) => logCrash("uncaughtException", e));
 process.on("unhandledRejection", (e) => logCrash("unhandledRejection", e));
 
-let serverProcess = null; // reserved: a future out-of-process server mode
+// The vault server runs in an Electron utilityProcess (R3.1): Argon2, file
+// parsing and regex work can no longer freeze the window, and a crash there
+// does not take the shell down. Its secrets are handed over in the child's
+// env only — never this process's env, which Ollama/LanguageTool inherit.
+let serverProcess = null;
+let backendPort = 0; // reported by the server once it is listening
+const apiToken = crypto.randomBytes(32).toString("hex");
+let settingsKey = null;
 let ollamaProcess = null;
 let mainWindow = null;
 let tray = null;
@@ -518,7 +525,7 @@ function isAppUrl(url) {
     return (
       u.protocol === "http:" &&
       (u.hostname === "127.0.0.1" || u.hostname === "localhost") &&
-      u.port === String(Number(process.env.INDEXARC_ACTUAL_PORT) || PORT)
+      u.port === String(backendPort || PORT)
     );
   } catch {
     return false;
@@ -584,11 +591,11 @@ handleTrusted("open-external", async (_e, url) => {
   }
 });
 
-// The embedded vault server exports its pairing token via process.env
+// The shell mints the pairing token and hands it to the server process
 // (server/auth.ts). The renderer fetches it once through this bridge and
 // presents it as the X-IndexArc-Token header on every /api call — a plain
 // web page can never obtain it, which is what blocks rebinding/CSRF.
-handleTrusted("get-api-token", () => process.env.INDEXARC_API_TOKEN || null);
+handleTrusted("get-api-token", () => apiToken);
 
 // Copy via the OS clipboard in the MAIN process. navigator.clipboard in a
 // packaged Electron window rejects silently on focus changes (the click
@@ -751,7 +758,7 @@ function initSettingsSecretsKey(root) {
       fs.mkdirSync(path.join(root, "config"), { recursive: true });
       fs.writeFileSync(keyFile, safeStorage.encryptString(key));
     }
-    process.env.INDEXARC_SETTINGS_KEY = key;
+    settingsKey = key;
   } catch (e) {
     logCrash("settings-key", e);
   }
@@ -816,48 +823,124 @@ function startBackendServer() {
     if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
   }
 
-  process.env.PORT = String(PORT);
-  process.env.HOST = "127.0.0.1";
-  process.env.NODE_ENV = "production";
   process.env.INDEXARC_ROOT = portableRoot;
-  process.env.INDEXARC_DIST_DIR = distDir;
-
   console.log(`Portable root: ${portableRoot}`);
   console.log(`Starting vault server: ${serverPath}`);
+  backendLaunch = { serverPath, distDir, portableRoot };
+  spawnBackend(PORT);
+}
 
+let backendLaunch = null;
+let backendStopping = false;
+const backendCrashes = [];
+
+function spawnBackend(preferredPort) {
+  const { utilityProcess } = require("electron");
+  const { serverPath, distDir, portableRoot } = backendLaunch;
+  const env = {
+    ...process.env,
+    PORT: String(preferredPort),
+    HOST: "127.0.0.1",
+    NODE_ENV: "production",
+    INDEXARC_ROOT: portableRoot,
+    INDEXARC_DIST_DIR: distDir,
+    INDEXARC_API_TOKEN: apiToken,
+  };
+  if (settingsKey) env.INDEXARC_SETTINGS_KEY = settingsKey;
+  else delete env.INDEXARC_SETTINGS_KEY;
+
+  let child;
   try {
-    require(serverPath);
-    console.log("[embedded-server] Express vault server embedded cleanly in main process");
+    child = utilityProcess.fork(serverPath, [], {
+      env,
+      serviceName: "IndexArc Vault Server",
+      stdio: "inherit",
+    });
   } catch (err) {
-    // Fail LOUDLY (same doctrine as the missing-bundle check above). The old
-    // fallback forked the server as a child process — but the child's env is
-    // a COPY: INDEXARC_ACTUAL_PORT and the pairing token never propagated
-    // back to this parent, so waitForServerPort timed out after 15s (or the
-    // identity check failed with expected===null) and the app quit anyway.
-    // A broken embed is a broken build — say so instead of hanging.
-    console.error("[embedded-server] Failed to embed vault server:", err);
+    // A broken bundle is a broken build — fail LOUDLY instead of hanging.
+    console.error("[backend] Failed to start vault server:", err);
     try {
       dialog.showErrorBox(
         "IndexArc — server failed to start",
-        "The embedded vault server could not start:\n\n" +
+        "The vault server could not start:\n\n" +
           (err && err.message ? err.message : String(err)) +
           "\n\nThe application will close. Your data on disk is untouched."
       );
     } catch {}
     app.exit(1);
-  }
-}
-
-// The embedded server publishes its ACTUAL bound port via env — it walks off
-// the preferred port when something already squats it, so the shell must
-// never assume 3000.
-function waitForServerPort(window, attempts = 0) {
-  const port = Number(process.env.INDEXARC_ACTUAL_PORT) || 0;
-  if (port) {
-    pollServerAndLoad(`http://127.0.0.1:${port}`, window);
     return;
   }
-  if (attempts > 150) {
+  serverProcess = child;
+
+  child.on("message", (msg) => {
+    if (!msg || typeof msg !== "object") return;
+    if (msg.type === "listening" && Number.isInteger(msg.port)) {
+      const restarted = backendPort !== 0;
+      backendPort = msg.port;
+      console.log(`[backend] vault server listening on ${backendPort} (pid ${child.pid})`);
+      // After a crash restart, reload the window from the new instance.
+      if (restarted && mainWindow && !mainWindow.isDestroyed()) {
+        pollServerAndLoad(`http://127.0.0.1:${backendPort}`, mainWindow);
+      }
+    }
+  });
+
+  child.on("exit", (code) => {
+    if (serverProcess === child) serverProcess = null;
+    if (backendStopping || isQuiting) return;
+    logCrash("backend-exit", new Error(`vault server exited with code ${code}`));
+    // Restart a crashed server, but not in a loop: 3 crashes in a minute
+    // means something is persistently wrong (corrupt file, broken build).
+    const now = Date.now();
+    backendCrashes.push(now);
+    while (backendCrashes.length && now - backendCrashes[0] > 60_000) backendCrashes.shift();
+    if (backendCrashes.length > 3) {
+      try {
+        dialog.showErrorBox(
+          "IndexArc — vault server stopped",
+          "The vault server stopped unexpectedly several times in a row. The application will close. Your data on disk is untouched; details are in logs/crash.log."
+        );
+      } catch {}
+      app.exit(1);
+      return;
+    }
+    spawnBackend(backendPort || PORT);
+  });
+}
+
+// Graceful stop: the server flushes its pending emergency snapshot and stops
+// its folder watchers, then exits. Killed after `timeoutMs` regardless.
+function stopBackend(timeoutMs) {
+  const child = serverProcess;
+  if (!child) return Promise.resolve();
+  backendStopping = true;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch {}
+      resolve();
+    }, timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    try {
+      child.postMessage({ type: "shutdown" });
+    } catch {
+      clearTimeout(timer);
+      try { child.kill(); } catch {}
+      resolve();
+    }
+  });
+}
+
+// The server reports its ACTUAL bound port — it walks off the preferred port
+// when something already squats it, so the shell must never assume 3000.
+function waitForServerPort(window, attempts = 0) {
+  if (backendPort) {
+    pollServerAndLoad(`http://127.0.0.1:${backendPort}`, window);
+    return;
+  }
+  if (attempts > 300) {
     console.error("Backend never reported its listening port.");
     app.quit();
     return;
@@ -866,8 +949,7 @@ function waitForServerPort(window, attempts = 0) {
 }
 
 function expectedServerId() {
-  const t = process.env.INDEXARC_API_TOKEN;
-  return t ? crypto.createHash("sha256").update(t).digest("hex").slice(0, 16) : null;
+  return crypto.createHash("sha256").update(apiToken).digest("hex").slice(0, 16);
 }
 
 function pollServerAndLoad(url, window, attempts = 0) {
@@ -1177,10 +1259,16 @@ function quitWithFlush(e, timeoutMs) {
     e?.preventDefault?.();
   } catch {}
   flushBeforeExitDone = true;
-  requestRendererFlush(timeoutMs).then(() => {
-    isQuiting = true;
-    app.quit();
-  });
+  // Renderer first (its last edits POST to the server), then the server
+  // flushes its pending emergency snapshot and exits. The vault may live in
+  // the install folder, which the next reinstall's uninstaller deletes — this
+  // keeps the machine-level copy (%APPDATA%) current.
+  requestRendererFlush(timeoutMs)
+    .then(() => stopBackend(timeoutMs))
+    .then(() => {
+      isQuiting = true;
+      app.quit();
+    });
 }
 
 app.on("before-quit", (e) => {
@@ -1199,15 +1287,9 @@ app.on("activate", () => {
 });
 
 app.on("will-quit", () => {
-  // Flush any pending emergency snapshot before the process dies. The vault
-  // may live in the install folder, which the next reinstall's uninstaller
-  // deletes — this keeps the machine-level copy (%APPDATA%) current so a
-  // restore never loses the last few minutes of changes.
-  try {
-    if (typeof globalThis.__indexarcFlushEmergency === "function") {
-      globalThis.__indexarcFlushEmergency();
-    }
-  } catch {}
+  // The graceful stop (and its emergency flush) ran in quitWithFlush; this
+  // only covers paths that skipped it.
+  backendStopping = true;
   if (tray) {
     try {
       tray.destroy();

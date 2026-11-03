@@ -11,7 +11,11 @@ import type { Request, Response, NextFunction } from "express";
 //     rejected outright.
 // The token reaches the renderer through the Electron preload bridge, or via
 // GET /api/auth/bootstrap for plain-browser use (same-origin + loopback only).
-const token = crypto.randomBytes(32).toString("hex");
+// The Electron shell mints the token and passes it in this process's env (the
+// server runs in a utilityProcess); a standalone `node dist/server.cjs` makes
+// its own.
+const envToken = process.env.INDEXARC_API_TOKEN;
+const token = envToken && /^[0-9a-f]{64}$/.test(envToken) ? envToken : crypto.randomBytes(32).toString("hex");
 
 // Non-reversible proof-of-identity for the readiness probe: the Electron
 // shell computes the same value from the token it holds and refuses to load
@@ -22,8 +26,8 @@ export function serverIdentity(): string {
   return crypto.createHash("sha256").update(token).digest("hex").slice(0, 16);
 }
 
-// Exported for the embedded Electron main process (same Node process) to hand
-// to the renderer through IPC.
+// Kept in env for in-process tests; shared/child-env.cjs strips it from any
+// third-party child this process spawns.
 (process.env as Record<string, string | undefined>).INDEXARC_API_TOKEN = token;
 
 const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost|\[::1\]|::1)(:\d+)?$/i;
