@@ -56,14 +56,14 @@ IndexArc is industrial grade when every statement below is true and checked by C
 **Theme:** close every remaining audit finding that can lose data, leak a secret, or fail open. No new features.
 
 **Status 2026-11-03 (branch `roadmap/r1-data-safety`):** R1.1 611e208 · R1.2 30122ed · R1.3 8876d2a · R1.4 5051e08 · R1.5 206855b — all items below landed with tests, except:
-- *Open (R1.4):* the Gemini SDK calls still use `withTimeout` (the request keeps running after the timeout) and there are no bounded retries. The fetch-based providers already abort via `AbortSignal.timeout`.
+- *Closed after the merge (R1.4):* Gemini SDK calls now go through `callWithRetry` (`server/validate.ts`): each attempt passes an `abortSignal`, so a timed-out request is actually cancelled, and 408/429/5xx/network errors retry with backoff inside one overall deadline (autocomplete: no retry).
 - *Covered elsewhere (R1.4):* process-level crash handlers are registered in `electron-main.cjs`, which hosts the server; a bare `node dist/server.cjs` still has none (dev/headless only).
 - *Also fixed, found by R4:* while locked, `POST /api/settings` accepts only language and font-size fields; `/api/ai/ollama/ensure` returns 423. Ollama probe, embedding fallback and `embed_provider_override` egress bugs fixed. The two quadratic heuristics regexes were replaced.
-- *Still to do for "Exit R1":* the findings table.
+- *Exit R1 met:* see the findings table below. The packaged app (`npm run desktop:pack`) was built from the merged branch and launched against a scratch data root: dist integrity OK, settings key wrapped with safeStorage, `/api/ping` 200, `/api/settings` without the token 401.
 
 ### R1.1 Fail-closed storage
 - **Quarantine only on parse errors**, never on transient I/O (`EBUSY`, `EPERM`, `EACCES` from antivirus/sync tools): retry with backoff, then surface an error. Today a transient read renames `vault.json`, `isLocked()` turns false, and new entries are written in plaintext (`store.ts` `readJsonOrQuarantine`).
-- **Never write plaintext when an encrypted vault ever existed:** persist an `encryption_expected` marker; `writeVault` refuses plaintext while it is set.
+- **Never write plaintext when an encrypted vault ever existed:** persist an `config/encryption-expected.json` marker; plaintext writes refused while it is set.
 - **fsync** temp file and directory before rename in `atomicWrite`; make snapshot and backup writes atomic too.
 - **Restore fails loudly:** `applyEmergencySnapshot` must stop and roll back on the first failed file instead of swallowing errors and returning `true` (mixed-key file sets today).
 - *Accept:* kill-the-process-mid-write test suite (vault, vectors, scratchpad, settings) leaves either old or new state, never a hybrid; transient-EBUSY test keeps the vault locked.
@@ -99,6 +99,42 @@ IndexArc is industrial grade when every statement below is true and checked by C
 - Make the clipboard clear delay a setting (0 = off), default 45 s.
 
 **Exit R1:** every finding in the 2026-11 audit is Fixed or explicitly Accepted (with reason) in a findings table appended to this doc.
+
+### R1 findings table (2026-11-03)
+
+| # | Finding | Status | Where / why |
+|---|---------|--------|-------------|
+| 1.1a | Transient I/O error quarantined `vault.json` and unlocked the store | Fixed | 611e208: retry with backoff on `EBUSY`/`EPERM`/`EACCES`; quarantine only on parse errors |
+| 1.1b | Plaintext writes possible after an encrypted vault existed | Fixed | 611e208: `config/encryption-expected.json` marker; plaintext writes refused |
+| 1.1c | `atomicWrite` without fsync; snapshot/backup writes not atomic | Fixed | 611e208 |
+| 1.1d | Emergency restore swallowed per-file errors and returned `true` | Fixed | 611e208: stops and rolls back on first failure |
+| 1.2a | `setupPassword`/`unlock`/`lock`/`upgradeKdf` raced (file key ≠ memory key) | Fixed | 30122ed: one store mutex |
+| 1.2b | Crash mid-`upgradeKdf` could strand files under the old key | Fixed | 30122ed: staged two-phase commit with resumable marker |
+| 1.2c | Watcher: two files changed together overwrote each other's candidates | Fixed | 30122ed: per-session write queue |
+| 1.3a | Count-based snapshot retention evicted every good snapshot in minutes | Fixed | 8876d2a: time-bucket tiers |
+| 1.3b | `backups/` copy only at startup | Fixed | 8876d2a: daily scheduled backup |
+| 1.3c | Audit `verify()` passed tail truncation and missing generations | Fixed | 8876d2a: anchor compare + generation checks; anchor fsynced |
+| 1.3d | Plaintext API keys in pre-safeStorage emergency snapshots | Fixed | 8876d2a: one-time re-wrap of snapshot settings |
+| 1.4a | Every protected request re-parsed `vault.json` | Fixed | 611e208: cached by the file's mtime and size |
+| 1.4b | Watcher ignored the skip list and followed symlinks | Fixed | 5051e08: `isWatchedPath`, `isRegularFileInside` |
+| 1.4c | Office zip bombs / hung parsers | Fixed | 5051e08: central-directory budget (64 MB, 5000 entries, no ZIP64), 30 s parser timeout |
+| 1.4d | `/api/entries/park` had no item cap | Fixed | 5051e08: 200 |
+| 1.4e | Gemini calls kept running after timeout; no retries | Fixed | `callWithRetry`, after the R2/R4 merge |
+| 1.4f | LanguageTool kept using the public API after consent was revoked | Fixed | 5051e08: consent re-read per request |
+| 1.4g | No process-level crash handlers | Accepted | Handlers live in `electron-main.cjs`, which hosts the server in every shipped build; bare `node dist/server.cjs` is dev/headless only. Revisit with R3.1 process isolation |
+| 1.4h | Protected-note AI guard depended on the client sending `tab_id` | Fixed | 5051e08: always on while locked; server-side text match otherwise |
+| 1.4i | Embedding model change silently returned 0 similarity | Fixed | 5051e08: `embed_model` per vector, background re-index |
+| 1.5a | `useSSE` leaked its reconnect timer on unmount | Fixed | 206855b |
+| 1.5b | IPC handlers trusted any sender; no permission check handler | Fixed | 206855b: `handleTrusted`, `setPermissionCheckHandler` |
+| 1.5c | Ollama installer signer checked with `-like '*Ollama*'` | Fixed | 206855b: exact CN + O match |
+| 1.5d | LanguageTool port could be answered by another process | Fixed | 206855b: free loopback port, live-child handshake |
+| 1.5e | Clipboard clear delay hard-coded | Fixed | 206855b: `clipboard_clear_seconds` (0–600, default 45) |
+| R4-1 | Locked vault accepted any `POST /api/settings` | Fixed | 206855b: language and font sizes only |
+| R4-2 | Ollama probed a remote host without cloud consent | Fixed | 5051e08 |
+| R4-3 | `embedText` fell back to Gemini when the user pinned local | Fixed | 5051e08 |
+| R4-4 | `embed_provider_override` ignored | Fixed | 5051e08 |
+| R4-5 | Two quadratic regexes (`isCommand` split, `stripSectionRule`) | Fixed | 5051e08 |
+| R4-6 | `/api/proofread`, `/api/rewrite`, `/api/ollama/ensure` outside the locked-vault gate | Fixed | eadc85c |
 
 ---
 

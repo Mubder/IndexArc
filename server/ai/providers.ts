@@ -2,7 +2,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import type { AnalyzeCandidate, AppSettings } from "../types.js";
 import { heuristicAnalyze } from "./heuristics.js";
 import { addLog } from "../logs.js";
-import { isHttpUrl, withTimeout } from "../validate.js";
+import { callWithRetry, isHttpUrl } from "../validate.js";
 import { randomUUID } from "crypto";
 
 let lastOllamaCheck: { online: boolean; models: string[] } | null = null;
@@ -344,13 +344,14 @@ async function geminiEmbed(settings: AppSettings, text: string): Promise<number[
   if (!settings.gemini_api_key) return null;
   try {
     const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
-    const res: any = await withTimeout(
-      ai.models.embedContent({
-        model: settings.gemini_embed_model,
-        contents: text.slice(0, 8000),
-      }),
-      60_000,
-      "Gemini embed"
+    const res: any = await callWithRetry(
+      (abortSignal) =>
+        ai.models.embedContent({
+          model: settings.gemini_embed_model,
+          contents: text.slice(0, 8000),
+          config: { abortSignal },
+        }),
+      { timeoutMs: 60_000, label: "Gemini embed" }
     );
     const values =
       res.embedding?.values ||
@@ -764,11 +765,12 @@ export async function analyzePaste(
     } else if (active === "api") {
       addLog("ANALYZE", `Gemini classify via ${settings.gemini_llm_model}`);
       const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
-      const response = await withTimeout(
+      const response = await callWithRetry((abortSignal) =>
         ai.models.generateContent({
         model: settings.gemini_llm_model,
         contents: userPrompt,
         config: {
+          abortSignal,
           systemInstruction: ANALYZE_SYSTEM,
           responseMimeType: "application/json",
           responseSchema: {
@@ -799,8 +801,7 @@ export async function analyzePaste(
           },
         },
         }),
-        120_000,
-        "Gemini analyze"
+        { timeoutMs: 120_000, label: "Gemini analyze" }
       );
       text = response.text || null;
       usedLabel = "gemini+heuristic";
@@ -1140,17 +1141,18 @@ async function geminiGenerateText(
   if (!settings.gemini_api_key) return null;
   try {
     const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
-    const response = await withTimeout(
-      ai.models.generateContent({
-        model: settings.gemini_llm_model,
-        contents: prompt,
-        config: {
-          systemInstruction: system,
-          temperature: 0.3,
-        },
-      }),
-      120_000,
-      "Gemini generateText"
+    const response = await callWithRetry(
+      (abortSignal) =>
+        ai.models.generateContent({
+          model: settings.gemini_llm_model,
+          contents: prompt,
+          config: {
+            abortSignal,
+            systemInstruction: system,
+            temperature: 0.3,
+          },
+        }),
+      { timeoutMs: 120_000, label: "Gemini generateText" }
     );
     return response.text || null;
   } catch (e: any) {
@@ -1303,17 +1305,19 @@ export async function autoComplete(
       }
     } else if (active === "api") {
       const ai = new GoogleGenAI({ apiKey: settings.gemini_api_key });
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: settings.gemini_llm_model,
-          contents: `${AUTO_COMPLETION_SYSTEM}\n\nUser Text:\n${text}`,
-          config: {
-            temperature: 0.2,
-            maxOutputTokens: maxTokens,
-          },
-        }),
-        60_000,
-        "Gemini autocomplete"
+      // Autocomplete is latency-bound: a retry would land after the user typed on.
+      const response = await callWithRetry(
+        (abortSignal) =>
+          ai.models.generateContent({
+            model: settings.gemini_llm_model,
+            contents: `${AUTO_COMPLETION_SYSTEM}\n\nUser Text:\n${text}`,
+            config: {
+              abortSignal,
+              temperature: 0.2,
+              maxOutputTokens: maxTokens,
+            },
+          }),
+        { timeoutMs: 60_000, label: "Gemini autocomplete", retries: 0 }
       );
       raw = response.text || null;
     } else if (active === "openai") {

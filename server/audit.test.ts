@@ -89,8 +89,9 @@ describe("hash-chained audit log", () => {
   // first (so .1 was never written and the previous .2 was destroyed), and
   // verify() seeded prev="" so every post-rotation file reported a FALSE
   // "chain broken" alarm.
-  // Fills past the 5 MiB rotation threshold — genuinely long-running.
-  it("rotates oldest-first, keeps both generations, and continues the chain across them", { timeout: 30_000 }, () => {
+  // A 64 KiB threshold keeps this fast: every append fsyncs the anchor.
+  it("rotates oldest-first, keeps both generations, and continues the chain across them", () => {
+    audit = new AuditLog(paths, 64 * 1024);
     const file = path.join(paths.dataDir, "audit.log");
     // Fill until the 5 MiB threshold triggers at least one rotation.
     let guard = 0;

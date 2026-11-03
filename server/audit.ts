@@ -69,7 +69,8 @@ export class AuditLog {
   private wroteAnything = false;
   private reportedWriteFailure = false;
 
-  constructor(paths: PortablePaths) {
+  // Rotation threshold; tests pass a small value instead of writing 5 MiB.
+  constructor(paths: PortablePaths, private maxBytes = MAX_BYTES) {
     this.file = path.join(paths.dataDir, "audit.log");
     this.anchorFile = path.join(paths.configDir, "audit.anchor.json");
   }
@@ -143,7 +144,7 @@ export class AuditLog {
   private rotateIfNeeded() {
     try {
       if (!fs.existsSync(this.file)) return;
-      if (fs.statSync(this.file).size < MAX_BYTES) return;
+      if (fs.statSync(this.file).size < this.maxBytes) return;
       // Shift OLDEST first: .1 → .2, then current → .1. (The old loop renamed
       // the CURRENT file to .2 first, so the trailing rename to .1 hit ENOENT,
       // .1 was never written, and the previous .2 was destroyed.)
