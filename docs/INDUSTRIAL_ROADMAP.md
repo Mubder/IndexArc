@@ -121,7 +121,7 @@ IndexArc is industrial grade when every statement below is true and checked by C
 | 1.4d | `/api/entries/park` had no item cap | Fixed | 5051e08: 200 |
 | 1.4e | Gemini calls kept running after timeout; no retries | Fixed | `callWithRetry`, after the R2/R4 merge |
 | 1.4f | LanguageTool kept using the public API after consent was revoked | Fixed | 5051e08: consent re-read per request |
-| 1.4g | No process-level crash handlers | Accepted | Handlers live in `electron-main.cjs`, which hosts the server in every shipped build; bare `node dist/server.cjs` is dev/headless only. Revisit with R3.1 process isolation |
+| 1.4g | No process-level crash handlers | Fixed | fd4dfcd (R3.1): the server process has its own handlers; the shell restarts it after an uncaught exception |
 | 1.4h | Protected-note AI guard depended on the client sending `tab_id` | Fixed | 5051e08: always on while locked; server-side text match otherwise |
 | 1.4i | Embedding model change silently returned 0 similarity | Fixed | 5051e08: `embed_model` per vector, background re-index |
 | 1.5a | `useSSE` leaked its reconnect timer on unmount | Fixed | 206855b |
@@ -180,6 +180,10 @@ IndexArc is industrial grade when every statement below is true and checked by C
 ### R3.1 Process isolation (do first — independent of storage)
 - Run the backend in an Electron `utilityProcess` instead of inside the main process: Argon2, parsing and regex work can no longer freeze the window.
 - Document parsing (pdf/docx/xlsx) in a worker with memory and time limits; a hostile file kills the worker, not the app.
+- **Progress (2026-11-03, `roadmap/r1-data-safety`):** both done.
+  - fd4dfcd: the server runs in a `utilityProcess` ("IndexArc Vault Server"). The shell mints the pairing token and holds it and the settings wrap key in module variables; only the server's env gets them. The port arrives over `parentPort`. Quit = renderer flush, then a `shutdown` message (emergency snapshot flush, watchers stopped). A crashed server restarts on the same port and the window reloads; more than 3 crashes a minute closes the app. The server now has its own `unhandledRejection`/`uncaughtException` handlers (closes R1 finding 1.4g). Verified in a packaged build: the window loads from the utility process, and killing it restarts it with the same identity.
+  - Parsing: `server/services/docParse.ts` runs mammoth/pdf.js/exceljs in a `worker_threads` worker (`dist/parse-worker.cjs`, second esbuild entry, in the dist manifest) with a 512 MB heap limit and a hard deadline that terminates the thread. Tests cover the real bundle, a hung parser and a heap blow-up. Source runs (tsx/vitest) without the bundle parse in-process.
+  - **Open:** a PDF scan in an installed build (needs the `@napi-rs/**` unpack rule to resolve from the worker, same as from `server.cjs`).
 
 ### R3.2 Storage engine *(needs an ADR: SQLite + per-record AES-GCM with AAD vs SQLCipher)*
 - Move vault, vectors, notes, revisions and scan sessions into SQLite (WAL mode, real transactions).

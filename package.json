@@ -8,7 +8,7 @@
   "main": "electron-main.cjs",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --external:vite --external:electron --banner:js=\"const __importMetaUrl = require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__importMetaUrl --sourcemap --outfile=dist/server.cjs && node scripts/copy-pdf-worker.cjs && node scripts/write-dist-manifest.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --external:vite --external:electron --banner:js=\"const __importMetaUrl = require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__importMetaUrl --sourcemap --outfile=dist/server.cjs && esbuild server/services/parseWorker.ts --bundle --platform=node --format=cjs --external:vite --external:electron --banner:js=\"const __importMetaUrl = require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__importMetaUrl --sourcemap --outfile=dist/parse-worker.cjs && node scripts/copy-pdf-worker.cjs && node scripts/write-dist-manifest.cjs",
     "start": "node dist/server.cjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true}); try{require('fs').rmSync('dist-desktop',{recursive:true,force:true})}catch(e){}\"",
     "lint": "tsc --noEmit && tsc -p tsconfig.electron.json",

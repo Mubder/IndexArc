@@ -13,7 +13,9 @@ import type {
 import { heuristicAnalyze } from "../ai/heuristics.js";
 import { analyzePaste } from "../ai/providers.js";
 import { addLog } from "../logs.js";
-import * as mammoth from "mammoth";
+import { parseDocument, type DocKind } from "./docParse.js";
+// Re-exported for existing callers and tests.
+export { withTimeout, PARSER_TIMEOUT_MS } from "./docParse.js";
 
 const IGNORE_DIRS = new Set([
   "node_modules",
@@ -170,8 +172,6 @@ export function isIgnoredDirName(name: string): boolean {
 // inflate to gigabytes inside mammoth/exceljs, which buffer it all in memory.
 export const MAX_ZIP_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
 const MAX_ZIP_ENTRIES = 5000;
-// A hostile document can also keep a parser busy forever.
-export const PARSER_TIMEOUT_MS = 30_000;
 
 /**
  * Sums the declared uncompressed sizes from a zip's central directory.
@@ -208,16 +208,6 @@ export function zipBudgetProblem(buf: Buffer): string | null {
   return null;
 }
 
-/** Rejects when `work` takes longer than `ms`; the caller reports a skip. */
-export function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
-    timer.unref?.();
-  });
-  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
-}
-
 /**
  * Extract searchable text from a file. Handles binary document formats
  * (.docx/.pdf/.xlsx) and JSON-Lines (.jsonl/.ndjson); falls back to the
@@ -247,78 +237,24 @@ export async function extractText(
     return { ok: true, text: out };
   }
 
-  // Microsoft Word (.docx)
-  if (ext === ".docx") {
+  // Binary documents: size and zip-budget checks here, the parse itself in
+  // an isolated worker (docParse.ts).
+  if (ext === ".docx" || ext === ".pdf" || ext === ".xlsx") {
+    const kind = ext as DocKind;
+    const label = kind.slice(1).toUpperCase();
     try {
       const stat = await fs.promises.stat(filePath);
       if (stat.size === 0) return { ok: false, reason: "Empty file" };
       if (stat.size > MAX_DOC_BYTES)
         return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
       const buf = await fs.promises.readFile(filePath);
-      const zipProblem = zipBudgetProblem(buf);
-      if (zipProblem) return { ok: false, reason: zipProblem };
-      const res = await withTimeout(mammoth.extractRawText({ buffer: buf }), PARSER_TIMEOUT_MS, "DOCX parse");
-      const text = (res.value || "").trim();
-      return text ? { ok: true, text } : { ok: false, reason: "No extractable text" };
-    } catch (e: any) {
-      return { ok: false, reason: `DOCX read failed: ${e.message}` };
-    }
-  }
-
-  // PDF
-  if (ext === ".pdf") {
-    try {
-      const stat = await fs.promises.stat(filePath);
-      if (stat.size === 0) return { ok: false, reason: "Empty file" };
-      if (stat.size > MAX_DOC_BYTES)
-        return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
-      const buf = await fs.promises.readFile(filePath);
-      // pdf-parse v2 exports a class (the v1 function call threw for every
-      // PDF — a stale local type stub hid it from the compiler).
-      const { PDFParse } = await import("pdf-parse");
-      const parser = new PDFParse({ data: new Uint8Array(buf) });
-      let text = "";
-      try {
-        text = ((await withTimeout(parser.getText(), PARSER_TIMEOUT_MS, "PDF parse")).text || "").trim();
-      } finally {
-        await parser.destroy().catch(() => {});
+      if (kind !== ".pdf") {
+        const zipProblem = zipBudgetProblem(buf);
+        if (zipProblem) return { ok: false, reason: zipProblem };
       }
-      return text ? { ok: true, text } : { ok: false, reason: "No extractable text" };
+      return await parseDocument(kind, buf);
     } catch (e: any) {
-      return { ok: false, reason: `PDF read failed: ${e.message}` };
-    }
-  }
-
-  // Excel (.xlsx)
-  if (ext === ".xlsx") {
-    try {
-      const stat = await fs.promises.stat(filePath);
-      if (stat.size === 0) return { ok: false, reason: "Empty file" };
-      if (stat.size > MAX_DOC_BYTES)
-        return { ok: false, reason: `Too large (${Math.round(stat.size / 1024 / 1024)}MB)` };
-      const buf = await fs.promises.readFile(filePath);
-      const zipProblem = zipBudgetProblem(buf);
-      if (zipProblem) return { ok: false, reason: zipProblem };
-      const ExcelJS = (await import("exceljs")).default;
-      const workbook = new ExcelJS.Workbook();
-      await withTimeout(workbook.xlsx.load(buf as any), PARSER_TIMEOUT_MS, "XLSX parse");
-      const parts: string[] = [];
-      workbook.eachSheet((sheet, sheetId) => {
-        parts.push(`## Sheet: ${sheet.name}`);
-        const rows: string[] = [];
-        sheet.eachRow({ includeEmpty: false }, (row) => {
-          const vals: string[] = [];
-          row.eachCell({ includeEmpty: true }, (cell) => {
-            vals.push(String(cell.value ?? ""));
-          });
-          rows.push(vals.join(","));
-        });
-        parts.push(rows.join("\n"));
-      });
-      const text = parts.join("\n").trim();
-      return text ? { ok: true, text } : { ok: false, reason: "No extractable text" };
-    } catch (e: any) {
-      return { ok: false, reason: `XLSX read failed: ${e.message}` };
+      return { ok: false, reason: `${label} read failed: ${e.message}` };
     }
   }
 

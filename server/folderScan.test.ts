@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -167,4 +167,75 @@ describe("scanFileIntoSession — concurrent watcher updates", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+});
+
+// R3.1: binary documents parse in a worker thread with a heap limit and a
+// hard deadline. These exercise the real bundled worker and the two limits.
+describe("parseDocument — isolated worker", () => {
+  let dir = "";
+  let bundle = "";
+
+  beforeAll(async () => {
+    const esbuild = await import("esbuild");
+    const { createRequire } = await import("module");
+    // Inside the repo, like dist/: pdf.js resolves @napi-rs/canvas (its
+    // DOMMatrix polyfill) relative to the bundle's own path.
+    const cache = path.join(process.cwd(), "node_modules", ".cache");
+    fs.mkdirSync(cache, { recursive: true });
+    dir = fs.mkdtempSync(path.join(cache, "indexarc-parseworker-"));
+    bundle = path.join(dir, "parse-worker.cjs");
+    // Same flags as the npm build step.
+    await esbuild.build({
+      entryPoints: [path.join(process.cwd(), "server", "services", "parseWorker.ts")],
+      bundle: true,
+      platform: "node",
+      format: "cjs",
+      external: ["vite", "electron"],
+      banner: { js: "const __importMetaUrl = require('url').pathToFileURL(__filename).href;" },
+      define: { "import.meta.url": "__importMetaUrl" },
+      outfile: bundle,
+      logLevel: "silent",
+    });
+    const req = createRequire(import.meta.url);
+    const pdfWorker = path.join(path.dirname(req.resolve("pdf-parse/worker")), "..", "pdf.worker.mjs");
+    fs.copyFileSync(pdfWorker, path.join(dir, "pdf.worker.mjs"));
+  }, 120_000);
+
+  afterAll(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("extracts PDF text through the bundled worker", async () => {
+    const { parseDocument } = await import("./services/docParse.js");
+    const r = await parseDocument(".pdf", minimalPdf("AWS_KEY AKIAWORKERTEST123"), { workerPath: bundle });
+    expect(r.ok ? "ok" : r.reason).toBe("ok");
+    if (r.ok) expect(r.text).toContain("AKIAWORKERTEST123");
+  });
+
+  it("reports a corrupt document instead of throwing", async () => {
+    const { parseDocument } = await import("./services/docParse.js");
+    const r = await parseDocument(".docx", Buffer.from("not a zip at all"), { workerPath: bundle });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/DOCX read failed/);
+  });
+
+  it("terminates a parser that never finishes", async () => {
+    const { parseDocument } = await import("./services/docParse.js");
+    const hang = path.join(dir, "hang.cjs");
+    fs.writeFileSync(hang, "setInterval(() => {}, 1000);");
+    const t0 = Date.now();
+    const r = await parseDocument(".pdf", Buffer.from("x"), { workerPath: hang, timeoutMs: 300 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/timed out/);
+    expect(Date.now() - t0).toBeLessThan(5_000);
+  });
+
+  it("kills a parser that exceeds its heap limit", async () => {
+    const { parseDocument } = await import("./services/docParse.js");
+    const hog = path.join(dir, "hog.cjs");
+    fs.writeFileSync(hog, "const a = []; for (;;) a.push({ s: 'x'.repeat(1024) + a.length });");
+    const r = await parseDocument(".xlsx", Buffer.from("x"), { workerPath: hog, heapMb: 32, timeoutMs: 60_000 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/memory limit/);
+  }, 90_000);
 });
