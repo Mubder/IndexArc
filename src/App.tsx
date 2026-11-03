@@ -3,21 +3,11 @@ import { copyTextToClipboard, setSecretClipboardClearSeconds } from "./lib/clipb
 import {
   Layers,
   Search,
-  Server,
   Sparkles,
   Settings as SettingsIcon,
   StickyNote,
   Folder,
   KeyRound,
-  ChevronRight,
-  Lock,
-  Sun,
-  Moon,
-  Globe,
-  Menu,
-  Stethoscope,
-  ShieldAlert,
-  X,
 } from "lucide-react";
 
 import {
@@ -27,13 +17,11 @@ import {
   Settings,
   Tab,
   LibraryFilter,
-  ScanCandidate,
   FolderScanSession,
   WatchedFolderRow,
   HealthReport,
 } from "./types";
 
-import { readJson, findDuplicateHits } from "./utils";
 import { getTranslation } from "./utils/i18n";
 import { offerNoteToScratchpad } from "./noteHandoff";
 
@@ -54,10 +42,21 @@ import { HealthModal } from "./components/HealthModal";
 
 // Modals
 import { FsBrowserModal } from "./components/FsBrowserModal";
-import { ClarifyModal } from "./components/ClarifyModal";
-import { ConfirmModal } from "./components/ConfirmModal";
 import { CommandPaletteModal } from "./components/CommandPaletteModal";
 import Starfield from "./components/Starfield";
+import { DialogModals } from "./components/app/DialogModals";
+import { HealthBanners } from "./components/app/HealthBanners";
+import { TopBar } from "./components/app/TopBar";
+import { Sidebar } from "./components/app/Sidebar";
+import { EncryptMigrationBanner } from "./components/app/EncryptMigrationBanner";
+import { useFolderScanActions } from "./components/app/useFolderScanActions";
+import { useSettingsActions } from "./components/app/useSettingsActions";
+import { useEntryActions } from "./components/app/useEntryActions";
+import { useClarify } from "./components/app/useClarify";
+import { usePasteActions } from "./components/app/usePasteActions";
+import { useConfirmDialog } from "./components/app/useConfirmDialog";
+import { useToasts } from "./components/app/useToasts";
+import { useSettingsPatch } from "./components/app/useSettingsPatch";
 
 export default function App() {
   // All valid Tab values (write and read sides must be symmetric — "analyze"
@@ -79,22 +78,16 @@ export default function App() {
   const [attention, setAttention] = useState<VaultEntry[]>([]);
   const [logs, setLogs] = useState<{ time: string; type: string; message: string }[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [toasts, setToasts] = useState<{ id: number; message: string; type: "success" | "error" | "info" }[]>([]);
-  const toastIdRef = useRef(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Encryption-migration banner dismissal is intentionally per-session: an
   // unencrypted vault should be surfaced again on every launch until fixed.
   const [encryptBannerDismissed, setEncryptBannerDismissed] = useState(false);
-  const showToast = useCallback((message: string, type: "success" | "error" | "info" = "info") => {
-    const id = ++toastIdRef.current;
-    setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
-  }, []);
 
   const t = useCallback(
     (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key),
     [settings]
   );
+  const { showToast, toasts } = useToasts();
 
   // paste / analyze
   const [paste, setPaste] = useState("");
@@ -136,42 +129,7 @@ export default function App() {
   const [fsEntries, setFsEntries] = useState<{ name: string; path: string; isDirectory: boolean }[]>([]);
   const [fsLoading, setFsLoading] = useState(false);
   const [fsError, setFsError] = useState("");
-
-  // clarify modal
-  const [clarify, setClarify] = useState<VaultEntry | null>(null);
-  const [clarifyType, setClarifyType] = useState("");
-  const [clarifyName, setClarifyName] = useState("");
-  const [clarifyValue, setClarifyValue] = useState("");
-  const [clarifyFamily, setClarifyFamily] = useState<VaultEntry["family"]>("secret");
-
-  // confirm modal
-  const [confirmState, setConfirmState] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void; onCancel?: () => void; confirmText?: string } | null>(null);
-  const showConfirm = useCallback((title: string, message: string, onConfirm: () => void, confirmText?: string): Promise<void> => {
-    return new Promise<void>((resolve, reject) => {
-      setConfirmState({
-        open: true,
-        title,
-        message,
-        confirmText,
-        onConfirm: async () => {
-          try {
-            await onConfirm();
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-          setConfirmState(null);
-        },
-        onCancel: () => {
-          // Cancelling is not an error: resolve so an uncaught rejection can
-          // never blank the app via the error boundary.
-          resolve();
-          setConfirmState(null);
-        },
-      });
-    });
-  }, []);
-  const closeConfirm = useCallback(() => setConfirmState(null), []);
+  const { closeConfirm, confirmState, showConfirm } = useConfirmDialog();
 
   const [vaultStatus, setVaultStatus] = useState<{ is_locked: boolean; encryption_enabled: boolean; needs_setup?: boolean; migration_recommended?: boolean } | null>(null);
   const [integrityWarnings, setIntegrityWarnings] = useState<string[]>([]);
@@ -294,76 +252,7 @@ export default function App() {
       console.error(e);
     }
   };
-
-  const patchSettings = useCallback((patch: Partial<Settings>) => {
-    settingsDirtyRef.current = true;
-    setSettings((prev) => {
-      const next = prev ? { ...prev, ...patch } : (patch as Settings);
-      if (next) {
-        localStorage.setItem(
-          "indexarc-settings-preset",
-          JSON.stringify({
-            font_size_en: next.font_size_en || 14,
-            font_size_ar: next.font_size_ar || 16,
-            ui_language: next.ui_language || "en",
-          })
-        );
-      }
-      return next;
-    });
-
-    if (patchTimerRef.current) clearTimeout(patchTimerRef.current);
-    patchTimerRef.current = setTimeout(() => {
-      fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      })
-        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-        .then((saved) => {
-          settingsDirtyRef.current = false;
-          if (saved && typeof saved === "object" && (saved as Settings).ai_provider) {
-            // The server masks API keys (writes them as ""). Never let a
-            // masked response wipe locally stored key material — merge
-            // server fields while preserving non-empty local key values.
-            // Without this, every settings save replaced the whole settings
-            // object with a masked copy, and components below the first
-            // edited toggle (e.g. the egress card at the top of SettingsTab)
-            // re-rendered with blanked keys — visually "cut in half."
-            const KEY_FIELDS = [
-              "gemini_api_key",
-              "openai_api_key",
-              "groq_api_key",
-              "openrouter_api_key",
-              "anthropic_api_key",
-              "local_openai_api_key",
-            ] as const;
-            setSettings((prev) => {
-              const merged = { ...prev, ...saved };
-              for (const k of KEY_FIELDS) {
-                if (merged[k] === "" && prev?.[k]) {
-                  merged[k] = prev[k];
-                }
-              }
-              return merged;
-            });
-          }
-        })
-        .catch(() => {
-          settingsDirtyRef.current = false;
-          showToast("Settings change may not have saved / قد لا يكون الحفظ قد تم", "error");
-        });
-    }, 300);
-  }, []);
-
-  // Language toggle routes through patchSettings: pure state update + the
-  // debounced persist path (the old version POSTed inside a setState updater,
-  // which StrictMode double-invokes).
-  const toggleLanguage = useCallback(() => {
-    const current = settings?.ui_language || "en";
-    const next = (current === "en" ? "ar" : "en") as "ar" | "en";
-    patchSettings({ ui_language: next });
-  }, [settings, patchSettings]);
+  const { patchSettings, toggleLanguage } = useSettingsPatch({ patchTimerRef, setSettings, settings, settingsDirtyRef, showToast });
 
   useEffect(() => {
     scanSessionIdRef.current = scanSession?.id ?? null;
@@ -509,125 +398,7 @@ export default function App() {
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
-
-  const handleAnalyze = async () => {
-    if (!paste.trim()) return;
-    setAnalyzing(true);
-    setCandidates([]);
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: paste }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Analyze failed");
-      setPasteId(data.paste_id);
-      setCandidates(data.candidates || []);
-      setProviderUsed(data.provider_used || "");
-      const sel: Record<string, boolean> = {};
-      for (const c of data.candidates || []) sel[c.temp_id] = true;
-      setSelected(sel);
-    } catch (e: any) {
-      showToast(e.message, "error");
-    } finally {
-      setAnalyzing(false);
-      fetchAll();
-    }
-  };
-
-  const updateCandidate = (tempId: string, patch: Partial<AnalyzeCandidate>) => {
-    setCandidates((prev) =>
-      prev.map((c) => {
-        if (c.temp_id !== tempId) return c;
-        const next = { ...c, ...patch };
-        next.needs_type = !String(next.type || "").trim() && (next.family === "secret" || next.family === "unknown");
-        next.needs_name =
-          !String(next.name || "").trim() && (next.family === "secret" || next.family === "unknown");
-        if (next.family === "note" || next.family === "command") {
-          next.needs_type = false;
-          next.needs_name = false;
-        }
-        next.ready = !next.needs_type && !next.needs_name;
-        return next;
-      })
-    );
-  };
-
-  const discardCandidate = (tempId: string) => {
-    setCandidates((prev) => prev.filter((c) => c.temp_id !== tempId));
-    setSelected((prev) => {
-      const n = { ...prev };
-      delete n[tempId];
-      return n;
-    });
-  };
-
-  const handleSaveSelected = async (parkIncomplete: boolean) => {
-    const items = candidates.filter((c) => selected[c.temp_id]);
-    if (!items.length) return;
-    const doSave = async () => {
-      const payload = items.map((c) => ({
-        value: c.value,
-        type: c.type,
-        name: c.name,
-        raw_fragment: c.raw_fragment,
-        labels: c.labels,
-        type_aliases: c.type_aliases,
-        family: c.family,
-      }));
-      const endpoint = parkIncomplete ? "/api/entries/park" : "/api/entries/save";
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paste_id: pasteId, candidates: payload }),
-      });
-      if (res.ok) {
-        setCandidates([]);
-        setPaste("");
-        setPasteId(null);
-        fetchAll();
-        setTab("home");
-      } else {
-        const err = await res.json();
-        showToast(err.error || "Save failed", "error");
-      }
-    };
-    // Pre-save duplicate screen: values already in the vault trigger a
-    // confirm instead of silently doubling entries. Cancelling deselects the
-    // duplicates so a second click saves only the new ones.
-    try {
-      const hits = await findDuplicateHits(items);
-      if (hits.length) {
-        const names = hits.map((h) => `"${h.existing_name}"`).slice(0, 4).join(", ");
-        const more = hits.length > 4 ? ` +${hits.length - 4} more` : "";
-        // showConfirm resolves on BOTH confirm and cancel — track the choice.
-        let confirmed = false;
-        await showConfirm(
-          "Possible duplicates",
-          `${hits.length} of ${items.length} already exist in the vault (${names}${more}). Save anyway?`,
-          async () => {
-            confirmed = true;
-            await doSave();
-          },
-          "Save anyway"
-        ).catch(() => {});
-        if (confirmed) return;
-        // Cancelled: deselect the duplicates, keep the rest selected.
-        const dupIds = new Set(hits.map((h) => items[h.index].temp_id));
-        setSelected((prev) => {
-          const n = { ...prev };
-          for (const id of dupIds) delete n[id];
-          return n;
-        });
-        showToast(`Duplicates deselected — save again for the ${items.length - hits.length} new one(s)`, "info");
-        return;
-      }
-    } catch {
-      /* fail open — duplicates are advisory */
-    }
-    await doSave();
-  };
+  const { discardCandidate, handleAnalyze, handleSaveSelected, updateCandidate } = usePasteActions({ candidates, fetchAll, paste, pasteId, selected, setAnalyzing, setCandidates, setPaste, setPasteId, setProviderUsed, setSelected, setTab, showConfirm, showToast });
 
   const handleAsk = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -660,296 +431,10 @@ export default function App() {
       fetchAll();
     }
   };
-
-  const openClarify = (entry: VaultEntry) => {
-    setClarify(entry);
-    setClarifyType(entry.type === "unidentified" ? "" : entry.type);
-    setClarifyName(entry.name === "unnamed" ? "" : entry.name);
-    setClarifyValue("");
-    setClarifyFamily(entry.family || "secret");
-  };
-
-  const submitClarify = async () => {
-    if (!clarify) return;
-    const secretLike = clarifyFamily === "secret" || clarifyFamily === "unknown";
-    if (secretLike && !clarifyName.trim()) {
-      showToast("Name is required / الاسم مطلوب", "error");
-      return;
-    }
-    const value = clarifyValue.trim() || clarify.value;
-    try {
-      const res = await fetch(`/api/entries/${clarify.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: clarifyType.trim(),
-          name: clarifyName.trim(),
-          value,
-          family: clarifyFamily,
-        }),
-      });
-      if (res.ok) {
-        setClarify(null);
-        fetchAll();
-      } else {
-        // Surface the refusal — a silent no-op left the modal open with no
-        // explanation (locked vault, validation error, network…).
-        const err = await res.json().catch(() => null);
-        showToast(err?.error || "Save failed / فشل الحفظ", "error");
-      }
-    } catch {
-      showToast("Network error / خطأ في الاتصال", "error");
-    }
-  };
-
-  /** PATCH an entry (NoteDetailModal edit path). Returns success. */
-  const saveEntryUpdate = async (id: string, updates: Partial<VaultEntry>): Promise<boolean> => {
-    try {
-      const res = await fetch(`/api/entries/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      });
-      if (res.ok) {
-        fetchAll();
-        return true;
-      }
-      const err = await res.json().catch(() => null);
-      showToast(err?.error || "Save failed / فشل الحفظ", "error");
-      return false;
-    } catch {
-      showToast("Network error / خطأ في الاتصال", "error");
-      return false;
-    }
-  };
-
-  const removeEntriesLocally = useCallback((ids: string[]) => {
-    const idSet = new Set(ids);
-    setEntries((prev) => prev.filter((e) => !idSet.has(e.id)));
-    setAttention((prev) => prev.filter((e) => !idSet.has(e.id)));
-  }, []);
-
-  const deleteEntry = async (id: string) => {
-    showConfirm("Delete Entry", "Delete this entry permanently?", async () => {
-      const res = await fetch(`/api/entries/${id}`, { method: "DELETE" });
-      if (!res.ok && res.status !== 404) {
-        const err = await res.json().catch(() => null);
-        throw new Error(err?.error || `Delete failed (HTTP ${res.status})`);
-      }
-      removeEntriesLocally([id]);
-      await fetchAll();
-    }, "Delete").catch((e) => showToast(e?.message || "Delete failed", "error"));
-  };
-
-  const bulkDeleteEntries = async (ids: string[]) => {
-    if (ids.length === 0) return;
-    return showConfirm(
-      "Delete Entries",
-      `Delete ${ids.length} selected entr${ids.length === 1 ? "y" : "ies"} permanently?`,
-      async () => {
-        // Optimistic update first so the UI reflects the deletion immediately.
-        removeEntriesLocally(ids);
-        await fetch("/api/entries/bulk-delete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids }),
-        });
-        await fetchAll();
-      },
-      "Delete"
-    );
-  };
-
-  const saveSettings = async () => {
-    if (!settings) return;
-    try {
-      const res = await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
-      });
-      if (!res.ok) {
-        // Never claim success on a refused save — the user believes API keys
-        // and model picks persisted when they didn't.
-        const err = await res.json().catch(() => null);
-        throw new Error(err?.error || `Save failed (HTTP ${res.status})`);
-      }
-      const saved = await res.json().catch(() => settings);
-      settingsDirtyRef.current = false;
-      if (saved && typeof saved === "object" && saved.ai_provider) {
-        setSettings(saved as Settings);
-      }
-      // When using local/auto, ensure models exist and warm the LLM into memory
-      if (settings.ai_provider === "local" || settings.ai_provider === "auto") {
-        try {
-          await fetch("/api/ollama/ensure", { method: "POST" });
-        } catch {
-          /* optional */
-        }
-      }
-      fetchAll();
-      showToast("Settings saved · تم الحفظ", "success");
-    } catch (e: any) {
-      showToast(e?.message || "Settings save failed / فشل حفظ الإعدادات", "error");
-    }
-  };
-
-  const warmOllama = async () => {
-    try {
-      showToast("Loading LLM into memory... · جارٍ التحميل", "info");
-      const res = await fetch("/api/ollama/warm", { method: "POST" });
-      const data = await readJson(res);
-      if (!res.ok) throw new Error(data.error || "Warm failed");
-      const parts = [`classify: ${data.model}`];
-      if (data.embed_model) parts.push(`embed: ${data.embed_model}`);
-      showToast(`Models loaded · ${parts.join(" · ")}`, "success");
-      fetchAll();
-    } catch (e: any) {
-      showToast(e.message || "Could not load Ollama LLM", "error");
-    }
-  };
-
-  const loadFsDir = async (dirPath: string) => {
-    setFsLoading(true);
-    setFsError("");
-    try {
-      const q = dirPath ? `?path=${encodeURIComponent(dirPath)}` : "";
-      const res = await fetch(`/api/fs/list${q}`);
-      const data = await readJson(res);
-      if (!res.ok) throw new Error(data.error || "Cannot list folder");
-      setFsPath(data.path || dirPath || "");
-      setFsParent(data.parent ?? null);
-      setFsEntries(data.entries || []);
-    } catch (e: any) {
-      setFsError(e.message || "Failed to list directory");
-      setFsEntries([]);
-    } finally {
-      setFsLoading(false);
-    }
-  };
-
-  const pickFolder = async () => {
-    // Desktop Electron: OS native dialog → absolute path
-    if (window.electronAPI?.selectFolder) {
-      const folder = await window.electronAPI.selectFolder();
-      if (folder) setFolderPath(folder);
-      return;
-    }
-    // Web: browse the machine's disk via the local server (in place, no upload)
-    setFsBrowserOpen(true);
-    await loadFsDir("");
-  };
-
-  const handleFolderScan = async (pathOverride?: string) => {
-    const target = (pathOverride ?? folderPath).trim();
-    if (!target) return;
-    setScanning(true);
-    try {
-      const res = await fetch("/api/folders/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          path: target,
-          watch: folderWatch,
-          use_ai: folderUseAi,
-        }),
-      });
-      const data = await readJson(res);
-      if (!res.ok) throw new Error(data.error || "Scan failed");
-      setFolderPath(target);
-      setScanSession(data);
-      setFsBrowserOpen(false);
-      setTab("folders");
-      fetchAll();
-    } catch (e: any) {
-      showToast(e.message, "error");
-    } finally {
-      setScanning(false);
-    }
-  };
-
-  const patchScanCandidate = async (tempId: string, patch: Partial<ScanCandidate>) => {
-    if (!scanSession) return;
-    // optimistic local update
-    setScanSession((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        candidates: prev.candidates.map((c) => {
-          if (c.temp_id !== tempId) return c;
-          const next = { ...c, ...patch };
-          const secretLike = next.family === "secret" || next.family === "unknown";
-          next.needs_type = secretLike && !String(next.type || "").trim();
-          next.needs_name = secretLike && !String(next.name || "").trim();
-          next.ready = !next.needs_type && !next.needs_name;
-          return next;
-        }),
-      };
-    });
-    await fetch(`/api/folders/sessions/${scanSession.id}/candidates`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ candidates: [{ temp_id: tempId, ...patch }] }),
-    }).then(async (res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    }).catch(() => {
-      // The optimistic UI now disagrees with the server — re-fetch the
-      // session so the review shows what is actually persisted.
-      fetchAll();
-    });
-  };
-
-  const setAllDecisions = async (decision: "save" | "park" | "discard" | "pending") => {
-    if (!scanSession) return;
-    const candidatesPayload = scanSession.candidates.map((c) => ({
-      temp_id: c.temp_id,
-      decision,
-    }));
-    setScanSession({
-      ...scanSession,
-      candidates: scanSession.candidates.map((c) => ({ ...c, decision })),
-    });
-    await fetch(`/api/folders/sessions/${scanSession.id}/candidates`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ candidates: candidatesPayload }),
-    }).then(async (res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    }).catch(() => {
-      fetchAll();
-    });
-  };
-
-  const applyScanSession = async () => {
-    if (!scanSession) return;
-    setApplyingScan(true);
-    try {
-      const res = await fetch(`/api/folders/sessions/${scanSession.id}/apply`, {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Apply failed");
-      showToast(
-        `Saved ${data.saved_count} · Unidentified ${data.parked_count} · Discarded ${data.discarded_count}`, "success"
-      );
-      setScanSession(null);
-      fetchAll();
-      setTab("home");
-    } catch (e: any) {
-      showToast(e.message, "error");
-    } finally {
-      setApplyingScan(false);
-    }
-  };
-
-  const discardScanSession = async () => {
-    if (!scanSession) return;
-    showConfirm("Discard Scan", "Discard this entire scan review? Nothing will be saved.", async () => {
-      await fetch(`/api/folders/sessions/${scanSession.id}/discard`, { method: "POST" });
-      setScanSession(null);
-      fetchAll();
-    }, "Discard").catch((e) => console.error("discard failed:", e?.message || e));
-  };
+  const { clarify, clarifyFamily, clarifyName, clarifyType, clarifyValue, openClarify, setClarify, setClarifyFamily, setClarifyName, setClarifyType, setClarifyValue, submitClarify } = useClarify({ fetchAll, showToast });
+  const { bulkDeleteEntries, deleteEntry, saveEntryUpdate } = useEntryActions({ fetchAll, setAttention, setEntries, showConfirm, showToast });
+  const { saveSettings, warmOllama } = useSettingsActions({ fetchAll, setSettings, settings, settingsDirtyRef, showToast });
+  const { applyScanSession, discardScanSession, handleFolderScan, loadFsDir, patchScanCandidate, pickFolder, setAllDecisions } = useFolderScanActions({ fetchAll, folderPath, folderUseAi, folderWatch, scanSession, setApplyingScan, setFolderPath, setFsBrowserOpen, setFsEntries, setFsError, setFsLoading, setFsParent, setFsPath, setScanSession, setScanning, setTab, showConfirm, showToast });
 
   const nav: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = useMemo(
     () => [
@@ -1007,55 +492,7 @@ return (
       {/* Animated Background */}
       <Starfield />
 
-      {/* Encryption migration banner: an existing vault that predates
-          encrypted-by-default stays usable, but the recommendation recurs
-          every session until acted on (dismissal is per-session only). */}
-      {vaultStatus?.migration_recommended && !encryptBannerDismissed && (
-        <div
-          className="flex items-center gap-3 px-4 py-2.5 text-xs border-b"
-          style={{ background: "var(--amber-bg)", borderColor: "rgba(251, 191, 36, 0.2)", color: "var(--amber)" }}
-          role="alert"
-        >
-          <ShieldAlert className="w-4 h-4 shrink-0" />
-          <span className="font-semibold">{t("sec_encrypt_banner_title")}</span>
-          <span className="opacity-80 hidden sm:inline">{t("sec_encrypt_banner_text")}</span>
-          <button
-            onClick={() => {
-              // Jump STRAIGHT to the Security & Encryption card — the button
-              // previously only switched tabs, leaving users to find the
-              // master-password UI (or mistake the egress toggles for it).
-              // The Settings subtree is huge and mounts asynchronously, so a
-              // single smooth scrollIntoView races layout and silently lands
-              // nowhere; a few settled instant attempts always converge.
-              setTab("settings");
-              [0, 80, 250, 600].forEach((delay) =>
-                setTimeout(() => {
-                  document
-                    .getElementById("security-section")
-                    ?.scrollIntoView({ block: "start" });
-                  // scrollIntoView scrolls EVERY scrollable ancestor —
-                  // including this overflow-hidden shell (programmatically
-                  // scrollable per spec), which drifts the whole app frame.
-                  // Only main may scroll; pin the shell back every attempt.
-                  const shell = document.querySelector("#root")?.firstElementChild;
-                  if (shell) shell.scrollTop = 0;
-                }, delay)
-              );
-            }}
-            className="ml-auto shrink-0 font-semibold px-3 py-1 rounded-lg border cursor-pointer"
-            style={{ borderColor: "rgba(251, 191, 36, 0.35)", background: "transparent", color: "var(--amber)" }}
-          >
-            {t("sec_encrypt_banner_btn")}
-          </button>
-          <button
-            onClick={() => setEncryptBannerDismissed(true)}
-            className="shrink-0 opacity-60 hover:opacity-100 cursor-pointer px-1"
-            aria-label="Dismiss"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+      <EncryptMigrationBanner encryptBannerDismissed={encryptBannerDismissed} setEncryptBannerDismissed={setEncryptBannerDismissed} setTab={setTab} t={t} vaultStatus={vaultStatus} />
 
       {/* Mobile sidebar overlay */}
         {sidebarOpen && (
@@ -1069,343 +506,11 @@ return (
 
         {/* Main App Shell */}
         <div className="relative z-10 flex flex-1 min-h-0" style={{ paddingTop: "0" }}>
-          {/* Sidebar - desktop: always visible, mobile: drawer */}
-          <aside
-            className={`
-              w-60 flex-shrink-0 flex flex-col border-r overflow-y-auto
-              ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} 
-              md:translate-x-0
-              transition-transform duration-250 ease-out
-              z-50 md:z-auto
-              fixed md:static inset-y-0 left-0
-            `}
-            style={{
-              background: "var(--glass)",
-              backdropFilter: "blur(20px)",
-              borderColor: "var(--border)",
-            }}
-          >
-          {/* Navigation */}
-          <nav className="flex-1 p-3 flex flex-col gap-1">
-            <div
-              className="text-[11px] font-semibold uppercase tracking-wider px-3 pt-2 pb-2 flex items-center gap-2"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Vault
-              <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
-            </div>
-            {nav.map((n) => {
-              const isActive = tab === n.id;
-              return (
-              <button
-                key={n.id}
-                type="button"
-                onClick={() => setTab(n.id)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm font-medium transition-all relative group"
-                style={{
-                  borderRadius: "9999px",
-                  color: isActive ? "var(--tab-active-color)" : "var(--tab-inactive-color)",
-                  background: isActive ? "var(--tab-active-bg)" : "var(--tab-inactive-bg)",
-                  border: `1px solid ${isActive ? "var(--tab-active-border)" : "var(--tab-inactive-border)"}`,
-                  boxShadow: isActive ? "var(--tab-active-shadow)" : "none",
-                }}
-              >
-                <span style={{ color: isActive ? "var(--accent-bright)" : "inherit", opacity: isActive ? 1 : 0.75 }}>{n.icon}</span>
-                <span className="flex-1 text-left truncate font-medium">{n.label}</span>
-                {n.badge ? (
-                  <span
-                    className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
-                    style={{ background: isActive ? "var(--accent)" : "var(--amber-bg)", color: isActive ? "#fff" : "var(--amber)" }}
-                  >
-                    {n.badge}
-                  </span>
-                ) : null}
-              </button>
-              );
-            })}
-
-            <div
-              className="text-[11px] font-semibold uppercase tracking-wider px-3 pt-4 pb-2 flex items-center gap-2"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Tools
-              <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
-            </div>
-          </nav>
-
-          {/* Stats */}
-          <div
-            className="mx-3 mb-3 p-4 rounded-xl border"
-            style={{ background: "var(--bg-surface)", borderColor: "var(--border)", backdropFilter: "blur(10px)" }}
-          >
-            <div
-              className="text-[10px] font-semibold uppercase tracking-wider mb-2.5"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Vault Overview
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {([
-                { val: status?.stats?.total_saved ?? 0, lbl: "Saved", filter: "all" },
-                { val: status?.stats?.needs_attention ?? 0, lbl: "Pending", filter: "attention" },
-                { val: status?.stats?.total_secrets ?? 0, lbl: "Secrets", filter: "secret" },
-                { val: status?.stats?.total_commands ?? 0, lbl: "Commands", filter: "command" },
-              ] as { val: number; lbl: string; filter: LibraryFilter }[]).map((s) => (
-                <button
-                  key={s.lbl}
-                  type="button"
-                  onClick={() => {
-                    setLibraryFilter(s.filter);
-                    setTab("library");
-                  }}
-                  className="text-center py-1.5 rounded-lg border transition-all hover:brightness-125 cursor-pointer"
-                  style={{ background: "var(--accent-bg)", borderColor: "rgba(37, 99, 235, 0.06)" }}
-                  title={`Open ${s.lbl} in Library`}
-                >
-                  <div
-                    className="text-lg font-bold tabular-nums"
-                    style={{
-                      background: "linear-gradient(135deg, var(--accent-bright), var(--cyan))",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                    }}
-                  >
-                    {s.val}
-                  </div>
-                  <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: "var(--text-muted)" }}>
-                    {s.lbl}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Built with Kazma.ai credit (clickable → opens in default browser) */}
-          <button
-            type="button"
-            onClick={() => window.electronAPI?.openExternal?.("https://kazma.ai")}
-            className="mt-auto m-3 p-3 rounded-xl flex items-center gap-3 transition-all hover:brightness-125 text-left"
-            style={{
-              borderColor: "var(--border-glow)",
-              background: "var(--accent-bg)",
-              boxShadow: "0 0 16px var(--accent-glow)",
-            }}
-            title="https://kazma.ai"
-          >
-            <img
-              src="/kazma-logo.jpeg"
-              alt="Kazma.ai"
-              className="h-10 w-10 rounded-lg object-contain flex-shrink-0"
-            />
-            <div className="leading-snug">
-              <div className="text-[11px] font-semibold" style={{ color: "var(--accent-bright)" }}>
-                {t("built_with_kazma")}
-              </div>
-              <div className="text-[10px]" style={{ color: "var(--text-dim)" }}>
-                {t("kazma_tagline")}
-              </div>
-            </div>
-          </button>
-        </aside>
+          <Sidebar nav={nav} setLibraryFilter={setLibraryFilter} setTab={setTab} sidebarOpen={sidebarOpen} status={status} t={t} tab={tab} />
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
-          {/* Top Bar - Fixed Layout */}
-          <header
-            className="flex items-center gap-4 px-6 py-3 border-b flex-shrink-0"
-            style={{
-              background: "var(--glass)",
-              backdropFilter: "blur(12px)",
-              borderColor: "var(--border)",
-            }}
-          >
-            {/* Brand/Title - hidden on mobile, shown on desktop */}
-            <div className="flex items-center gap-3 flex-shrink-0 hidden md:flex">
-              <img
-                src="/Logo1.png"
-                alt="IndexArc"
-                className="w-9 h-9 rounded-xl object-contain"
-                style={{ boxShadow: "0 0 20px var(--accent-glow)" }}
-              />
-              <div>
-                <h1
-                  className="text-base font-bold"
-                  style={{
-                    background: "linear-gradient(135deg, var(--text), var(--accent-bright))",
-                    WebkitBackgroundClip: "text",
-                    WebkitTextFillColor: "transparent",
-                  }}
-                >
-                  IndexArc
-                </h1>
-                <span className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-                  Portable Vault
-                </span>
-              </div>
-            </div>
-
-            {/* Mobile brand - shown only on mobile */}
-            <div className="flex items-center gap-2 flex-shrink-0 md:hidden">
-              <img
-                src="/Logo1.png"
-                alt="IndexArc"
-                className="w-8 h-8 rounded-xl object-contain"
-                style={{ boxShadow: "0 0 20px var(--accent-glow)" }}
-              />
-              <span className="text-sm font-bold" style={{ color: "var(--text)" }}>IndexArc</span>
-            </div>
-
-            {/* Search - Center */}
-            <div className="flex-1 max-w-2xl relative order-3 md:order-none md:max-w-xl">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--text-muted)" }} />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAsk(e)}
-                placeholder={t("ask_header_placeholder") || "Search entries, tokens, commands..."}
-                className="w-full pl-9 pr-16 py-2.5 rounded-xl text-sm focus:outline-none transition-all"
-                style={{
-                  background: "var(--bg-input)",
-                  border: "1px solid var(--border-input)",
-                  color: "var(--text)",
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "var(--border-glow)";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(37, 99, 235, 0.08)";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "var(--border-input)";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              />
-              <span
-                className="absolute right-3 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded text-[10px]"
-                style={{
-                  background: "var(--accent-bg)",
-                  border: "1px solid rgba(37, 99, 235, 0.15)",
-                  color: "var(--text-muted)",
-                }}
-              >
-                Ctrl K
-              </span>
-            </div>
-
-            {/* Right Controls */}
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {/* Mobile Menu Toggle */}
-              <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="p-2 rounded-xl border transition-all md:hidden"
-                style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
-                aria-label={sidebarOpen ? "Close menu" : "Open menu"}
-              >
-                {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-              </button>
-              {/* AI Status */}
-              {status?.is_ollama_online && (
-                <div
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold border"
-                  style={{ borderColor: "var(--border)", background: "var(--bg-surface)" }}
-                >
-                  <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--emerald)" }} />
-                  <span className="font-mono" style={{ color: "var(--text-dim)" }}>
-                    {status?.ai_provider || "auto"}
-                  </span>
-                </div>
-              )}
-
-              {/* Encryption Badge */}
-              {vaultStatus?.encryption_enabled && (
-                <div
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold border"
-                  style={{
-                    background: "var(--emerald-bg)",
-                    color: "var(--emerald)",
-                    borderColor: "rgba(52, 211, 153, 0.12)",
-                  }}
-                >
-                  <Lock className="w-3 h-3" />
-                  AES-256
-                </div>
-              )}
-
-              {/* Lock Button */}
-              {vaultStatus?.encryption_enabled && !vaultStatus?.is_locked && (
-                <button
-                  onClick={handleLockVault}
-                  className="p-2 rounded-xl border transition-all"
-                  style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
-                  title={t("sec_lock_btn") || "Lock vault"}
-                >
-                  <Lock className="w-4 h-4" />
-                </button>
-              )}
-
-              {/* App Health */}
-              <button
-                onClick={() => setHealthOpen(true)}
-                className="p-2 rounded-xl border transition-all relative"
-                style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
-                title={t("health_open_btn")}
-                aria-label={t("health_open_btn")}
-              >
-                <Stethoscope className="w-4 h-4" />
-                {health && health.overall !== "healthy" && (
-                  <span
-                    className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2"
-                    style={{
-                      background: health.overall === "attention" ? "var(--danger)" : "var(--amber)",
-                      borderColor: "var(--bg-surface)",
-                    }}
-                  />
-                )}
-              </button>
-
-              {/* Theme Toggle */}
-              <button
-                onClick={toggleTheme}
-                className="p-2 rounded-xl border transition-all"
-                style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
-                title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-              >
-                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-              </button>
-
-              {/* Command Palette Trigger */}
-              <button
-                onClick={() => setCmdPaletteOpen(true)}
-                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs transition-all"
-                style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-muted)" }}
-                title="Global Search (Ctrl + K)"
-              >
-                <Search className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Search...</span>
-                <kbd className="px-1.5 py-0.5 rounded text-[10px] font-mono" style={{ background: "var(--bg-input)" }}>Ctrl+K</kbd>
-              </button>
-
-              {/* Language Toggle */}
-              <button
-                onClick={toggleLanguage}
-                className="p-2 rounded-xl border transition-all"
-                style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
-                title={`Switch to ${settings?.ui_language === "ar" ? "English" : "Arabic"}`}
-              >
-                <Globe className="w-4 h-4" />
-              </button>
-
-              {/* New Entry */}
-              <button
-                onClick={() => setTab("home")}
-                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
-                style={{
-                  background: "linear-gradient(135deg, var(--accent), #1d4ed8)",
-                  boxShadow: "0 0 20px var(--accent-glow), 0 2px 8px rgba(0,0,0,0.3)",
-                }}
-              >
-                + New
-              </button>
-            </div>
-          </header>
+          <TopBar handleAsk={handleAsk} handleLockVault={handleLockVault} health={health} query={query} setCmdPaletteOpen={setCmdPaletteOpen} setHealthOpen={setHealthOpen} setQuery={setQuery} setSidebarOpen={setSidebarOpen} setTab={setTab} settings={settings} sidebarOpen={sidebarOpen} status={status} t={t} theme={theme} toggleLanguage={toggleLanguage} toggleTheme={toggleTheme} vaultStatus={vaultStatus} />
 
           {/* Content Area */}
           <main dir={settings?.ui_language === "ar" ? "rtl" : "ltr"} className="flex-1 min-h-0 overflow-y-auto px-8 py-6">
@@ -1418,51 +523,7 @@ return (
               onOpenHealth={() => setHealthOpen(true)}
             />
 
-            {health?.overall === "attention" && (
-              <div className="mb-4 flex items-start justify-between gap-3 rounded-xl px-4 py-3 text-sm" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.35)", color: "var(--text)" }}>
-                <div className="min-w-0">
-                  <div className="font-semibold mb-0.5">{t("health_attention")} — {t("health_title")}</div>
-                  <ul className="list-disc pl-5 text-xs" style={{ color: "var(--text-dim)" }}>
-                    {(health.checks ?? []).filter((c) => c.severity === "critical" && !c.ok).slice(0, 3).map((c) => (
-                      <li key={c.id}>{c.label}: {c.detail}</li>
-                    ))}
-                    {(health.checks ?? []).filter((c) => c.severity === "critical" && !c.ok).length === 0 && (
-                      <li>{health.error || health.vault?.error || "Vault data unavailable in this data folder."}</li>
-                    )}
-                  </ul>
-                </div>
-                <button
-                  onClick={() => setHealthOpen(true)}
-                  className="px-2.5 py-1 rounded-lg text-xs font-medium shrink-0"
-                  style={{ background: "var(--danger-bg)", border: "1px solid rgba(248,113,113,0.35)", color: "var(--danger)" }}
-                >
-                  {t("health_banner_action")}
-                </button>
-              </div>
-            )}
-
-            {integrityWarnings.length > 0 && !integrityDismissed && health?.overall !== "attention" && (
-              <div className="mb-4 flex items-start justify-between gap-3 rounded-xl px-4 py-3 text-sm" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.35)", color: "var(--text)" }}>
-                <div>
-                  <div className="font-semibold mb-0.5">Data integrity warning</div>
-                  <ul className="list-disc pl-5 text-xs" style={{ color: "var(--text-dim)" }}>
-                    {integrityWarnings.map((w, i) => (
-                      <li key={i}>{w}</li>
-                    ))}
-                  </ul>
-                  <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                    Check Settings → Logs for details. Corrupt copies are quarantined, never deleted.
-                  </div>
-                </div>
-                <button
-                  onClick={() => setIntegrityDismissed(true)}
-                  className="px-2.5 py-1 rounded-lg text-xs font-medium shrink-0"
-                  style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
-                >
-                  Dismiss
-                </button>
-              </div>
-            )}
+            <HealthBanners health={health} integrityDismissed={integrityDismissed} integrityWarnings={integrityWarnings} setHealthOpen={setHealthOpen} setIntegrityDismissed={setIntegrityDismissed} t={t} />
 
             {tab === "home" && (
               <HomeTab
@@ -1621,39 +682,7 @@ return (
         settings={settings}
       />
 
-      {/* Clarify modal */}
-      {clarify && (
-        <ClarifyModal
-          isOpen={!!clarify}
-          onClose={() => setClarify(null)}
-          clarify={clarify}
-          clarifyType={clarifyType}
-          setClarifyType={setClarifyType}
-          clarifyName={clarifyName}
-          setClarifyName={setClarifyName}
-          clarifyValue={clarifyValue}
-          setClarifyValue={setClarifyValue}
-          clarifyFamily={clarifyFamily}
-          setClarifyFamily={setClarifyFamily}
-          onSubmitClarify={submitClarify}
-          settings={settings}
-        />
-      )}
-
-      {/* Confirm modal */}
-      {confirmState && (
-        <ConfirmModal
-          isOpen={confirmState.open}
-          onClose={() => {
-            confirmState.onCancel?.();
-            closeConfirm();
-          }}
-          onConfirm={confirmState.onConfirm}
-          title={confirmState.title}
-          message={confirmState.message}
-          confirmText={confirmState.confirmText}
-        />
-      )}
+      <DialogModals clarify={clarify} clarifyFamily={clarifyFamily} clarifyName={clarifyName} clarifyType={clarifyType} clarifyValue={clarifyValue} closeConfirm={closeConfirm} confirmState={confirmState} setClarify={setClarify} setClarifyFamily={setClarifyFamily} setClarifyName={setClarifyName} setClarifyType={setClarifyType} setClarifyValue={setClarifyValue} settings={settings} submitClarify={submitClarify} />
 
       {/* Global Command Palette Modal */}
       <CommandPaletteModal
