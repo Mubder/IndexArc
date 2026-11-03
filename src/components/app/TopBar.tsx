@@ -57,7 +57,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
                   IndexArc
                 </h1>
                 <span className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-                  Portable Vault
+                  {t("brand_tagline")}
                 </span>
               </div>
             </div>
@@ -115,7 +115,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
                 onClick={() => setSidebarOpen(!sidebarOpen)}
                 className="p-2 rounded-xl border transition-all md:hidden"
                 style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
-                aria-label={sidebarOpen ? "Close menu" : "Open menu"}
+                aria-label={sidebarOpen ? t("menu_close") : t("menu_open")}
               >
                 {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </button>
@@ -184,7 +184,8 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
                 onClick={toggleTheme}
                 className="p-2 rounded-xl border transition-all"
                 style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
-                title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+                title={theme === "dark" ? t("theme_to_light") : t("theme_to_dark")}
+                aria-label={theme === "dark" ? t("theme_to_light") : t("theme_to_dark")}
               >
                 {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </button>
@@ -194,10 +195,10 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
                 onClick={() => setCmdPaletteOpen(true)}
                 className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs transition-all"
                 style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-muted)" }}
-                title="Global Search (Ctrl + K)"
+                title={t("search_btn_title")}
               >
                 <Search className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Search...</span>
+                <span>{t("search_btn_short")}</span>
                 <kbd className="px-1.5 py-0.5 rounded text-[10px] font-mono" style={{ background: "var(--bg-input)" }}>Ctrl+K</kbd>
               </button>
 
@@ -206,7 +207,8 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
                 onClick={toggleLanguage}
                 className="p-2 rounded-xl border transition-all"
                 style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
-                title={`Switch to ${settings?.ui_language === "ar" ? "English" : "Arabic"}`}
+                title={t("lang_switch_title")}
+                aria-label={t("lang_switch_title")}
               >
                 <Globe className="w-4 h-4" />
               </button>
@@ -220,7 +222,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
                   boxShadow: "0 0 20px var(--accent-glow), 0 2px 8px rgba(0,0,0,0.3)",
                 }}
               >
-                + New
+                + {t("new_entry_btn")}
               </button>
             </div>
           </header>

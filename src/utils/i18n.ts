@@ -393,6 +393,28 @@ export interface TranslationDict {
   health_healthy: string;
   health_degraded: string;
   health_attention: string;
+  nav_section_vault: string;
+  vault_overview: string;
+  stat_saved: string;
+  stat_pending: string;
+  stat_secrets: string;
+  stat_commands: string;
+  stat_open_in_library: string;
+  brand_tagline: string;
+  new_entry_btn: string;
+  search_btn_short: string;
+  search_btn_title: string;
+  theme_to_light: string;
+  theme_to_dark: string;
+  lang_switch_title: string;
+  menu_open: string;
+  menu_close: string;
+  integrity_title: string;
+  integrity_hint: string;
+  dismiss_btn: string;
+  setup_vault_locked: string;
+  setup_vault_counts: string;
+  health_more_issues: string;
   health_data_label: string;
   health_vault_label: string;
   health_go_emergency: string;
@@ -791,6 +813,28 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     health_healthy: "Healthy",
     health_degraded: "Degraded",
     health_attention: "Needs attention",
+    nav_section_vault: "Vault",
+    vault_overview: "Vault overview",
+    stat_saved: "Saved",
+    stat_pending: "Pending",
+    stat_secrets: "Secrets",
+    stat_commands: "Commands",
+    stat_open_in_library: "Open in Library",
+    brand_tagline: "Portable Vault",
+    new_entry_btn: "New",
+    search_btn_short: "Search…",
+    search_btn_title: "Search everything (Ctrl+K)",
+    theme_to_light: "Switch to light theme",
+    theme_to_dark: "Switch to dark theme",
+    lang_switch_title: "التبديل إلى العربية",
+    menu_open: "Open menu",
+    menu_close: "Close menu",
+    integrity_title: "Data integrity warning",
+    integrity_hint: "Check Settings → Logs for details. Corrupt copies are quarantined, never deleted.",
+    dismiss_btn: "Dismiss",
+    setup_vault_locked: "Locked — unlock to load entries",
+    setup_vault_counts: "{entries} entries · {notes} notes",
+    health_more_issues: "+{n} more",
     health_data_label: "Data folder",
     health_vault_label: "Vault data",
     health_go_emergency: "Open Emergency Plan (Settings)",
@@ -1187,6 +1231,28 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     health_healthy: "سليم",
     health_degraded: "متدهور",
     health_attention: "يحتاج اهتماماً",
+    nav_section_vault: "الخزنة",
+    vault_overview: "نظرة عامة",
+    stat_saved: "محفوظ",
+    stat_pending: "قيد المراجعة",
+    stat_secrets: "أسرار",
+    stat_commands: "أوامر",
+    stat_open_in_library: "افتح في المكتبة",
+    brand_tagline: "خزنة محمولة",
+    new_entry_btn: "جديد",
+    search_btn_short: "بحث…",
+    search_btn_title: "بحث في كل شيء (Ctrl+K)",
+    theme_to_light: "التبديل إلى المظهر الفاتح",
+    theme_to_dark: "التبديل إلى المظهر الداكن",
+    lang_switch_title: "Switch to English",
+    menu_open: "فتح القائمة",
+    menu_close: "إغلاق القائمة",
+    integrity_title: "تحذير سلامة البيانات",
+    integrity_hint: "راجع الإعدادات ← السجلات للتفاصيل. النسخ التالفة تُعزل ولا تُحذف أبداً.",
+    dismiss_btn: "إخفاء",
+    setup_vault_locked: "مقفلة — افتحها لتحميل العناصر",
+    setup_vault_counts: "{entries} عنصر · {notes} ملاحظة",
+    health_more_issues: "+{n} أخرى",
     health_data_label: "مجلد البيانات",
     health_vault_label: "بيانات الخزنة",
     health_go_emergency: "فتح خطة الطوارئ (الإعدادات)",

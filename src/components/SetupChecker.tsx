@@ -10,6 +10,8 @@ interface SetupCheckerProps {
   onRefresh: () => void;
   health?: HealthReport | null;
   onOpenHealth?: () => void;
+  /** Outside Home: render only when AI setup needs action. */
+  onlyWhenAttention?: boolean;
 }
 
 const DISMISS_KEY = "indexarc-setup-dismissed";
@@ -25,6 +27,7 @@ export const SetupChecker: React.FC<SetupCheckerProps> = ({
   onRefresh,
   health,
   onOpenHealth,
+  onlyWhenAttention,
 }) => {
   const t = (key: Parameters<typeof getTranslation>[1], vars?: Record<string, string>) => {
     let s = getTranslation(settings, key);
@@ -74,21 +77,23 @@ export const SetupChecker: React.FC<SetupCheckerProps> = ({
     };
   }, [isElectron, status?.is_ollama_online]);
 
+  // Critical data problems (vault empty/locked in this folder, etc.). These
+  // are never shown as green here; the red app-health banner explains them,
+  // so this card only turns amber for AI setup it can fix itself.
+  const dataBad = useMemo(
+    () => !!health && health.overall === "attention" && (health.checks ?? []).some((c) => c.severity === "critical" && !c.ok),
+    [health]
+  );
+
   const needsAttention = useMemo(() => {
+    // Status not loaded yet: say nothing rather than flash "needs attention".
+    if (!status) return false;
     if (!aiReady) return true;
     if (isElectron && ollamaInstalled === false) return true;
     if (isElectron && ollamaInstalled === true && !ollamaOnline) return true;
     if (ollamaOnline && !ollamaHasLlm) return true;
-    // Data health (from GET /api/health) also drives the header — an "all
-    // set" banner while the vault is locked/empty in the wrong folder is
-    // exactly the false-green that hid data loss. Only critical data checks
-    // count here; AI-only degradation stays green for data purposes.
-    if (health && health.overall === "attention") {
-      const criticalBad = (health.checks ?? []).some((c) => c.severity === "critical" && !c.ok);
-      if (criticalBad) return true;
-    }
     return false;
-  }, [aiReady, isElectron, ollamaInstalled, ollamaOnline, ollamaHasLlm, health]);
+  }, [status, aiReady, isElectron, ollamaInstalled, ollamaOnline, ollamaHasLlm]);
 
   useEffect(() => {
     if (needsAttention) setExpanded(true);
@@ -156,7 +161,8 @@ export const SetupChecker: React.FC<SetupCheckerProps> = ({
     else window.open(url, "_blank");
   }, []);
 
-  if (dismissed) return null;
+  if (onlyWhenAttention && !needsAttention) return null;
+  if (dismissed && !needsAttention) return null;
 
   const dismiss = () => {
     setDismissed(true);
@@ -179,7 +185,7 @@ export const SetupChecker: React.FC<SetupCheckerProps> = ({
 
   return (
     <div
-      className="rounded-2xl p-4 space-y-3"
+      className={`rounded-2xl px-4 ${expanded ? "py-3.5 space-y-3" : "py-2.5"}`}
       style={{
         background: needsAttention ? "var(--amber-bg)" : "var(--bg-surface)",
         border: "1px solid " + (needsAttention ? "rgba(251,191,36,0.25)" : "var(--border)"),
@@ -188,10 +194,17 @@ export const SetupChecker: React.FC<SetupCheckerProps> = ({
       <div className="flex items-center gap-2">
         <Info className="w-4 h-4" style={{ color: needsAttention ? "var(--amber)" : "var(--accent-bright)" }} />
         <span className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("setup_title")}</span>
-        <span className="text-[11px]" style={{ color: needsAttention ? "var(--amber)" : "var(--emerald)" }}>
+        <span className="text-[11px] truncate" style={{ color: needsAttention ? "var(--amber)" : "var(--emerald)" }}>
           {needsAttention ? t("setup_needs_attention") : t("setup_all_set")}
         </span>
         <div className="flex-1" />
+        {!expanded && (
+          <span className="hidden sm:flex items-center gap-3 text-[11px]" style={{ color: "var(--text-muted)" }}>
+            <span className="flex items-center gap-1"><StatusDot ok={ollamaOnline} warn={!ollamaOnline && aiReady} /> {t("setup_ollama")}</span>
+            <span className="flex items-center gap-1"><StatusDot ok={aiReady} /> AI</span>
+            <span className="flex items-center gap-1"><StatusDot ok={!dataBad} warn={!!health && health.overall === "degraded"} /> {t("health_vault_label")}</span>
+          </span>
+        )}
         <button
           type="button"
           onClick={() => setExpanded((e) => !e)}
@@ -299,12 +312,12 @@ export const SetupChecker: React.FC<SetupCheckerProps> = ({
               <Database className="w-4 h-4" /> {t("health_vault_label")}
             </span>
             <span className="flex items-center gap-1">
-              <StatusDot ok={!needsAttention || aiReady} warn={!!health && health.overall === "degraded"} />
+              <StatusDot ok={!dataBad} warn={!!health && health.overall === "degraded"} />
               {health?.vault?.locked ? (
-                <span style={{ color: "var(--amber)" }}>Locked — unlock to load entries</span>
+                <span style={{ color: "var(--amber)" }}>{t("setup_vault_locked")}</span>
               ) : health?.vault ? (
-                <span style={{ color: "var(--emerald)" }}>
-                  {health.vault.total ?? 0} entries · {health.scratchpad?.tabs ?? 0} notes
+                <span style={{ color: dataBad ? "var(--danger)" : "var(--emerald)" }}>
+                  {t("setup_vault_counts", { entries: String(health.vault.total ?? 0), notes: String(health.scratchpad?.tabs ?? 0) })}
                 </span>
               ) : (
                 <span style={{ color: "var(--text-muted)" }}>…</span>

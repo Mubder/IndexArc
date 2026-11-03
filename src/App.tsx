@@ -79,6 +79,10 @@ export default function App() {
   const [logs, setLogs] = useState<{ time: string; type: string; message: string }[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // On phones the sidebar is a drawer: picking a tab closes it.
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [tab]);
   // Encryption-migration banner dismissal is intentionally per-session: an
   // unencrypted vault should be surfaced again on every launch until fixed.
   const [encryptBannerDismissed, setEncryptBannerDismissed] = useState(false);
@@ -494,18 +498,17 @@ return (
 
       <EncryptMigrationBanner encryptBannerDismissed={encryptBannerDismissed} setEncryptBannerDismissed={setEncryptBannerDismissed} setTab={setTab} t={t} vaultStatus={vaultStatus} />
 
-      {/* Mobile sidebar overlay */}
-        {sidebarOpen && (
-          <div
-            className="fixed inset-0 z-40 md:hidden"
-            style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
-            onClick={() => setSidebarOpen(false)}
-            aria-hidden="true"
-          />
-        )}
-
         {/* Main App Shell */}
         <div className="relative z-10 flex flex-1 min-h-0" style={{ paddingTop: "0" }}>
+          {/* Mobile drawer overlay: inside the shell so it stacks under the sidebar (z-50) */}
+          {sidebarOpen && (
+            <div
+              className="fixed inset-0 z-40 md:hidden"
+              style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+              onClick={() => setSidebarOpen(false)}
+              aria-hidden="true"
+            />
+          )}
           <Sidebar nav={nav} setLibraryFilter={setLibraryFilter} setTab={setTab} sidebarOpen={sidebarOpen} status={status} t={t} tab={tab} />
 
         {/* Main Content */}
@@ -521,9 +524,10 @@ return (
               onRefresh={fetchAll}
               health={health}
               onOpenHealth={() => setHealthOpen(true)}
+              onlyWhenAttention={tab !== "home"}
             />
 
-            <HealthBanners health={health} integrityDismissed={integrityDismissed} integrityWarnings={integrityWarnings} setHealthOpen={setHealthOpen} setIntegrityDismissed={setIntegrityDismissed} t={t} />
+            <HealthBanners compact={tab !== "home"} health={health} integrityDismissed={integrityDismissed} integrityWarnings={integrityWarnings} setHealthOpen={setHealthOpen} setIntegrityDismissed={setIntegrityDismissed} t={t} />
 
             {tab === "home" && (
               <HomeTab

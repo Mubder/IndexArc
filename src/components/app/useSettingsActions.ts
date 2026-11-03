@@ -32,16 +32,19 @@ export function useSettingsActions({ fetchAll, setSettings, settings, settingsDi
       if (saved && typeof saved === "object" && saved.ai_provider) {
         setSettings(saved as Settings);
       }
-      // When using local/auto, ensure models exist and warm the LLM into memory
-      if (settings.ai_provider === "local" || settings.ai_provider === "auto") {
-        try {
-          await fetch("/api/ollama/ensure", { method: "POST" });
-        } catch {
-          /* optional */
-        }
-      }
-      fetchAll();
+      // The save has landed: confirm now. Model prep below can take minutes
+      // (it may pull a model), and used to hold this toast back the whole time.
       showToast("Settings saved · تم الحفظ", "success");
+      fetchAll();
+      // When using local/auto, ensure models exist and warm the LLM into
+      // memory in the background, then refresh the AI status.
+      if (settings.ai_provider === "local" || settings.ai_provider === "auto") {
+        fetch("/api/ollama/ensure", { method: "POST" })
+          .then(() => fetchAll())
+          .catch(() => {
+            /* optional */
+          });
+      }
     } catch (e: any) {
       showToast(e?.message || "Settings save failed / فشل حفظ الإعدادات", "error");
     }

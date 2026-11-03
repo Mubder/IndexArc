@@ -57,7 +57,7 @@ export function EncryptMigrationBanner({ encryptBannerDismissed, setEncryptBanne
           <button
             onClick={() => setEncryptBannerDismissed(true)}
             className="shrink-0 opacity-60 hover:opacity-100 cursor-pointer px-1"
-            aria-label="Dismiss"
+            aria-label={t("dismiss_btn")}
           >
             ✕
           </button>

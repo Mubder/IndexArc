@@ -21,7 +21,7 @@ export function Sidebar({ nav, setLibraryFilter, setTab, sidebarOpen, status, t,
           <aside
             className={`
               w-60 flex-shrink-0 flex flex-col border-r overflow-y-auto
-              ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} 
+              ${sidebarOpen ? "translate-x-0 open" : "-translate-x-full"} 
               md:translate-x-0
               transition-transform duration-250 ease-out
               z-50 md:z-auto
@@ -39,7 +39,7 @@ export function Sidebar({ nav, setLibraryFilter, setTab, sidebarOpen, status, t,
               className="text-[11px] font-semibold uppercase tracking-wider px-3 pt-2 pb-2 flex items-center gap-2"
               style={{ color: "var(--text-muted)" }}
             >
-              Vault
+              {t("nav_section_vault")}
               <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
             </div>
             {nav.map((n) => {
@@ -71,14 +71,6 @@ export function Sidebar({ nav, setLibraryFilter, setTab, sidebarOpen, status, t,
               </button>
               );
             })}
-
-            <div
-              className="text-[11px] font-semibold uppercase tracking-wider px-3 pt-4 pb-2 flex items-center gap-2"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Tools
-              <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
-            </div>
           </nav>
 
           {/* Stats */}
@@ -90,14 +82,14 @@ export function Sidebar({ nav, setLibraryFilter, setTab, sidebarOpen, status, t,
               className="text-[10px] font-semibold uppercase tracking-wider mb-2.5"
               style={{ color: "var(--text-muted)" }}
             >
-              Vault Overview
+              {t("vault_overview")}
             </div>
             <div className="grid grid-cols-2 gap-1.5">
               {([
-                { val: status?.stats?.total_saved ?? 0, lbl: "Saved", filter: "all" },
-                { val: status?.stats?.needs_attention ?? 0, lbl: "Pending", filter: "attention" },
-                { val: status?.stats?.total_secrets ?? 0, lbl: "Secrets", filter: "secret" },
-                { val: status?.stats?.total_commands ?? 0, lbl: "Commands", filter: "command" },
+                { val: status?.stats?.total_saved ?? 0, lbl: t("stat_saved"), filter: "all" },
+                { val: status?.stats?.needs_attention ?? 0, lbl: t("stat_pending"), filter: "attention" },
+                { val: status?.stats?.total_secrets ?? 0, lbl: t("stat_secrets"), filter: "secret" },
+                { val: status?.stats?.total_commands ?? 0, lbl: t("stat_commands"), filter: "command" },
               ] as { val: number; lbl: string; filter: LibraryFilter }[]).map((s) => (
                 <button
                   key={s.lbl}
@@ -108,7 +100,7 @@ export function Sidebar({ nav, setLibraryFilter, setTab, sidebarOpen, status, t,
                   }}
                   className="text-center py-1.5 rounded-lg border transition-all hover:brightness-125 cursor-pointer"
                   style={{ background: "var(--accent-bg)", borderColor: "rgba(37, 99, 235, 0.06)" }}
-                  title={`Open ${s.lbl} in Library`}
+                  title={`${s.lbl} · ${t("stat_open_in_library")}`}
                 >
                   <div
                     className="text-lg font-bold tabular-nums"
