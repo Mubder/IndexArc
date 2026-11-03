@@ -47,7 +47,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
               />
               <div>
                 <h1
-                  className="text-base font-bold"
+                  className="brand-text text-base font-bold"
                   style={{
                     background: "linear-gradient(135deg, var(--text), var(--accent-bright))",
                     WebkitBackgroundClip: "text",

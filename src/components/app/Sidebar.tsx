@@ -20,7 +20,7 @@ export function Sidebar({ nav, setLibraryFilter, setTab, sidebarOpen, status, t,
           {/* Sidebar - desktop: always visible, mobile: drawer */}
           <aside
             className={`
-              w-60 flex-shrink-0 flex flex-col border-r overflow-y-auto
+              app-sidebar w-60 flex-shrink-0 flex flex-col border-r overflow-y-auto
               ${sidebarOpen ? "translate-x-0 open" : "-translate-x-full"} 
               md:translate-x-0
               transition-transform duration-250 ease-out

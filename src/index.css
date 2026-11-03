@@ -234,10 +234,11 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --bg-base: #0b1120;
   /* Ambient backdrop: static aurora light (no animation, no GPU cost). */
   --bg-app:
-    radial-gradient(1200px 600px at 12% -10%, rgba(59, 130, 246, 0.20), transparent 60%),
-    radial-gradient(900px 520px at 92% -6%, rgba(139, 92, 246, 0.16), transparent 62%),
-    radial-gradient(1000px 600px at 55% 115%, rgba(20, 184, 166, 0.10), transparent 60%),
-    #0b1120;
+    radial-gradient(800px 520px at 35% 8%, rgba(59, 130, 246, 0.30), transparent 65%),
+    radial-gradient(700px 520px at 92% 22%, rgba(168, 85, 247, 0.28), transparent 65%),
+    radial-gradient(600px 460px at 85% 92%, rgba(236, 72, 153, 0.14), transparent 65%),
+    radial-gradient(900px 560px at 30% 105%, rgba(20, 184, 166, 0.20), transparent 65%),
+    #0a0f1e;
   --bg-surface: rgba(19, 27, 48, 0.78);
   --bg-surface-solid: #16223a;
   --bg-input: rgba(27, 41, 69, 0.95);
@@ -276,9 +277,9 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 12px 32px -14px rgba(0, 0, 0, 0.7);
   --skeleton-from: rgba(37, 99, 235, 0.07);
   --skeleton-mid: rgba(37, 99, 235, 0.14);
-  --tab-active-bg: linear-gradient(135deg, rgba(59, 130, 246, 0.28), rgba(99, 102, 241, 0.2));
-  --tab-active-border: var(--accent-bright);
-  --tab-active-shadow: 0 2px 12px rgba(59, 130, 246, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  --tab-active-bg: linear-gradient(120deg, rgba(59, 130, 246, 0.42), rgba(139, 92, 246, 0.32));
+  --tab-active-border: rgba(147, 197, 253, 0.55);
+  --tab-active-shadow: 0 6px 22px -6px rgba(99, 102, 241, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   --tab-active-color: #ffffff;
   --tab-inactive-bg: transparent;
   --tab-inactive-border: transparent;
@@ -718,4 +719,91 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 @media (prefers-reduced-motion: reduce) {
   .app-main > * { animation: none !important; }
   .icon-btn:hover, .btn-primary:hover { transform: none; }
+}
+
+/* ── Bold round (2026-11) ─────────────────────────────────────────────── */
+
+/* Cards: a light-catching gradient edge drawn with a masked ring, so the
+   glass fill stays translucent. Hover brightens the ring and adds a glow. */
+:root {
+  --edge: linear-gradient(135deg, rgba(125, 211, 252, 0.75), rgba(99, 102, 241, 0.2) 35%, rgba(255, 255, 255, 0.06) 60%, rgba(168, 85, 247, 0.65));
+  --edge-hover: linear-gradient(135deg, rgba(125, 211, 252, 0.9), rgba(99, 102, 241, 0.3) 40%, rgba(168, 85, 247, 0.85));
+  --card-glow: 0 18px 40px -18px rgba(99, 102, 241, 0.55);
+}
+[data-theme="light"] {
+  --edge: linear-gradient(135deg, rgba(59, 130, 246, 0.45), rgba(99, 102, 241, 0.1) 35%, rgba(255, 255, 255, 0.4) 60%, rgba(168, 85, 247, 0.35));
+  --edge-hover: linear-gradient(135deg, rgba(59, 130, 246, 0.75), rgba(99, 102, 241, 0.25) 40%, rgba(168, 85, 247, 0.65));
+  --card-glow: 0 16px 34px -18px rgba(59, 90, 200, 0.45);
+}
+.app-card, .app-surface { position: relative; border-color: transparent; }
+.app-card::before, .app-surface::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--edge);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.app-card::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--edge-hover);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.app-card:hover { border-color: transparent; box-shadow: var(--shadow-card), var(--card-glow); }
+.app-card:hover::after { opacity: 1; }
+
+/* Primary action: blue-to-violet gradient with a glow and a light sweep on hover. */
+.btn-primary {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(120deg, #3b82f6, #6366f1 55%, #a855f7) !important;
+  box-shadow: 0 8px 24px -8px rgba(99, 102, 241, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+}
+.btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.35) 50%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 0.6s ease;
+  pointer-events: none;
+}
+.btn-primary:hover { box-shadow: 0 10px 30px -6px rgba(139, 92, 246, 0.95), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important; }
+.btn-primary:hover::after { transform: translateX(120%); }
+
+/* Brand wordmark: tri-color gradient. */
+.brand-text {
+  background: linear-gradient(110deg, #7dd3fc, #818cf8 50%, #c084fc) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text;
+}
+[data-theme="light"] .brand-text {
+  background: linear-gradient(110deg, #1e3a8a, #2563eb 40%, #7c3aed) !important;
+  -webkit-background-clip: text !important;
+}
+
+/* Sidebar: a faint violet wash at the top and a lit inner edge. */
+.app-sidebar {
+  background:
+    radial-gradient(240px 200px at 0% 0%, rgba(99, 102, 241, 0.18), transparent 70%),
+    var(--glass) !important;
+  box-shadow: inset -1px 0 0 rgba(140, 165, 255, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-primary::after { transition: none; }
 }
