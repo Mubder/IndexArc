@@ -563,34 +563,35 @@ async function installOllama() {
   }
 }
 
-// Every IPC handler checks WHO is calling: only the main window's top frame,
+// Every IPC message checks WHO is calling: only the main window's top frame,
 // showing our own local server, may reach the bridge (get-api-token hands out
 // the vault pairing token). A subframe or any other webContents is refused.
+// The logic lives in shared/ipc-trust.cjs (unit-tested).
+const ipcTrust = require("./shared/ipc-trust.cjs");
 /** @param {string} url */
 function isAppUrl(url) {
-  try {
-    const u = new URL(url);
-    return (
-      u.protocol === "http:" &&
-      (u.hostname === "127.0.0.1" || u.hostname === "localhost") &&
-      u.port === String(backendPort || PORT)
-    );
-  } catch {
-    return false;
-  }
+  return ipcTrust.isAppUrl(url, backendPort || PORT);
 }
 
-/** @param {import("electron").IpcMainInvokeEvent} e */
+/** @param {import("electron").IpcMainInvokeEvent | import("electron").IpcMainEvent} e */
 function isTrustedSender(e) {
-  try {
-    if (!mainWindow || mainWindow.isDestroyed() || e.sender !== mainWindow.webContents) return false;
-    const frame = e.senderFrame;
-    if (!frame || frame !== e.sender.mainFrame) return false;
-    return isAppUrl(frame.url);
-  } catch {
-    return false;
-  }
+  return ipcTrust.isTrustedSender(e, mainWindow, backendPort || PORT);
 }
+
+// Defaults for EVERY webContents, including any created later: no <webview>
+// may attach (the tag is off, this is the backstop), no window may open, and
+// nothing but the app may be navigated to. The main window then installs its
+// own handlers on top (external links open in the OS browser).
+app.on("web-contents-created", (_event, contents) => {
+  contents.on("will-attach-webview", (e) => {
+    console.log("[security] Blocked a <webview> from attaching");
+    e.preventDefault();
+  });
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  contents.on("will-navigate", (e, url) => {
+    if (!isAppUrl(url)) e.preventDefault();
+  });
+});
 
 /**
  * @param {string} channel
@@ -1098,6 +1099,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      webviewTag: false,
       spellcheck: true,
       preload: path.join(__dirname, "preload.cjs"),
     },
@@ -1342,7 +1344,13 @@ function requestRendererFlush(timeoutMs) {
       try { ipcMain.removeListener("flush-complete", onFlushComplete); } catch {}
       resolve();
     };
-    const onFlushComplete = () => finish();
+    /** @param {import("electron").IpcMainEvent} e */
+    const onFlushComplete = (e) => {
+      // Only the main window may end the flush wait early; anyone else
+      // could otherwise cut the save of the last keystrokes short.
+      if (isTrustedSender(e)) finish();
+      else console.log('[security] Ignored "flush-complete" from an untrusted sender');
+    };
     ipcMain.on("flush-complete", onFlushComplete);
     const timer = setTimeout(finish, timeoutMs);
     timer.unref?.();

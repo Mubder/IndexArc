@@ -236,7 +236,7 @@ server-side unlocked state. No cookies are used anywhere.
 
 | # | Requirement (short) | Status | Evidence / notes |
 |---|---|---|---|
-| 10.1.1 | Code analysis tooling in CI | Partial | Typecheck, tests, fuzz smoke, dependency audit ([ci.yml](../.github/workflows/ci.yml)). No SAST (CodeQL/Semgrep) or secret scanning workflow. |
+| 10.1.1 | Code analysis tooling in CI | Partial | Typecheck, tests, fuzz smoke, dependency audit ([ci.yml](../.github/workflows/ci.yml)); CodeQL `security-extended` on every push, pull request and weekly ([codeql.yml](../.github/workflows/codeql.yml)). Still to do (repository owner): turn on GitHub secret scanning and push protection in the repository settings. |
 | 10.2.1 | No unauthorized phone-home | Met | No telemetry. Network use is opt-in: cloud AI, LanguageTool, update checks (`update_check_on_start: false` by default, [server/types.ts](../server/types.ts); [shared/updater.cjs](../shared/updater.cjs)). Test: [server/egress.test.ts](../server/egress.test.ts). |
 | 10.2.3 | No back doors | Met | Production builds disable token bootstrap (`/api/auth/bootstrap` returns 404 unless dev or `INDEXARC_ALLOW_BOOTSTRAP=1`). Test: [server/route-matrix.test.ts](../server/route-matrix.test.ts). |
 | 10.3.1 | Auto-update over secure channel with signed packages | Partial | electron-updater over HTTPS from GitHub Releases; download/install only when `publisherName` exists (signed build), so Authenticode is verified; no prerelease, no downgrade ([shared/updater.cjs](../shared/updater.cjs)). Test: [shared/updater.test.ts](../shared/updater.test.ts). **Release builds are not signed yet** ([docs/RELEASE.md](RELEASE.md)), so today no build can self-install. |
@@ -321,12 +321,12 @@ Source: the numbered list at electronjs.org/docs/latest/tutorial/security.
 | 9 | Do not enable experimental features | Met | Not set. |
 | 10 | Do not use `enableBlinkFeatures` | Met | Not set. |
 | 11 | `<webview>`: do not use `allowpopups` | N/A | `webviewTag` is not enabled; no `<webview>` used. |
-| 12 | Verify WebView options before creation | Partial | No `<webview>` is possible (tag disabled by default), but there is no `will-attach-webview` handler as a backstop. |
+| 12 | Verify WebView options before creation | Met | `webviewTag: false` on the main window, and an app-wide `web-contents-created` hook denies every `will-attach-webview`, every new window and any navigation away from the app, for any webContents ([electron-main.cjs](../electron-main.cjs)). |
 | 13 | Disable or limit navigation | Met | `will-navigate` vetoes anything but the local server origin (`isAppUrl`). Not unit-tested; covered indirectly by [e2e/vault-lifecycle.spec.ts](../e2e/vault-lifecycle.spec.ts). |
 | 14 | Disable or limit creation of new windows | Met | `setWindowOpenHandler` always denies and hands `http:`/`https:`/`mailto:` to the OS browser. |
 | 15 | Do not use `shell.openExternal` with untrusted content | Partial | Parsed-URL scheme allowlist (`http:`, `https:`, `mailto:`) in both `open-external` IPC and the window-open handler. Any https URL in note content can still be opened in the browser (by design). |
 | 16 | Use a current version of Electron | Met | Electron 44 ([package.json](../package.json)); Dependabot keeps it moving. |
-| 17 | Validate the sender of all IPC messages | Partial | Every `invoke` channel goes through `handleTrusted`, which requires the main window's top frame showing the local server origin (`isTrustedSender`). The one `ipcMain.on("flush-complete")` listener is not sender-checked (it only resolves the quit handshake). No unit test for `isTrustedSender`. |
+| 17 | Validate the sender of all IPC messages | Met | Every `invoke` channel goes through `handleTrusted`, and the one `ipcMain.on("flush-complete")` listener checks the sender too: only the main window's top frame showing the local server origin is trusted ([shared/ipc-trust.cjs](../shared/ipc-trust.cjs), tests in [shared/ipc-trust.test.ts](../shared/ipc-trust.test.ts)). |
 | 18 | Avoid `file://`; prefer a custom protocol | Partial | No `file://` is used. The app uses a loopback HTTP server instead of a custom protocol, so other local processes can reach the origin (they still need the token). |
 | 19 | Check which fuses you can change | Met | `runAsNode`, `enableNodeOptionsEnvironmentVariable`, `enableNodeCliInspectArguments` off; `enableEmbeddedAsarIntegrityValidation`, `onlyLoadAppFromAsar` on ([package.json](../package.json) `electronFuses`). Cookie-encryption and file-protocol fuses are left at defaults (no cookies, no `file://`). |
 | 20 | Do not expose Electron APIs to untrusted web content | Met | The bridge exposes 13 narrow `invoke` wrappers, one `send`, and event subscriptions; no raw `ipcRenderer` ([preload.cjs](../preload.cjs)). |
@@ -339,8 +339,8 @@ Counts for the ASVS tables above (Electron checklist counted separately).
 
 | Status | ASVS rows | Electron rows |
 |---|---|---|
-| Met | 123 | 14 |
-| Partial | 42 | 5 |
+| Met | 123 | 16 |
+| Partial | 42 | 3 |
 | N/A | 23 | 1 |
 | Gap | 4 | 0 |
 | **Total** | **192** | **20** |
@@ -355,7 +355,7 @@ Priority gaps for the roadmap:
 6. ~~Change password (2.1.5)~~ landed 2026-11-04.
 7. **Recovery (2.5.6) follow-ups.** Landed 2026-11-04. Still to do: say in the UI that a password change does not revoke the code, and bind the seal's AAD to a vault id.
 8. ~~13.2.2 Runtime schema validation of request bodies~~ landed 2026-11-04: zod schema on every POST/PUT/PATCH route.
-9. **SAST / secret scanning in CI (10.1.1, Partial).** Add CodeQL and enable GitHub secret scanning.
-10. **Electron hardening (items 12, 17, 18).** Add a `will-attach-webview` deny handler, sender-check `flush-complete`, unit-test `isTrustedSender`; consider a custom protocol or named-pipe transport.
+9. **SAST / secret scanning in CI (10.1.1, Partial).** CodeQL landed 2026-11-04 ([codeql.yml](../.github/workflows/codeql.yml)). Still to do (owner): enable GitHub secret scanning and push protection.
+10. **Electron hardening (item 18).** Items 12 and 17 landed 2026-11-04 (webview/new-window/navigation deny for every webContents; `flush-complete` sender-checked; `isTrustedSender` unit-tested). Still open: consider a custom protocol or named-pipe transport instead of loopback HTTP.
 
 External verification (penetration test against [THREAT-MODEL.md](THREAT-MODEL.md)) is still open and needs an owner decision on vendor and budget.

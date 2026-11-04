@@ -48,8 +48,6 @@ Every engineering item in R1–R6 has landed with tests, except those listed und
   - password policy: 12-character minimum, breached-password check, strength meter, reveal toggle;
   - AAD on the JSON envelopes and the `vault.json` header (SQLite rows already have it);
   - a single key-lifecycle document.
-- CodeQL in CI.
-- Electron: a `will-attach-webview` guard and a sender check on the flush-complete IPC.
 - A self-contained CLI binary (Node SEA) and PATH registration by the installer.
 - The CI benchmark job (bar #5): the 10k benchmark exists in `server/storage-v2.test.ts` but is not timed against budgets in CI.
 

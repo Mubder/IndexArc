@@ -42,6 +42,9 @@ Commit messages follow the convention in
 - A dev or test launch could repoint the installed app's data folder.
 
 ### Security
+- Electron: no window can attach a `<webview>`, open a new window or leave the app, and the quit
+  handshake now checks who sent it, like every other IPC message.
+- CodeQL static analysis runs in CI on every push, pull request and weekly.
 - Every API request body is checked against a schema before it is handled; a malformed body is
   refused with a 400 that names the field (never the value).
 - Rolling back, removing or copying in a single record in `vault.db` is now detected on unlock

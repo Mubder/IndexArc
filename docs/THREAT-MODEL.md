@@ -76,9 +76,10 @@ deny-all permission request and check handlers; window-open handed to the OS
 browser after parsed-URL scheme checks; note HTML sanitized at write
 (DOMPurify allowlist), at ingest, and at render; DevTools only in unpackaged
 runs. Residual: a fully compromised renderer holds the session API token —
-it is the user's own session, equivalent to the user. The `flush-complete`
-IPC listener is not sender-checked (low impact: it only completes the quit
-handshake).
+it is the user's own session, equivalent to the user. Every IPC message,
+including the `flush-complete` quit handshake, is sender-checked
+(`shared/ipc-trust.cjs`), and no webContents may attach a `<webview>`,
+open a window or navigate away from the app.
 
 ### Shell ↔ vault server process (boundary 1b — new in R3.1)
 The vault server runs in an Electron `utilityProcess`, not in the main
