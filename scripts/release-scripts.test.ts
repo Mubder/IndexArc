@@ -29,6 +29,48 @@ describe("write-app-update-yml (SignPath flow)", () => {
   });
 });
 
+describe("azure-sign-config (Azure Trusted Signing)", () => {
+  const env = {
+    AZURE_SIGNING_ENDPOINT: "https://weu.codesigning.azure.net/",
+    AZURE_SIGNING_ACCOUNT: "acct",
+    AZURE_SIGNING_PROFILE: "prof",
+    AZURE_SIGNING_PUBLISHER_NAME: "Example Publisher",
+  };
+  const run = (extra: Record<string, string>) => {
+    const out = path.join(tmp(), "cfg.json");
+    execFileSync(process.execPath, [script("azure-sign-config.mjs"), out], { env: { ...process.env, ...extra }, stdio: "pipe" });
+    return JSON.parse(fs.readFileSync(out, "utf8"));
+  };
+
+  it("adds azureSignOptions to the package.json build config and forces signing", () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+    const cfg = run(env);
+    expect(cfg.win.azureSignOptions).toEqual({
+      endpoint: env.AZURE_SIGNING_ENDPOINT,
+      codeSigningAccountName: "acct",
+      certificateProfileName: "prof",
+      publisherName: "Example Publisher",
+    });
+    expect(cfg.win.signExts).toEqual([".dll"]);
+    expect(cfg.forceCodeSigning).toBe(true);
+    // Everything else is the normal build config.
+    expect(cfg.appId).toBe(pkg.build.appId);
+    expect(cfg.nsis).toEqual(pkg.build.nsis);
+    expect(cfg.extraResources).toEqual(pkg.build.extraResources);
+  });
+
+  it("can leave DLLs unsigned", () => {
+    expect(run({ ...env, AZURE_SIGN_DLLS: "false" }).win.signExts).toBeUndefined();
+  });
+
+  it("fails when a setting is missing", () => {
+    const out = path.join(tmp(), "cfg.json");
+    const e = { ...process.env, ...env, AZURE_SIGNING_PROFILE: "" };
+    expect(() => execFileSync(process.execPath, [script("azure-sign-config.mjs"), out], { env: e, stdio: "pipe" })).toThrow();
+    expect(fs.existsSync(out)).toBe(false);
+  });
+});
+
 describe("refresh-update-manifest (after external signing)", () => {
   it("rewrites sha512 and size and rebuilds the blockmap", () => {
     const dir = tmp();

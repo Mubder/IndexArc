@@ -22,10 +22,14 @@ jobs:
       contents: read
       actions: read
     env:
-      # Windows release builds are signed through SignPath (free OSS signing,
-      # certificate by SignPath Foundation) once the repository variable
-      # SIGNPATH_ORGANIZATION_ID is set. Setup: docs/CODE_SIGNING.md.
-      SIGN_WINDOWS: ${{ matrix.os == 'windows-latest' && github.event_name == 'release' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
+      # Windows release builds are signed by whichever service is configured
+      # (setup: docs/CODE_SIGNING.md); otherwise they stay unsigned.
+      # 1st choice — Azure Trusted Signing (paid, publisher = your verified
+      #   name): on once the repository variable AZURE_SIGNING_ENDPOINT is set.
+      # 2nd choice — SignPath (free OSS signing, publisher = SignPath
+      #   Foundation): on once SIGNPATH_ORGANIZATION_ID is set and Azure is not.
+      SIGN_AZURE: ${{ matrix.os == 'windows-latest' && github.event_name == 'release' && vars.AZURE_SIGNING_ENDPOINT != '' }}
+      SIGN_SIGNPATH: ${{ matrix.os == 'windows-latest' && github.event_name == 'release' && vars.AZURE_SIGNING_ENDPOINT == '' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
 
     strategy:
       fail-fast: false
@@ -59,12 +63,52 @@ jobs:
         run: npm ci
 
       - name: Build and Package Desktop Binary
-        if: env.SIGN_WINDOWS != 'true'
+        if: env.SIGN_SIGNPATH != 'true' && env.SIGN_AZURE != 'true'
         run: npm run ${{ matrix.build-script }}
         env:
           # Avoid signing issues during CI on macOS unless certs are passed
           CSC_IDENTITY_AUTO_DISCOVERY: false
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Signed Windows release (Azure Trusted Signing) ───────────────────
+      # electron-builder signs during the normal build: the app exe, Electron's
+      # DLLs, the installer, its uninstaller and the portable exe. It also
+      # writes publisherName into app-update.yml, so installed builds verify
+      # updates against it. forceCodeSigning makes a signing failure fail the
+      # build instead of shipping unsigned files.
+      - name: Build and sign (Azure Trusted Signing)
+        if: env.SIGN_AZURE == 'true'
+        shell: bash
+        run: |
+          npm run build && npm run check:dist
+          node scripts/azure-sign-config.mjs electron-builder.azure.json
+          npx electron-builder --config electron-builder.azure.json --win portable nsis --x64 --publish never
+        env:
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          AZURE_SIGNING_PUBLISHER_NAME: ${{ vars.AZURE_SIGNING_PUBLISHER_NAME }}
+          AZURE_SIGN_DLLS: ${{ vars.AZURE_SIGN_DLLS }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Verify signatures (Azure)
+        if: env.SIGN_AZURE == 'true'
+        shell: pwsh
+        env:
+          PUBLISHER: ${{ vars.AZURE_SIGNING_PUBLISHER_NAME }}
+        run: |
+          $files = @(Get-ChildItem dist-desktop -Filter 'IndexArc-*.exe') + @(Get-Item dist-desktop/win-unpacked/IndexArc.exe)
+          $bad = $false
+          foreach ($f in $files) {
+            $s = Get-AuthenticodeSignature $f.FullName
+            $cn = if ($s.SignerCertificate) { $s.SignerCertificate.GetNameInfo('SimpleName', $false) } else { '' }
+            "{0}: {1} ({2})" -f $f.Name, $s.Status, $cn
+            if ($s.Status -ne 'Valid' -or $cn -ne $env:PUBLISHER) { $bad = $true }
+          }
+          if ($bad) { throw "A Windows artifact is unsigned or signed by someone other than '$env:PUBLISHER'." }
+          if (-not (Select-String -Quiet -Path dist-desktop/win-unpacked/resources/app-update.yml -Pattern 'publisherName')) { throw 'app-update.yml has no publisherName' }
 
       # ── Signed Windows release (SignPath) ────────────────────────────────
       # 1. Package the app unpacked and have SignPath sign IndexArc.exe.
@@ -72,14 +116,14 @@ jobs:
       # 3. Have SignPath sign those two, then refresh latest.yml and the
       #    blockmap, whose hashes the signature just changed.
       - name: Package unpacked app (to sign)
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGN_SIGNPATH == 'true'
         run: npm run build && npm run check:dist && npx electron-builder --win dir --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload unsigned app
         id: upload-unsigned-app
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGN_SIGNPATH == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: signpath-input-app
@@ -88,7 +132,7 @@ jobs:
           retention-days: 1
 
       - name: Sign app (SignPath)
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGN_SIGNPATH == 'true'
         uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -101,7 +145,7 @@ jobs:
           output-artifact-directory: signed/win-unpacked
 
       - name: Build installers from the signed app
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGN_SIGNPATH == 'true'
         shell: bash
         run: |
           node scripts/write-app-update-yml.mjs signed/win-unpacked "SignPath Foundation"
@@ -111,7 +155,7 @@ jobs:
 
       - name: Upload unsigned installers
         id: upload-unsigned-installers
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGN_SIGNPATH == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: signpath-input-installers
@@ -122,7 +166,7 @@ jobs:
           retention-days: 1
 
       - name: Sign installers (SignPath)
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGN_SIGNPATH == 'true'
         uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -135,7 +179,7 @@ jobs:
           output-artifact-directory: signed/installers
 
       - name: Use signed installers and refresh update manifest
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGN_SIGNPATH == 'true'
         shell: bash
         run: |
           cp -f signed/installers/IndexArc-Setup-*.exe signed/installers/IndexArc-Portable-*.exe dist-desktop/

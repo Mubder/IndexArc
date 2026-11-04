@@ -37,7 +37,7 @@ Every engineering item in R1–R6 has landed with tests, except those listed und
 | R6 Product | CLI, import/export and hygiene done; hosted mode and sync are designed but not built (gated) | 99e078d · 34efe6f |
 
 **Still open, needs the owner:**
-- Code signing (R2.1): apply to SignPath Foundation and add its secrets/variables (`docs/CODE_SIGNING.md`); the workflow is ready. macOS notarization or dropping macOS targets.
+- Code signing (R2.1): set up Azure Trusted Signing (paid, preferred) or SignPath Foundation (free) and add its secrets/variables (`docs/CODE_SIGNING.md`); the workflow supports both. macOS notarization or dropping macOS targets.
 - Branch protection on `main` (R2.5).
 - Pentest vendor and timing (R5).
 - Un-deferring hosted mode and sync (R6.4/R6.5; see the ship gates in `docs/design/R6-hosted-and-sync.md`).
@@ -181,7 +181,7 @@ Every engineering item in R1–R6 has landed with tests, except those listed und
 - Windows Authenticode via `build.win` (`certificateSubjectName` or PFX in CI secrets, `signingHashAlgorithms: ["sha256"]`); remove `CSC_IDENTITY_AUTO_DISCOVERY=false` from both workflows.
 - macOS: Developer ID + hardened runtime + notarization, or drop macOS targets until funded.
 - *Accept:* `signtool verify /pa` passes on every shipped `.exe`; SmartScreen reputation tracked.
-- **Progress (2026-11-04):** route chosen: SignPath Foundation (free OSS signing, publisher shown as "SignPath Foundation"). The project is licensed GPL-3.0 to qualify. `desktop-builds.yml` signs `IndexArc.exe`, then the installer and portable exe, on release events once `SIGNPATH_ORGANIZATION_ID` is set; `scripts/write-app-update-yml.mjs` and `scripts/refresh-update-manifest.mjs` keep the updater working with the externally signed files (tested locally without signing). Waiting on the owner's SignPath application. Setup: `docs/CODE_SIGNING.md`.
+- **Progress (2026-11-04):** route chosen: SignPath Foundation (free OSS signing, publisher shown as "SignPath Foundation"). The project is licensed GPL-3.0 to qualify. `desktop-builds.yml` signs `IndexArc.exe`, then the installer and portable exe, on release events once `SIGNPATH_ORGANIZATION_ID` is set; `scripts/write-app-update-yml.mjs` and `scripts/refresh-update-manifest.mjs` keep the updater working with the externally signed files (tested locally without signing). Azure Trusted Signing added as the preferred route (`scripts/azure-sign-config.mjs`, electron-builder's `azureSignOptions`; signs the exe, DLLs, installer, uninstaller and portable under the owner's name, and a CI step verifies the signer). Waiting on the owner's account. Setup: `docs/CODE_SIGNING.md`.
 
 ### R2.2 Electron hardening
 - `@electron/fuses`: `RunAsNode` off, `EnableNodeOptionsEnvironmentVariable` off, `EnableNodeCliInspectArguments` off, `EnableEmbeddedAsarIntegrityValidation` on, `OnlyLoadAppFromAsar` on.

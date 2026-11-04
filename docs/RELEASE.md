@@ -5,8 +5,9 @@ should be called "industrial"; the build system already supports each step.
 
 ## 1. Code signing (Windows first — it is the primary install base)
 
-> **Chosen route: SignPath Foundation (free open-source signing).** The
-> workflow is wired and waits only for the SignPath account; follow
+> **The workflow is wired for two routes:** Azure Trusted Signing (paid,
+> your name as publisher, preferred) and SignPath Foundation (free OSS
+> signing). Each switches on once its account is configured; follow
 > [CODE_SIGNING.md](./CODE_SIGNING.md). The certificate-based steps below are
 > the alternative if the project ever moves to its own certificate.
 

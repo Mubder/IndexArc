@@ -30,3 +30,6 @@ skills-lock.json
 coverage/
 playwright-report/
 test-results/
+
+# Generated in CI by scripts/azure-sign-config.mjs
+electron-builder.azure.json
