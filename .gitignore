@@ -27,3 +27,4 @@ Thumbs.db
 /.agents/
 /.commandcode/
 skills-lock.json
+coverage/

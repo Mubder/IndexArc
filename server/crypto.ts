@@ -195,47 +195,56 @@ export function envelopePayload(
   };
 }
 
+/** AES-GCM sizes. A shorter tag is a forgery shortcut, so it is rejected. */
+export const GCM_IV_BYTES = 12;
+export const GCM_TAG_BYTES = 16;
+
 /**
  * Encrypts cleartext using AES-256-GCM with the derived key and a new random IV.
+ * `aad` (additional authenticated data) binds the ciphertext to its context,
+ * e.g. table + record id: decrypting with different AAD fails.
  */
-export function encryptString(text: string, key: Buffer): { iv: string; authTag: string; ciphertext: string } {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+export function encryptString(
+  text: string,
+  key: Buffer,
+  aad?: string | Buffer
+): { iv: string; authTag: string; ciphertext: string } {
+  const iv = crypto.randomBytes(GCM_IV_BYTES);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv, { authTagLength: GCM_TAG_BYTES });
+  if (aad !== undefined) cipher.setAAD(Buffer.isBuffer(aad) ? aad : Buffer.from(aad, "utf8"));
 
-  const encrypted = Buffer.concat([
-    cipher.update(text, "utf8"),
-    cipher.final()
-  ]);
-
+  const encrypted = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
   const authTag = cipher.getAuthTag();
 
   return {
     iv: iv.toString("hex"),
     authTag: authTag.toString("hex"),
-    ciphertext: encrypted.toString("hex")
+    ciphertext: encrypted.toString("hex"),
   };
 }
 
 /**
  * Decrypts AES-256-GCM ciphertext using the derived key, IV, and authentication tag.
+ * Throws on a wrong key, any modified byte, a short tag or IV, or mismatched AAD.
  */
 export function decryptString(
   ciphertext: string,
   key: Buffer,
   ivHex: string,
-  authTagHex: string
+  authTagHex: string,
+  aad?: string | Buffer
 ): string {
   const iv = Buffer.from(ivHex, "hex");
   const authTag = Buffer.from(authTagHex, "hex");
+  if (iv.length !== GCM_IV_BYTES) throw new Error("Invalid IV length");
+  if (authTag.length !== GCM_TAG_BYTES) throw new Error("Invalid auth tag length");
+  if (!/^[0-9a-f]*$/i.test(ciphertext) || ciphertext.length % 2) throw new Error("Invalid ciphertext encoding");
   const cipherBuffer = Buffer.from(ciphertext, "hex");
 
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv, { authTagLength: GCM_TAG_BYTES });
   decipher.setAuthTag(authTag);
+  if (aad !== undefined) decipher.setAAD(Buffer.isBuffer(aad) ? aad : Buffer.from(aad, "utf8"));
 
-  const decrypted = Buffer.concat([
-    decipher.update(cipherBuffer),
-    decipher.final()
-  ]);
-
+  const decrypted = Buffer.concat([decipher.update(cipherBuffer), decipher.final()]);
   return decrypted.toString("utf8");
 }
