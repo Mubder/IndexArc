@@ -76,7 +76,10 @@ IndexArc/
 ├── Dockerfile
 ├── README.md
 ├── SECURITY.md          # Security policy and repository cleanliness rules
-├── DESKTOP_BUILD_GUIDE.md
+├── CHANGELOG.md
+├── LICENSE            # GPL-3.0
+├── bin/               # indexarc CLI
+├── .signpath/         # SignPath artifact configurations (code signing)
 └── docs/              # this documentation set
 ```
 

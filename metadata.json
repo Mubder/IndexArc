@@ -1,6 +1,0 @@
-{
-  "name": "IndexArc Vault",
-  "description": "Portable single-folder personal vault: multi-extract secrets, always-named tokens, unidentified inbox, bilingual Ask (AR/EN), Local Ollama or Gemini API.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

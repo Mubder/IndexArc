@@ -18,13 +18,13 @@ Everything lives in **one folder** (USB-safe), with optional AES-256-GCM encrypt
 | [Audit Report](./AUDIT_REPORT.md) | Maintainers | 2026-09 deep audit: security findings (CRITICAL→LOW), correctness bugs, fix order |
 | [Scratchpad & Protection Plan](./SCRATCHPAD_AND_PROTECTION_PLAN.md) | Maintainers | Scratchpad refactor design, Pin/Protect/Lock note-protection spec, industry-grade roadmap |
 | [Industrial-Grade Roadmap](./INDUSTRIAL_ROADMAP.md) | Maintainers | **Authoritative build order** (2026-11) — what "industrial grade" means, phases R0–R6 with acceptance criteria, owner decisions, dependency map |
+| [Code Signing](./CODE_SIGNING.md) | Owner / release manager | Signing Windows releases: Azure Trusted Signing or SignPath Foundation, setup and verification |
 | [Execution Plan](./EXECUTION_PLAN.md) | Maintainers | Previous build order (2026-09); Phases 1–3 shipped, remaining work moved to the roadmap |
 
 Root-level docs that still apply:
 
 - [`../README.md`](../README.md) — quick project overview.
 - [`../SECURITY.md`](../SECURITY.md) — security policy and repository cleanliness rules.
-- [`../DESKTOP_BUILD_GUIDE.md`](../DESKTOP_BUILD_GUIDE.md) — original desktop build notes (superseded in detail by [Build & Release](./BUILD_AND_RELEASE.md)).
 
 ---
 

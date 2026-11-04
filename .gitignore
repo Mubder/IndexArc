@@ -2,8 +2,7 @@ node_modules/
 dist/
 dist-manifest.json
 dist-desktop/
-dist-desktop-release/
-dist-desktop-out/
+dist-desktop-*/
 .desktop-sandbox/
 
 # Never commit vault secrets
@@ -27,6 +26,7 @@ Thumbs.db
 /.agents/
 /.commandcode/
 skills-lock.json
+/.claude/
 coverage/
 playwright-report/
 test-results/
