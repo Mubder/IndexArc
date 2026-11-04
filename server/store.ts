@@ -802,6 +802,7 @@ export class VaultStore {
       } catch (e: any) {
         addLog("DATA", `Binding vault files to their roles failed (${e?.message}) — files stay as they are. Retried on next unlock.`);
       }
+      this.applyRowSumCheck();
       // Verified knowledge of the master password — end the encryption grace
       // period if its window has elapsed (staged plaintext copies are then
       // finally deleted; see stagePlaintextArtifactsForGrace).
@@ -1420,13 +1421,58 @@ export class VaultStore {
   // --- Vault ---
   // ── Storage v2: SQLite records (R3.2) ──────────────────────────────────
   private db(): RecordDb {
-    if (!this._db) this._db = new RecordDb(this.paths.vaultDbFile);
+    if (!this._db) {
+      this._db = new RecordDb(this.paths.vaultDbFile);
+      // Evaluated at use time, so a key switch (re-key, lock) is always seen.
+      this._db.rowMacProvider = () => this.rowMac();
+    }
     return this._db;
   }
 
   /** v2 when vault.json says so, or when there is no vault yet. */
   private isV2(header: any = readJsonStrict<any>(this.paths.vaultFile, null)): boolean {
     return !header || header.storage === STORAGE_V2;
+  }
+
+  private _rowMacCache: { key: Buffer; mac: (table: RecordTable, id: string, tag: Buffer) => Buffer } | null = null;
+
+  /** Keyed MAC for the row checksum (RecordDb "rowsum"); null without a key. */
+  private rowMac(): ((table: RecordTable, id: string, tag: Buffer) => Buffer) | null {
+    const key = this.encryptionKey;
+    if (!key) return null;
+    if (this._rowMacCache?.key !== key) {
+      const k = Buffer.from(crypto.hkdfSync("sha256", key, Buffer.alloc(0), "indexarc:rowsum:v1", 32));
+      this._rowMacCache = { key, mac: (table, id, tag) => crypto.createHmac("sha256", k).update(`${table} ${id} `).update(tag).digest() };
+    }
+    return this._rowMacCache.mac;
+  }
+
+  /**
+   * Compare the row checksum with the rows on disk. null when there is
+   * nothing to check (no key, no database, plaintext rows). A database from
+   * before the checksum gets one now (trust on first use).
+   */
+  private checkRowSum(): string | null {
+    if (!this.encryptionKey || !this.isV2()) return null;
+    const db = this.db();
+    if (!db.exists()) return null;
+    const stored = db.getMeta("rowsum");
+    const actual = db.computeRowSum();
+    if (!actual) return null;
+    if (stored === null) {
+      let expected = false;
+      try {
+        const raw = readJsonStrict<any>(this.paths.vaultFile, null);
+        expected = JSON.parse(openEnvelope(raw, this.encryptionKey, "vault")).rowsum === 1;
+      } catch {}
+      if (!expected) {
+        // Trust on first use, then record in the header that it exists.
+        db.tx(() => db.setMeta("rowsum", actual.toString("hex")));
+        this.writeHeaderV2();
+        return null;
+      }
+    } else if (stored.length === 64 && crypto.timingSafeEqual(Buffer.from(stored, "hex"), actual)) return null;
+    return "vault.db records changed outside IndexArc: a record was rolled back to an older copy, removed, or copied in from another copy of the vault. Check your entries; restore from Settings → Emergency Plan if something is missing or old.";
   }
 
   private static aad(table: RecordTable, id: string): string {
@@ -1470,7 +1516,10 @@ export class VaultStore {
 
   /** Small vault.json header: KDF + salt + an encrypted key check. */
   private writeHeaderV2(): void {
-    const body = { version: 2, storage: STORAGE_V2, entries: [] as VaultEntry[] };
+    // rowsum: vault.db keeps a row checksum (meta "rowsum"). Recorded in the
+    // encrypted header so that deleting the meta row is not mistaken for a
+    // vault from before the checksum.
+    const body = { version: 2, storage: STORAGE_V2, entries: [] as VaultEntry[], ...(this.encryptionKey ? { rowsum: 1 } : {}) };
     const rawDisk = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
     if ((rawDisk && rawDisk.encrypted) || this.encryptionKey) {
       if (!this.encryptionKey) throw new Error("Vault is locked");
@@ -2117,7 +2166,26 @@ export class VaultStore {
       atomicWrite(this.paths.manifestFile, JSON.stringify({ version: 1, hmacs: macs }, null, 2));
     } catch {}
     this._integrityWarnings = warnings;
-    return warnings;
+    this.applyRowSumCheck();
+    return this._integrityWarnings;
+  }
+
+  private static readonly ROWSUM_WARNING_PREFIX = "vault.db records changed";
+
+  /** Run the row checksum (needs the key) and keep its warning in the list. */
+  private applyRowSumCheck(): void {
+    let w: string | null = null;
+    try {
+      w = this.checkRowSum();
+    } catch (e: any) {
+      addLog("DATA", `Row checksum check failed to run: ${e?.message}`);
+    }
+    const rest = this._integrityWarnings.filter((x) => !x.startsWith(VaultStore.ROWSUM_WARNING_PREFIX));
+    if (w) {
+      addLog("SECURITY", w);
+      rest.push(w);
+    }
+    this._integrityWarnings = rest;
   }
 
   getIntegrityWarnings(): string[] {

@@ -135,6 +135,62 @@ export class RecordDb {
     this.stmt("DELETE FROM meta WHERE k = ?").run(k);
   }
 
+  /**
+   * Keyed checksum over the sealed rows, for rollback/removal detection:
+   * meta "rowsum" = XOR over every encrypted row of rowMac(table, id, tag).
+   * The GCM tag is unique per sealing, so replacing a row with an older
+   * sealed copy, deleting one, or copying one in from another copy of the
+   * database changes the sum, and without the vault key the sum cannot be
+   * fixed up. Kept in the same transaction as the row change.
+   *
+   * The store provides the MAC; it returns null when there is no key
+   * (plaintext vault), and then no checksum is kept.
+   */
+  rowMacProvider: (() => ((table: RecordTable, id: string, tag: Buffer) => Buffer) | null) | null = null;
+  private bulk = false;
+
+  private macs() {
+    return this.rowMacProvider?.() ?? null;
+  }
+
+  private static xorInto(acc: Buffer, b: Buffer): void {
+    for (let i = 0; i < acc.length && i < b.length; i++) acc[i] ^= b[i];
+  }
+
+  /** Full recomputation (null when there is no key). */
+  computeRowSum(): Buffer | null {
+    const mac = this.macs();
+    if (!mac) return null;
+    const acc = Buffer.alloc(32);
+    for (const table of RECORD_TABLES) {
+      const rows = this.stmt(`SELECT id, tag FROM ${table}`).all() as unknown as Array<{ id: string; tag: Uint8Array | null }>;
+      for (const r of rows) if (r.tag) RecordDb.xorInto(acc, mac(table, r.id, Buffer.from(r.tag)));
+    }
+    return acc;
+  }
+
+  recomputeRowSum(): void {
+    const s = this.computeRowSum();
+    if (s) this.setMeta("rowsum", s.toString("hex"));
+    else this.deleteMeta("rowsum");
+  }
+
+  /** Apply a row change to the checksum: XOR out removed tags, XOR in added ones. */
+  private adjustRowSum(table: RecordTable, removed: Array<{ id: string; tag: Uint8Array | null }>, added: Array<{ id: string; tag: Buffer | null }>): void {
+    if (this.bulk) return;
+    const mac = this.macs();
+    const cur = this.getMeta("rowsum");
+    if (!mac || cur === null) {
+      // No key, or a database from before the checksum: (re)build it whole.
+      this.recomputeRowSum();
+      return;
+    }
+    const acc = Buffer.from(cur, "hex");
+    for (const r of removed) if (r.tag) RecordDb.xorInto(acc, mac(table, r.id, Buffer.from(r.tag)));
+    for (const r of added) if (r.tag) RecordDb.xorInto(acc, mac(table, r.id, r.tag));
+    this.setMeta("rowsum", acc.toString("hex"));
+  }
+
   /** Monotonic change counter, bumped by every write (backups dedupe on it). */
   rev(): number {
     return Number(this.getMeta("rev") || 0);
@@ -166,21 +222,27 @@ export class RecordDb {
   }
 
   put(table: RecordTable, row: RecordRow): void {
+    const old = this.bulk ? undefined : (this.stmt(`SELECT id, tag FROM ${table} WHERE id = ?`).get(row.id) as { id: string; tag: Uint8Array | null } | undefined);
     this.stmt(
       `INSERT INTO ${table} (id, entry_id, iv, tag, body) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET entry_id = excluded.entry_id, iv = excluded.iv, tag = excluded.tag, body = excluded.body`
     ).run(row.id, row.entry_id, row.iv, row.tag, row.body);
+    this.adjustRowSum(table, old ? [old] : [], [{ id: row.id, tag: row.tag }]);
     this.bump();
   }
 
   delete(table: RecordTable, id: string): number {
+    const gone = this.stmt(`SELECT id, tag FROM ${table} WHERE id = ?`).all(id) as unknown as Array<{ id: string; tag: Uint8Array | null }>;
     const r = this.stmt(`DELETE FROM ${table} WHERE id = ?`).run(id);
+    this.adjustRowSum(table, gone, []);
     this.bump();
     return Number(r.changes);
   }
 
   deleteByEntry(table: RecordTable, entryId: string): number {
+    const gone = this.stmt(`SELECT id, tag FROM ${table} WHERE entry_id = ?`).all(entryId) as unknown as Array<{ id: string; tag: Uint8Array | null }>;
     const r = this.stmt(`DELETE FROM ${table} WHERE entry_id = ?`).run(entryId);
+    this.adjustRowSum(table, gone, []);
     this.bump();
     return Number(r.changes);
   }
@@ -188,7 +250,13 @@ export class RecordDb {
   /** Replace a whole table in the CURRENT transaction (caller wraps in tx). */
   replaceAll(table: RecordTable, rows: RecordRow[]): void {
     this.stmt(`DELETE FROM ${table}`).run();
-    for (const row of rows) this.put(table, row);
+    this.bulk = true;
+    try {
+      for (const row of rows) this.put(table, row);
+    } finally {
+      this.bulk = false;
+    }
+    this.recomputeRowSum();
     this.bump();
   }
 

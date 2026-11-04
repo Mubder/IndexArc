@@ -269,7 +269,7 @@ an older *encrypted* snapshot (rollback) while locked.
 See [RELEASE.md](RELEASE.md) and [ASVS-L2.md](ASVS-L2.md#gap-summary):
 Authenticode signing certificate + signed artifacts (unblocks the signed
 update path that is already in code), `Cache-Control: no-store` on `/api`,
-rollback detection and AAD on every envelope, a stronger password policy,
+whole-vault rollback detection (row rollback and AAD on every envelope have landed),
 the recovery key (shipping with clear rotation guidance), and an external penetration test against
 this model.
 
@@ -281,7 +281,7 @@ Previous revision: 2.1, 2026-09.
 |---|---|
 | Process model | Vault server moved from the main process into an Electron `utilityProcess` (R3.1). Token and settings key are minted by the shell and passed only in the child env; port reported over `parentPort`. New boundary 1b. |
 | Parsing | Binary document parsing moved into a `worker_threads` worker with heap and time limits; added adversary A7 and boundary 2b. |
-| Storage | Storage v2 (R3.2): `vault.json` is a sealed header; records in `data/vault.db` with per-row AES-GCM and AAD. Documented metadata visible at rest and undetected row rollback/deletion. |
+| Storage | Storage v2 (R3.2): `vault.json` is a sealed header; records in `data/vault.db` with per-row AES-GCM and AAD. Documented metadata visible at rest. A keyed row checksum (meta `rowsum`) now detects a single row rolled back, removed or copied in; whole-vault rollback stays undetected. |
 | Crypto | 16-byte GCM tag and 12-byte IV now enforced on decrypt; AAD support in `encryptString`/`decryptString`. JSON envelopes still lack AAD (noted). |
 | Updates | Signed auto-update via GitHub Releases (R2.3), install only on signed NSIS builds. New boundary 4b. Releases still unsigned. |
 | Recovery | Recovery key (X25519-sealed vault key in `data/recovery.json`, one-time recovery code) landed (R5); threat: code + files = vault access; password change does not revoke it. New boundary 3b. A single change-password (re-key) route landed too (no plaintext window). Also new: redacted diagnostics export, opt-in local crash log (messages/stacks only, redacted; never minidumps), `Cache-Control: no-store` on all `/api` responses. |

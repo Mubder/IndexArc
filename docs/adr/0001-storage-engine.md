@@ -66,7 +66,7 @@ Options considered:
 
 **Worse / accepted**
 - **Metadata is visible at rest.** Row count, row sizes and ids are visible; ids are random UUIDs. An attacker can tell how many secrets exist and roughly how large each is. In v1, only the total size was visible.
-- **Row-level rollback and deletion are not detected.** With file access, an attacker can delete a row or restore an older sealed copy of the same row, and GCM will not flag it. v1 had the same property at the file level, via a file-level HMAC that the attacker could not forge but could replay. A signed `rev` / Merkle root in the header is a follow-up (tracked in R5).
+- **Row-level rollback and deletion are not detected.** With file access, an attacker can delete a row or restore an older sealed copy of the same row, and GCM will not flag it. v1 had the same property at the file level, via a file-level HMAC that the attacker could not forge but could replay. A signed `rev` / Merkle root in the header is a follow-up (tracked in R5). **Update 2026-11-04:** addressed by a keyed checksum over the sealed rows (meta `rowsum`), checked on unlock; whole-vault rollback remains out of scope (see ASVS-L2 V6).
 - **Scratchpad, notes, revisions and settings are still JSON envelopes.** They are small and change less often. Moving them into the database is a follow-up once the format has had time in the field.
 - **Downgrading is not supported.** Once migrated, a 2.1 build cannot read a v2 vault. The pre-migration emergency snapshot is the rollback path.
 

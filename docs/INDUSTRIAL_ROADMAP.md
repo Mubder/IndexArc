@@ -49,7 +49,6 @@ Every engineering item in R1–R6 has landed with tests, except those listed und
   - AAD on the JSON envelopes and the `vault.json` header (SQLite rows already have it);
   - runtime schema validation of request bodies;
   - a single key-lifecycle document.
-- Row rollback detection: an old copy of a sealed row still decrypts under its AAD. A per-row version bound into the AAD, or a signed manifest, would close this.
 - CodeQL in CI.
 - Electron: a `will-attach-webview` guard and a sender check on the flush-complete IPC.
 - A self-contained CLI binary (Node SEA) and PATH registration by the installer.
@@ -233,7 +232,7 @@ Every engineering item in R1–R6 has landed with tests, except those listed und
   - A re-key keeps the old key sealed under the new one (`prev_key`) until every row is rewritten, so a crash mid-re-key is recovered at the next unlock.
   - 10k-entry benchmark: unlock ~130 ms, list ~285 ms, create/update/delete/upsert 3–11 ms.
   - A real 3k-entry vault migrated from 78 MB of JSON to a 39 MB database. Fixing `/health` (snapshot header peek) took the Library from ~21 s to 1.9 s.
-  - **Not done:** `sqlite-vec`/HNSW. Vector search is still a linear scan over decrypted rows, which is fast enough at 10k. Rollback of a single row to an older ciphertext is not detected (see "Where things stand").
+  - **Not done:** `sqlite-vec`/HNSW. Vector search is still a linear scan over decrypted rows, which is fast enough at 10k. Rollback of a single row is detected by a keyed row checksum (2026-11-04); rollback of the whole vault is not.
 
 ### R3.3 AI provider interface
 - One `Provider` interface (`generate`, `embed`, `complete`, `isLocal`, `health`) with an adapter per provider; consent and egress checks live in one wrapper, not in six if/else chains (`providers.ts`, 1.3k lines).
