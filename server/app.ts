@@ -4,7 +4,9 @@ import type { PortablePaths } from "./paths.js";
 import type { VaultStore } from "./store.js";
 import type { AuditLog } from "./audit.js";
 import type { FolderWatcherManager } from "./services/folderWatcher.js";
-import { apiAuthMiddleware } from "./auth.js";
+import { apiAuthMiddleware, setCliVerifier } from "./auth.js";
+import { verifyCliToken } from "./cli.js";
+import { cliRoutes } from "./routes/cli.js";
 import { vaultRoutes, checkVaultUnlocked } from "./routes/vault.js";
 import { entriesRoutes } from "./routes/entries.js";
 import { portingRoutes } from "./routes/porting.js";
@@ -39,6 +41,8 @@ export const protectedPaths = [
   "/api/vault/recovery",
   // Import preview + export (R6.2).
   "/api/porting",
+  // CLI token management + CLI reads (R6.1).
+  "/api/cli",
 ];
 
 export interface CreateAppDeps {
@@ -110,6 +114,13 @@ export function createApp({ paths, store, audit, watchers }: CreateAppDeps): { a
   // Shared context for all route modules
   const ctx: RouteContext = { store, watchers, paths, spellcheck: createSpellcheckEngines(paths), audit };
 
+  // CLI tokens are verified against digests keyed from the vault key.
+  setCliVerifier((presented) => {
+    const digest = store.cliDigester();
+    if (!digest) return "locked";
+    return verifyCliToken(paths.cliTokensFile, presented, digest);
+  });
+
   // --- Vault routes (lock/unlock/setup — no auth required) ---
   app.use("/api/vault", vaultRoutes(ctx));
 
@@ -153,6 +164,7 @@ export function createApp({ paths, store, audit, watchers }: CreateAppDeps): { a
   // --- Entries (CRUD, save, park, check-duplicate) ---
   app.use("/api/entries", entriesRoutes(ctx));
   app.use("/api/porting", portingRoutes(ctx));
+  app.use("/api/cli", cliRoutes(ctx));
 
   // --- Folder scan, watch, sessions, filesystem browser ---
   app.use("/api/folders", foldersRoutes(ctx));

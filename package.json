@@ -6,6 +6,9 @@
   "author": "IndexArc",
   "type": "module",
   "main": "electron-main.cjs",
+  "bin": {
+    "indexarc": "bin/indexarc.mjs"
+  },
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --external:vite --external:electron --banner:js=\"const __importMetaUrl = require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__importMetaUrl --sourcemap --outfile=dist/server.cjs && esbuild server/services/parseWorker.ts --bundle --platform=node --format=cjs --external:vite --external:electron --banner:js=\"const __importMetaUrl = require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__importMetaUrl --sourcemap --outfile=dist/parse-worker.cjs && node scripts/copy-pdf-worker.cjs && node scripts/write-dist-manifest.cjs",
@@ -213,6 +216,16 @@
       ],
       "category": "Office",
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "cli",
+        "filter": [
+          "indexarc.mjs",
+          "indexarc.cmd"
+        ]
+      }
+    ]
   }
 }

@@ -750,6 +750,17 @@ export interface TranslationDict {
   port_plain_confirm: string;
   port_export_btn: string;
   port_exported: string;
+  cli_title: string;
+  cli_desc: string;
+  cli_token_name: string;
+  cli_create: string;
+  cli_token_once: string;
+  cli_done: string;
+  cli_none: string;
+  cli_last_used: string;
+  cli_never_used: string;
+  cli_revoke: string;
+  cli_note: string;
 }
 
 export const translations: Record<UiLanguage, TranslationDict> = {
@@ -1501,6 +1512,17 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     port_plain_confirm: "Confirm the plain-text warning first.",
     port_export_btn: "Export",
     port_exported: "Exported {n} entries.",
+    cli_title: "CLI access",
+    cli_desc: "Use your secrets from a terminal or script with the indexarc command. It reads from this app, only while the vault is unlocked, using a token you create here.",
+    cli_token_name: "Token name (e.g. laptop, CI)",
+    cli_create: "Create token",
+    cli_token_once: "Copy this token now. It is shown only once. Paste it into `indexarc login`.",
+    cli_done: "I've copied it",
+    cli_none: "No CLI tokens yet.",
+    cli_last_used: "Last used",
+    cli_never_used: "Never used",
+    cli_revoke: "Revoke",
+    cli_note: "A CLI token can only read secrets; it cannot change the vault, unlock it, or make new tokens. Changing the master password revokes all CLI tokens.",
   },
   ar: {
     tab_home: "الرئيسية",
@@ -2250,6 +2272,17 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     port_plain_confirm: "أكّد تحذير النص العادي أولًا.",
     port_export_btn: "تصدير",
     port_exported: "تم تصدير {n} عنصرًا.",
+    cli_title: "الوصول عبر سطر الأوامر",
+    cli_desc: "استخدم أسرارك من الطرفية أو السكربتات عبر الأمر indexarc. يقرأ من هذا التطبيق فقط أثناء فتح الخزنة، باستخدام رمز تنشئه هنا.",
+    cli_token_name: "اسم الرمز (مثل: الحاسوب، CI)",
+    cli_create: "إنشاء رمز",
+    cli_token_once: "انسخ هذا الرمز الآن؛ لن يظهر مرة أخرى. الصقه في ‎`indexarc login`.",
+    cli_done: "نسخته",
+    cli_none: "لا توجد رموز بعد.",
+    cli_last_used: "آخر استخدام",
+    cli_never_used: "لم يُستخدم",
+    cli_revoke: "إلغاء",
+    cli_note: "رمز سطر الأوامر يقرأ الأسرار فقط؛ لا يغيّر الخزنة ولا يفتحها ولا ينشئ رموزًا جديدة. تغيير كلمة المرور الرئيسية يلغي كل الرموز.",
   },
 };
 

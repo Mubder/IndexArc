@@ -14,6 +14,7 @@ import { SecuritySection } from "./settings/SecuritySection";
 import { EmergencySection, type EmergencySnapshot } from "./settings/EmergencySection";
 import { LogsSection } from "./settings/LogsSection";
 import { PortingSection } from "./settings/PortingSection";
+import { CliSection } from "./settings/CliSection";
 import { fill } from "./home/DashboardCards";
 
 interface SettingsTabProps {
@@ -201,6 +202,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       <SecuritySection handleRemovePassword={handleRemovePassword} handleSetupPassword={handleSetupPassword} secError={secError} secPassword={secPassword} setSecPassword={setSecPassword} t={t} vaultStatus={vaultStatus} />
 
       <PortingSection t={t} encrypted={!!vaultStatus?.encryption_enabled} />
+
+      <CliSection t={t} encrypted={!!vaultStatus?.encryption_enabled} />
 
       <EmergencySection confirmRestore={confirmRestore} emgBusy={emgBusy} emgMsg={emgMsg} fmtDate={fmtDate} handleCreateSnapshot={handleCreateSnapshot} handleRestoreSnapshot={handleRestoreSnapshot} loadSnapshots={loadSnapshots} onOpenHealth={onOpenHealth} setConfirmRestore={setConfirmRestore} snapshots={snapshots} status={status} t={t} />
 

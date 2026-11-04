@@ -69,6 +69,14 @@ function consumeSseTicket(t: unknown): boolean {
   return exp !== undefined && exp > Date.now();
 }
 
+// CLI token verification is injected by the app (it needs the vault key).
+const CLI_PATHS = new Set(["/cli/secret", "/cli/env"]);
+export type CliVerifier = (presented: string) => { id: string; name: string } | null | "locked";
+let cliVerifier: CliVerifier | null = null;
+export function setCliVerifier(fn: CliVerifier | null) {
+  cliVerifier = fn;
+}
+
 // Constant-time token comparison (RESIDUAL-4): comparing sha256 digests of
 // both sides gives equal-length buffers — timingSafeEqual then leaks neither
 // content nor length of the presented value.
@@ -128,7 +136,30 @@ export function apiAuthMiddleware(req: Request, res: Response, next: NextFunctio
     return;
   }
 
-  // 6) Everything else requires the pairing token.
+  // 6) CLI tokens (R6.1): scoped to the read-only CLI endpoints. They never
+  //    unlock anything, never mint tokens, and do not count as user activity
+  //    (a script must not keep the vault from auto-locking).
+  const auth = String(req.header("authorization") ?? "");
+  if (auth.startsWith("Bearer ")) {
+    if (!CLI_PATHS.has(req.path) || !cliVerifier) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const v = cliVerifier(auth.slice(7).trim());
+    if (v === "locked") {
+      res.status(423).json({ error: "Vault is locked. Unlock IndexArc and try again.", locked: true });
+      return;
+    }
+    if (!v) {
+      res.status(401).json({ error: "Invalid or revoked CLI token" });
+      return;
+    }
+    (req as any).cliToken = v;
+    next();
+    return;
+  }
+
+  // 7) Everything else requires the pairing token.
   if (!tokenMatches(String(req.header("x-indexarc-token") ?? ""))) {
     res.status(401).json({ error: "Unauthorized" });
     return;

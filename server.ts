@@ -11,6 +11,7 @@ import { getLastActivity } from "./server/auth.js";
 import { sendSSE } from "./server/routes/sse.js";
 import { createApp } from "./server/app.js";
 import { closeAllRecordDbs } from "./server/db/recordDb.js";
+import { writeRuntimeFile, removeRuntimeFile } from "./server/cli.js";
 import { recordCrash } from "./server/diagnostics.js";
 
 const paths = ensurePortableLayout();
@@ -56,6 +57,7 @@ function shutdown(code: number) {
     /* best-effort */
   }
   watchers.stopAll();
+  removeRuntimeFile();
   // Checkpoint the WAL into data/vault.db so the file is self-contained.
   try {
     closeAllRecordDbs();
@@ -279,6 +281,8 @@ async function startServer() {
   const listenReady = (server: import("http").Server) => {
     const addr = server.address() as { port: number };
     parentPort?.postMessage({ type: "listening", port: addr.port });
+    // Port discovery for the `indexarc` CLI (no secret in it).
+    writeRuntimeFile(addr.port, HOST);
     addLog("SYSTEM", `Vault server listening on http://${HOST}:${addr.port}`);
     console.log(`IndexArc Vault → http://${HOST}:${addr.port}`);
     console.log(`Portable root → ${paths.root}`);
@@ -312,7 +316,10 @@ async function startServer() {
   listenWithRetry(PORT, 0);
 }
 
-process.on("exit", () => watchers.stopAll());
+process.on("exit", () => {
+  watchers.stopAll();
+  removeRuntimeFile();
+});
 process.on("SIGINT", () => {
   watchers.stopAll();
   process.exit(0);

@@ -40,6 +40,12 @@ const POLICY: Record<string, Policy> = {
   "GET /api/entries/hygiene": "token+unlocked",
   "PATCH /api/entries/:id/hygiene": "token+unlocked",
   "GET /api/entries/:id/usages": "token+unlocked",
+  // CLI access (R6.1): reads also accept a scoped CLI token (server/cli.test.ts).
+  "GET /api/cli/tokens": "token+unlocked",
+  "POST /api/cli/tokens": "token+unlocked",
+  "POST /api/cli/tokens/:id/revoke": "token+unlocked",
+  "GET /api/cli/secret": "token+unlocked",
+  "POST /api/cli/env": "token+unlocked",
 
   // --- analyze ---
   "POST /api/analyze": "token+unlocked",

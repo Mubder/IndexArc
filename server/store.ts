@@ -17,6 +17,7 @@ import { RecordDb, RECORD_TABLES, type RecordRow, type RecordTable } from "./db/
 import type { KdfParams } from "./crypto.js";
 import { addLog } from "./logs.js";
 import { RECOVERY_ALG, generateRecoveryKey, openWithRecoveryCode, sealToRecoveryKey } from "./recovery.js";
+import { cliDigester, revokeAllCliTokens, type Digester } from "./cli.js";
 
 /** AAD for the previous vault key kept in vault.db meta during a re-key. */
 const PREV_KEY_AAD = "indexarc:v2:prevkey";
@@ -645,7 +646,15 @@ export class VaultStore {
     } catch {}
     this.clearCache();
     this.refreshRecoverySeal();
+    // CLI token digests were keyed from the old vault key.
+    revokeAllCliTokens(this.paths.cliTokensFile);
     this.touchEmergencySnapshot();
+  }
+
+  /** Digest for CLI tokens, keyed from the vault key; null while locked. */
+  cliDigester(): Digester | null {
+    if (this.isLocked()) return null;
+    return cliDigester(this.encryptionKey);
   }
 
   // ── Recovery key ─────────────────────────────────────────────────────────
@@ -868,6 +877,7 @@ export class VaultStore {
     } catch {}
     addLog("SYSTEM", "Vault re-keyed with current KDF standard (Argon2id) — envelopes upgraded.");
     this.refreshRecoverySeal();
+    revokeAllCliTokens(this.paths.cliTokensFile);
     this.touchEmergencySnapshot();
   }
 
@@ -954,6 +964,7 @@ export class VaultStore {
     try {
       fs.unlinkSync(this.paths.recoveryFile);
     } catch {}
+    revokeAllCliTokens(this.paths.cliTokensFile);
     const salt = generateSalt();
     const key = await deriveKeyAsync(password, salt);
     this.encryptionKey = key;
@@ -1247,6 +1258,7 @@ export class VaultStore {
       try {
         fs.unlinkSync(this.paths.recoveryFile);
       } catch {}
+      revokeAllCliTokens(this.paths.cliTokensFile);
       this.touchEmergencySnapshot();
       return true;
     } catch (e: any) {

@@ -94,6 +94,8 @@ export function ensurePortableLayout(root: string = getAppRoot()) {
     vaultDbFile: path.join(root, "data", "vault.db"),
     /** Vault key sealed to the user's recovery key (public half only). */
     recoveryFile: path.join(root, "data", "recovery.json"),
+    /** CLI access tokens, stored as keyed digests (server/cli.ts). */
+    cliTokensFile: path.join(root, "data", "cli-tokens.json"),
     settingsFile: path.join(root, "config", "settings.json"),
     watchedFoldersFile: path.join(root, "data", "watched_folders.json"),
     scanSessionsFile: path.join(root, "data", "scan_sessions.json"),
