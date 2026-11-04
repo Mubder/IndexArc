@@ -5,6 +5,12 @@ should be called "industrial"; the build system already supports each step.
 
 ## 1. Code signing (Windows first — it is the primary install base)
 
+> **Chosen route: SignPath Foundation (free open-source signing).** The
+> workflow is wired and waits only for the SignPath account; follow
+> [CODE_SIGNING.md](./CODE_SIGNING.md). The certificate-based steps below are
+> the alternative if the project ever moves to its own certificate.
+
+
 1. Purchase an OV (or EV) code-signing certificate for the publishing
    identity you want users to trust.
 2. Store it somewhere CI can use without leaking it (GitHub Actions

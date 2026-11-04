@@ -150,7 +150,7 @@ The net effect: **updating or reinstalling never changes where your vault lives,
 
 ## Code signing
 
-Artifacts are **unsigned** today: CI sets `CSC_IDENTITY_AUTO_DISCOVERY=false` and no certificate is configured. When a certificate is available, electron-builder signs the exe, the portable, the uninstaller and helper binaries with `signtool.exe`. The steps and the decisions still open (OV vs EV, macOS notarization) are in [RELEASE.md](./RELEASE.md#1-code-signing-windows-first--it-is-the-primary-install-base).
+Artifacts are **unsigned** today. Windows release builds will be signed through SignPath Foundation's free open-source program as soon as the owner's SignPath account is set up; the workflow steps are already in place and switch on by themselves. Setup and verification: [CODE_SIGNING.md](./CODE_SIGNING.md). Without SignPath, CI sets `CSC_IDENTITY_AUTO_DISCOVERY=false` and no certificate is configured. When a certificate is available, electron-builder signs the exe, the portable, the uninstaller and helper binaries with `signtool.exe`. The steps and the decisions still open (OV vs EV, macOS notarization) are in [RELEASE.md](./RELEASE.md#1-code-signing-windows-first--it-is-the-primary-install-base).
 
 ---
 

@@ -4,6 +4,7 @@
   "version": "2.1.0",
   "description": "Portable personal vault — paste secrets, multi-extract, name, ask in AR/EN",
   "author": "IndexArc",
+  "license": "GPL-3.0-only",
   "type": "module",
   "main": "electron-main.cjs",
   "bin": {
@@ -77,7 +78,7 @@
   "build": {
     "appId": "com.indexarc.vault",
     "productName": "IndexArc",
-    "copyright": "Copyright © IndexArc",
+    "copyright": "Copyright © 2026 Mubder. Licensed under GPL-3.0.",
     "directories": {
       "output": "dist-desktop",
       "buildResources": "assets"
@@ -225,6 +226,10 @@
           "indexarc.mjs",
           "indexarc.cmd"
         ]
+      },
+      {
+        "from": "LICENSE",
+        "to": "LICENSE.txt"
       }
     ]
   }

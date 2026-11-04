@@ -17,6 +17,15 @@ jobs:
   build-cross-platform:
     name: Build Desktop app (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # actions: read lets the SignPath connector download this run's artifacts.
+    permissions:
+      contents: read
+      actions: read
+    env:
+      # Windows release builds are signed through SignPath (free OSS signing,
+      # certificate by SignPath Foundation) once the repository variable
+      # SIGNPATH_ORGANIZATION_ID is set. Setup: docs/CODE_SIGNING.md.
+      SIGN_WINDOWS: ${{ matrix.os == 'windows-latest' && github.event_name == 'release' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
 
     strategy:
       fail-fast: false
@@ -50,11 +59,87 @@ jobs:
         run: npm ci
 
       - name: Build and Package Desktop Binary
+        if: env.SIGN_WINDOWS != 'true'
         run: npm run ${{ matrix.build-script }}
         env:
           # Avoid signing issues during CI on macOS unless certs are passed
           CSC_IDENTITY_AUTO_DISCOVERY: false
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Signed Windows release (SignPath) ────────────────────────────────
+      # 1. Package the app unpacked and have SignPath sign IndexArc.exe.
+      # 2. Build the installer and portable exe from the signed folder.
+      # 3. Have SignPath sign those two, then refresh latest.yml and the
+      #    blockmap, whose hashes the signature just changed.
+      - name: Package unpacked app (to sign)
+        if: env.SIGN_WINDOWS == 'true'
+        run: npm run build && npm run check:dist && npx electron-builder --win dir --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload unsigned app
+        id: upload-unsigned-app
+        if: env.SIGN_WINDOWS == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signpath-input-app
+          path: dist-desktop/win-unpacked/
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign app (SignPath)
+        if: env.SIGN_WINDOWS == 'true'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: app
+          github-artifact-id: ${{ steps.upload-unsigned-app.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed/win-unpacked
+
+      - name: Build installers from the signed app
+        if: env.SIGN_WINDOWS == 'true'
+        shell: bash
+        run: |
+          node scripts/write-app-update-yml.mjs signed/win-unpacked "SignPath Foundation"
+          npx electron-builder --win nsis portable --x64 --publish never --prepackaged signed/win-unpacked
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload unsigned installers
+        id: upload-unsigned-installers
+        if: env.SIGN_WINDOWS == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signpath-input-installers
+          path: |
+            dist-desktop/IndexArc-Setup-*.exe
+            dist-desktop/IndexArc-Portable-*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign installers (SignPath)
+        if: env.SIGN_WINDOWS == 'true'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: installers
+          github-artifact-id: ${{ steps.upload-unsigned-installers.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed/installers
+
+      - name: Use signed installers and refresh update manifest
+        if: env.SIGN_WINDOWS == 'true'
+        shell: bash
+        run: |
+          cp -f signed/installers/IndexArc-Setup-*.exe signed/installers/IndexArc-Portable-*.exe dist-desktop/
+          node scripts/refresh-update-manifest.mjs dist-desktop
 
       # CycloneDX SBOM of the production (runtime) dependency tree. Generated
       # once (on the Windows leg) since the npm tree is platform-independent.
@@ -116,6 +201,9 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: release-assets
+          # Only the finished builds and the SBOM, never the signpath-input-*
+          # intermediates (unsigned files sent to SignPath).
+          pattern: IndexArc-*
           merge-multiple: true
 
       - name: Upload to the release

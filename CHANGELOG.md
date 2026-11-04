@@ -10,6 +10,11 @@ Commit messages follow the convention in
 ## [Unreleased]
 
 ### Added
+- IndexArc is now open source under the GNU GPL v3 (`LICENSE`). The README states the code-signing
+  policy and what the app sends over the network (only what the user turns on).
+- Windows release builds can be signed through SignPath Foundation's free open-source program; the
+  release workflow signs the app, installer and portable exe and keeps the auto-updater's hashes
+  correct. Activates once the SignPath account is set up (`docs/CODE_SIGNING.md`).
 - `indexarc` command-line tool: `get`, `env` and `run -- cmd` read secrets from the running,
   unlocked app. Tokens are created in Settings → CLI access and can only read secrets.
 - Import from `.env`, Bitwarden JSON, 1Password or generic CSV, KeePass XML and IndexArc exports,

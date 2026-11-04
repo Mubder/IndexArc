@@ -202,6 +202,39 @@ Full technical documentation is located in the [`docs/`](./docs/README.md) direc
 
 ---
 
-## License & Security Policy
+## License
 
-Private project. Built with strict **Zero-Secrets Compliance** — no private telemetry, tracking, or cloud uploads. All data remains exclusively under user control.
+IndexArc is free software: you can redistribute it and/or modify it under the terms of the
+**GNU General Public License, version 3** ([LICENSE](./LICENSE)).
+
+Copyright (C) 2026 Mubder
+
+It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the license for details.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+- Committers and reviewers: [Mubder](https://github.com/Mubder)
+- Approvers: [Mubder](https://github.com/Mubder)
+
+Only builds produced by this repository's GitHub Actions from a published release are signed, and
+each signing request is approved by hand. Details: [docs/CODE_SIGNING.md](./docs/CODE_SIGNING.md).
+
+## Privacy
+
+This program will not transfer any information to other networked systems unless specifically
+requested by the user or the person installing or operating it. There is no telemetry, analytics
+or crash upload. Each outbound connection is something the user turns on or starts:
+
+- **Cloud AI providers** (Gemini, OpenAI, Anthropic, Groq, OpenRouter): only after the user adds an
+  API key and gives cloud consent; the text being processed goes to the chosen provider.
+- **Local AI (Ollama)**: talks to the Ollama address the user configures; downloading the Ollama
+  installer happens only when the user asks for it.
+- **Public LanguageTool grammar check** (languagetool.org): off by default.
+- **Update check** (GitHub Releases): only when the user clicks *Check for updates*, or turns on
+  the startup check (off by default).
+
+Your vault never leaves your device unless you export it. Security details: [SECURITY.md](./SECURITY.md).

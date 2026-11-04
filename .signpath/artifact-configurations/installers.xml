@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "installers" (slug must be: installers).
+  Input: the NSIS installer and the portable exe, built from the already-signed
+  app by .github/workflows/desktop-builds.yml. Each path must match exactly once.
+  Paste into SignPath → Project → Artifact configurations. See docs/CODE_SIGNING.md.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="IndexArc-Setup-*.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="IndexArc-Portable-*.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
