@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     setupFiles: ["./vitest.setup.ts"],
     // Agent worktrees under .claude/ hold full copies of the repo.
-    exclude: [...configDefaults.exclude, ".claude/**", "dist-desktop/**"],
+    exclude: [...configDefaults.exclude, ".claude/**", "dist-desktop/**", "e2e/**"],
     // Coverage gate (R4) on the server: `npm run test:coverage` fails below
     // these floors. They start just under the measured level (2026-11-04:
     // statements 66.6%, branches 52.1%, functions 72.5%, lines 69.3%).

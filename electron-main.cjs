@@ -294,11 +294,12 @@ function isWritableDir(dir) {
 // SECONDARY safety net for the installed build, used when the exe folder can't
 // be the home (e.g. installed into Program Files under a read-only location).
 function getPortableRoot() {
-  // 1) Explicit override always wins (dev, tests, power users).
+  // 1) Explicit override always wins (dev, tests, power users). It applies
+  //    to this launch only: it is NOT saved to the registry/marker, or one
+  //    test or dev run would silently repoint the installed app at a
+  //    scratch folder on its next start.
   if (process.env.INDEXARC_ROOT) {
-    const r = path.resolve(process.env.INDEXARC_ROOT);
-    savePortableRoot(r);
-    return r;
+    return path.resolve(process.env.INDEXARC_ROOT);
   }
   // 2) Dev Electron: isolated sandbox so we NEVER touch the real project vault.
   if (!app.isPackaged) {

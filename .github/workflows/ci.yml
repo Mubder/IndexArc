@@ -27,6 +27,30 @@ jobs:
       - name: Dependency audit (high/critical gate)
         run: npm audit --audit-level=high
 
+  e2e:
+    name: Electron end-to-end (set password, save, lock, restart, unlock)
+    runs-on: windows-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build UI + server bundle
+        run: npm run build
+      - name: Playwright (Electron)
+        run: npm run test:e2e
+      - name: Upload trace on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-report
+          path: |
+            playwright-report
+            test-results
+
   installer-preservation:
     name: Build + reinstall data-preservation proof
     runs-on: windows-latest
