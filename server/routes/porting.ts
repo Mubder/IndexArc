@@ -3,6 +3,8 @@ import { addLog } from "../logs.js";
 import { throttle, recordFailure, recordSuccess } from "./throttle.js";
 import { buildEncryptedExport, buildEnvExport, parseImport, withoutDuplicates, type ImportFormat } from "../porting.js";
 import type { RouteContext } from "./types.js";
+import { validateBody } from "../request-body.js";
+import { BODIES } from "./bodies.js";
 
 // Import / export (R6.2). Mounted under /api/porting, which is in
 // protectedPaths (unlocked vault required). Import only PREVIEWS: the user
@@ -12,7 +14,7 @@ export function portingRoutes(ctx: RouteContext) {
   const { store, audit } = ctx;
   const FORMATS: ImportFormat[] = ["env", "indexarc", "bitwarden", "csv", "keepass-xml"];
 
-  r.post("/import/preview", async (req, res) => {
+  r.post("/import/preview", validateBody(BODIES.porting["POST /import/preview"]), async (req, res) => {
     const { content, filename, format, passphrase } = req.body || {};
     if (typeof content !== "string" || !content.trim()) return res.status(400).json({ error: "File content is required" });
     if (format != null && !FORMATS.includes(format)) return res.status(400).json({ error: "Unknown format" });
@@ -26,7 +28,7 @@ export function portingRoutes(ctx: RouteContext) {
     }
   });
 
-  r.post("/export", async (req, res) => {
+  r.post("/export", validateBody(BODIES.porting["POST /export"]), async (req, res) => {
     // Bulk export is the biggest single exfiltration step: re-confirm the
     // master password even on an unlocked session.
     const gate = throttle(req, res, { max: 10 });

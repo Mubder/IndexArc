@@ -7,6 +7,8 @@ import type { RouteContext, SpellcheckEngines } from "./types.js";
 
 // Spellcheck helpers imported at route-init time (must match server.ts CJS import)
 import spellcheckHelpers from "../../shared/spellcheck.cjs";
+import { validateBody } from "../request-body.js";
+import { BODIES } from "./bodies.js";
 const {
   findMisspelled,
   loadArabicEngine,
@@ -143,7 +145,7 @@ export function spellcheckRoutes(ctx: RouteContext) {
     return w;
   };
 
-  r.post("/spellcheck-words", async (req, res) => {
+  r.post("/spellcheck-words", validateBody(BODIES.spellcheck["POST /spellcheck-words"]), async (req, res) => {
     const words: string[] = req.body?.words || [];
     if (!Array.isArray(words)) {
       return res.json({ bad: [] });
@@ -155,7 +157,7 @@ export function spellcheckRoutes(ctx: RouteContext) {
     res.json({ bad });
   });
 
-  r.post("/spellcheck-suggest", async (req, res) => {
+  r.post("/spellcheck-suggest", validateBody(BODIES.spellcheck["POST /spellcheck-suggest"]), async (req, res) => {
     const word: string = typeof req.body?.word === "string" ? req.body.word.trim() : "";
     if (!word) {
       return res.json({ suggestions: [] });
@@ -168,7 +170,7 @@ export function spellcheckRoutes(ctx: RouteContext) {
     res.json({ suggestions });
   });
 
-  r.post("/spellcheck-add-word", (req, res) => {
+  r.post("/spellcheck-add-word", validateBody(BODIES.spellcheck["POST /spellcheck-add-word"]), (req, res) => {
     const word = cleanDictWord(req.body?.word);
     if (word) {
       sp.addCustomWord(word, sp.userDictPath, sp.arSpell, sp.enSpell);
@@ -176,7 +178,7 @@ export function spellcheckRoutes(ctx: RouteContext) {
     res.json({ ok: !!word });
   });
 
-  r.post("/spellcheck-ignore-word", (req, res) => {
+  r.post("/spellcheck-ignore-word", validateBody(BODIES.spellcheck["POST /spellcheck-ignore-word"]), (req, res) => {
     const word = cleanDictWord(req.body?.word);
     if (word) {
       sp.addCustomWord(word, sp.ignoredDictPath, sp.arSpell, sp.enSpell);

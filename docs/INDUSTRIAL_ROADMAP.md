@@ -47,7 +47,6 @@ Every engineering item in R1–R6 has landed with tests, except those listed und
 - ASVS L2 gaps (`docs/ASVS-L2.md`):
   - password policy: 12-character minimum, breached-password check, strength meter, reveal toggle;
   - AAD on the JSON envelopes and the `vault.json` header (SQLite rows already have it);
-  - runtime schema validation of request bodies;
   - a single key-lifecycle document.
 - CodeQL in CI.
 - Electron: a `will-attach-webview` guard and a sender check on the flush-complete IPC.

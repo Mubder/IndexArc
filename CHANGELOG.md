@@ -42,6 +42,8 @@ Commit messages follow the convention in
 - A dev or test launch could repoint the installed app's data folder.
 
 ### Security
+- Every API request body is checked against a schema before it is handled; a malformed body is
+  refused with a 400 that names the field (never the value).
 - Rolling back, removing or copying in a single record in `vault.db` is now detected on unlock
   (keyed checksum over the sealed rows) and shown as an integrity warning.
 - Every encrypted vault file (header, vectors, notes, archive, revisions, scan sessions) is bound to

@@ -8,6 +8,8 @@ import { sendSSE } from "./sse.js";
 import { wrapAsync } from "../asyncWrap.js";
 import type { AnalyzeCandidate, WatchedFolder } from "../types.js";
 import type { RouteContext } from "./types.js";
+import { validateBody } from "../request-body.js";
+import { BODIES } from "./bodies.js";
 
 async function registerAndMaybeWatch(
   ctx: RouteContext,
@@ -66,7 +68,7 @@ export function foldersRoutes(ctx: RouteContext) {
     res.json(s);
   });
 
-  r.post("/scan", async (req, res) => {
+  r.post("/scan", validateBody(BODIES.folders["POST /scan"]), async (req, res) => {
     const folderPath = String(req.body?.path ?? "").trim();
     if (!folderPath) return res.status(400).json({ error: "Folder path is required" });
     const useAi = !!req.body?.use_ai;
@@ -87,7 +89,7 @@ export function foldersRoutes(ctx: RouteContext) {
     }
   });
 
-  r.patch("/sessions/:id/candidates", (req, res) => {
+  r.patch("/sessions/:id/candidates", validateBody(BODIES.folders["PATCH /sessions/:id/candidates"]), (req, res) => {
     const session = store.getScanSession(req.params.id);
     if (!session) return res.status(404).json({ error: "Session not found" });
     if (session.status !== "review") {
@@ -138,7 +140,7 @@ export function foldersRoutes(ctx: RouteContext) {
   // NOTE: the old near-duplicate `/sessions/:id/commit` endpoint was removed
   // (audit AUD-022) — the frontend only calls `/apply`, and the two copies
   // had silently diverged (different pending-candidate handling).
-  r.post("/sessions/:id/apply", wrapAsync(async (req, res) => {
+  r.post("/sessions/:id/apply", validateBody(BODIES.folders["POST /sessions/:id/apply"]), wrapAsync(async (req, res) => {
     // Atomic claim (AUD-009): flip review→committing BEFORE the long awaited
     // save loop, so a double-click / concurrent SSE-triggered retry cannot
     // re-enter and commit the candidate set twice.
@@ -212,7 +214,7 @@ export function foldersRoutes(ctx: RouteContext) {
     });
   }));
 
-  r.post("/sessions/:id/discard", (req, res) => {
+  r.post("/sessions/:id/discard", validateBody(BODIES.folders["POST /sessions/:id/discard"]), (req, res) => {
     // Same atomic claim — discard while an apply is mid-flight is refused.
     const claimed = store.claimScanSession(req.params.id, "review", "discarded");
     if (!claimed) return res.status(400).json({ error: "Session not found or already closed" });

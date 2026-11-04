@@ -4,6 +4,8 @@ import { sendSSE } from "./sse.js";
 import { throttle, recordFailure, recordSuccess } from "./throttle.js";
 import type { RouteContext } from "./types.js";
 import { checkPassword, passwordProblemMessage } from "../../shared/password-policy.js";
+import { validateBody } from "../request-body.js";
+import { BODIES } from "./bodies.js";
 
 /** 400 body for a new master password that fails the policy, or null if it passes. */
 function rejectPassword(pw: unknown) {
@@ -29,7 +31,7 @@ export function vaultRoutes(ctx: RouteContext) {
     });
   });
 
-  r.post("/unlock", async (req, res) => {
+  r.post("/unlock", validateBody(BODIES.vault["POST /unlock"]), async (req, res) => {
     const gate = throttle(req, res, { max: 10 });
     if (!gate) return;
 
@@ -62,7 +64,7 @@ export function vaultRoutes(ctx: RouteContext) {
     }
   });
 
-  r.post("/lock", (_req, res) => {
+  r.post("/lock", validateBody(BODIES.vault["POST /lock"]), (_req, res) => {
     store.lock();
     addLog("SECURITY", "Vault locked");
     audit?.log("vault.lock", "manual");
@@ -70,7 +72,7 @@ export function vaultRoutes(ctx: RouteContext) {
     res.json({ success: true });
   });
 
-  r.post("/setup-password", async (req, res) => {
+  r.post("/setup-password", validateBody(BODIES.vault["POST /setup-password"]), async (req, res) => {
     // Setting a master password encrypts the whole vault — a hostile or
     // accidental call here is a lockout/ransom attack, so it is throttled AND
     // requires the interactive ceremony word (same pattern as unprotect's
@@ -98,7 +100,7 @@ export function vaultRoutes(ctx: RouteContext) {
     }
   });
 
-  r.post("/remove-password", async (req, res) => {
+  r.post("/remove-password", validateBody(BODIES.vault["POST /remove-password"]), async (req, res) => {
     // Success here writes the vault to disk DECRYPTED, so guessing this
     // endpoint must be as hard as guessing the unlock endpoint.
     const gate = throttle(req, res, { max: 10 });
@@ -124,7 +126,7 @@ export function vaultRoutes(ctx: RouteContext) {
     }
   });
 
-  r.post("/change-password", async (req, res) => {
+  r.post("/change-password", validateBody(BODIES.vault["POST /change-password"]), async (req, res) => {
     // Verifies the current password itself, so it works locked or unlocked;
     // throttled like unlock (a success is proof of the password).
     const gate = throttle(req, res, { max: 10 });
@@ -156,7 +158,7 @@ export function vaultRoutes(ctx: RouteContext) {
     res.json(store.recoveryStatus());
   });
 
-  r.post("/recovery", async (req, res) => {
+  r.post("/recovery", validateBody(BODIES.vault["POST /recovery"]), async (req, res) => {
     // A recovery code outlives lock and password changes, so minting one
     // needs the master password — not just a token on an unlocked session.
     const gate = throttle(req, res, { max: 10 });
@@ -178,14 +180,14 @@ export function vaultRoutes(ctx: RouteContext) {
     }
   });
 
-  r.post("/recovery/remove", (_req, res) => {
+  r.post("/recovery/remove", validateBody(BODIES.vault["POST /recovery/remove"]), (_req, res) => {
     if (store.isLocked()) return res.status(423).json({ error: "Vault is locked", is_locked: true });
     store.removeRecoveryKey();
     audit?.log("vault.recovery", "recovery key removed");
     res.json(store.recoveryStatus());
   });
 
-  r.post("/recover", async (req, res) => {
+  r.post("/recover", validateBody(BODIES.vault["POST /recover"]), async (req, res) => {
     // Locked-state entry point, like unlock: throttled harder. The code is
     // 256 bits, so this is about noise, not brute force.
     const gate = throttle(req, res, { max: 5 });

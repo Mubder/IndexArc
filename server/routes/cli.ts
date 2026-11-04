@@ -5,6 +5,8 @@ import { createCliToken, listCliTokens, revokeCliToken } from "../cli.js";
 import { envKey } from "../porting.js";
 import type { VaultEntry } from "../types.js";
 import type { RouteContext } from "./types.js";
+import { validateBody } from "../request-body.js";
+import { BODIES } from "./bodies.js";
 
 // CLI access (R6.1). Mounted under /api/cli (in protectedPaths).
 //   Token management (/tokens*) — pairing token only (the app's own UI).
@@ -44,7 +46,7 @@ export function cliRoutes(ctx: RouteContext) {
     res.json({ tokens: listCliTokens(file) });
   });
 
-  r.post("/tokens", async (req: any, res) => {
+  r.post("/tokens", validateBody(BODIES.cli["POST /tokens"]), async (req: any, res) => {
     if (req.cliToken) return res.status(403).json({ error: "Forbidden" });
     const gate = throttle(req, res, { max: 10 });
     if (!gate) return;
@@ -68,7 +70,7 @@ export function cliRoutes(ctx: RouteContext) {
     }
   });
 
-  r.post("/tokens/:id/revoke", (req: any, res) => {
+  r.post("/tokens/:id/revoke", validateBody(BODIES.cli["POST /tokens/:id/revoke"]), (req: any, res) => {
     if (req.cliToken) return res.status(403).json({ error: "Forbidden" });
     if (!revokeCliToken(file, String(req.params.id))) return res.status(404).json({ error: "No such token" });
     addLog("SECURITY", "CLI token revoked.");
@@ -95,7 +97,7 @@ export function cliRoutes(ctx: RouteContext) {
     res.json({ id: entry.id, name: entry.name, type: entry.type, value: entry.value });
   });
 
-  r.post("/env", (req: any, res) => {
+  r.post("/env", validateBody(BODIES.cli["POST /env"]), (req: any, res) => {
     const { names, label, all } = req.body || {};
     const entries = store.listEntries();
     const env: Record<string, string> = {};

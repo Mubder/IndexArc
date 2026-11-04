@@ -9,6 +9,8 @@ import { checkOllama } from "../ai/providers.js";
 import { throttle, recordFailure, recordSuccess } from "./throttle.js";
 import { serverIdentity } from "../auth.js";
 import type { RouteContext } from "./types.js";
+import { validateBody } from "../request-body.js";
+import { BODIES } from "./bodies.js";
 
 function fileSizeOrNull(file: string): number | null {
   try {
@@ -320,7 +322,7 @@ export function miscRoutes(ctx: RouteContext) {
   // removed. Meant to be attached to a bug report.
   // Opt-in crash log (R5): the renderer reports React/window errors here.
   // Messages + stacks only, redacted before they touch disk; never values.
-  r.post("/diagnostics/crash", (req, res) => {
+  r.post("/diagnostics/crash", validateBody(BODIES.misc["POST /diagnostics/crash"]), (req, res) => {
     if (!store.getSettings().crash_reports_enabled) return res.json({ recorded: false });
     const b = req.body || {};
     recordCrash(ctx.paths.logsDir, { source: "renderer", message: String(b.message ?? "").slice(0, 2000), stack: String(b.stack ?? "").slice(0, 8000) });
@@ -361,13 +363,13 @@ export function miscRoutes(ctx: RouteContext) {
     });
   });
 
-  r.post("/emergency/create", (_req, res) => {
+  r.post("/emergency/create", validateBody(BODIES.misc["POST /emergency/create"]), (_req, res) => {
     const name = store.createEmergencySnapshot();
     if (name) addLog("SYSTEM", `Emergency snapshot created (manual) → ${name}`);
     res.json({ ok: !!name, name });
   });
 
-  r.post("/emergency/restore", (req, res) => {
+  r.post("/emergency/restore", validateBody(BODIES.misc["POST /emergency/restore"]), (req, res) => {
     const name = String(req.body?.name ?? "").trim();
     if (!name) return res.status(400).json({ ok: false, error: "name required" });
     // Strict allowlist: this value is joined onto snapshot directory paths, so
@@ -413,7 +415,7 @@ export function miscRoutes(ctx: RouteContext) {
     res.json({ revisions: store.getNoteRevisions(req.params.id) });
   });
 
-  r.post("/scratchpad/tabs/:id/revisions", (req, res) => {
+  r.post("/scratchpad/tabs/:id/revisions", validateBody(BODIES.misc["POST /scratchpad/tabs/:id/revisions"]), (req, res) => {
     const b = req.body || {};
     const rev = {
       id: String(b.id ?? `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
@@ -438,7 +440,7 @@ export function miscRoutes(ctx: RouteContext) {
   });
 
   // --- Granular scratchpad endpoints (preferred over whole-array saves) ---
-  r.post("/scratchpad/tabs/:id/content", (req, res) => {
+  r.post("/scratchpad/tabs/:id/content", validateBody(BODIES.misc["POST /scratchpad/tabs/:id/content"]), (req, res) => {
     const content = String(req.body?.content ?? "");
     const baseRev = req.body?.base_rev === undefined ? undefined : Number(req.body.base_rev);
     // Title is honored ONLY when this POST creates the tab (upsert); an
@@ -459,7 +461,7 @@ export function miscRoutes(ctx: RouteContext) {
     res.json({ tab: result.tab });
   });
 
-  r.post("/scratchpad/tabs/:id/meta", (req, res) => {
+  r.post("/scratchpad/tabs/:id/meta", validateBody(BODIES.misc["POST /scratchpad/tabs/:id/meta"]), (req, res) => {
     const title = req.body?.title === undefined ? undefined : String(req.body.title);
     if (title !== undefined) {
       try {
@@ -486,7 +488,7 @@ export function miscRoutes(ctx: RouteContext) {
   });
 
   // --- Protect / Pin ---
-  r.post("/scratchpad/tabs/:id/protect", async (req, res) => {
+  r.post("/scratchpad/tabs/:id/protect", validateBody(BODIES.misc["POST /scratchpad/tabs/:id/protect"]), async (req, res) => {
     const wantProtected = req.body?.protected !== false;
     if (!wantProtected) {
       // Unprotect requires ceremony: the fixed confirm word, or the master
@@ -519,19 +521,19 @@ export function miscRoutes(ctx: RouteContext) {
     res.json({ tab });
   });
 
-  r.post("/scratchpad/tabs/:id/pin", (req, res) => {
+  r.post("/scratchpad/tabs/:id/pin", validateBody(BODIES.misc["POST /scratchpad/tabs/:id/pin"]), (req, res) => {
     const pinned = req.body?.pinned !== false;
     const tab = store.setScratchpadTabPinned(req.params.id, pinned);
     if (!tab) return res.status(404).json({ error: "Tab not found" });
     res.json({ tab });
   });
 
-  r.put("/scratchpad/order", (req, res) => {
+  r.put("/scratchpad/order", validateBody(BODIES.misc["PUT /scratchpad/order"]), (req, res) => {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((x: unknown) => String(x)) : [];
     res.json({ tabs: store.reorderScratchpad(ids) });
   });
 
-  r.post("/scratchpad", (req, res) => {
+  r.post("/scratchpad", validateBody(BODIES.misc["POST /scratchpad"]), (req, res) => {
     const tabs = Array.isArray(req.body?.tabs) ? req.body.tabs : [];
     const force = req.body?.force === true;
     const baseRevs = req.body?.base_revs;
@@ -586,7 +588,7 @@ export function miscRoutes(ctx: RouteContext) {
     });
   });
 
-  r.post("/scratchpad/archive-tab", (req, res) => {
+  r.post("/scratchpad/archive-tab", validateBody(BODIES.misc["POST /scratchpad/archive-tab"]), (req, res) => {
     const tabId = String(req.body?.tabId || "").trim();
     const tabFallback = req.body?.tab;
     if (!tabId) return res.status(400).json({ ok: false, error: "tabId required" });
@@ -594,14 +596,14 @@ export function miscRoutes(ctx: RouteContext) {
     res.json({ ok: result.success, ...result });
   });
 
-  r.post("/scratchpad/restore-tab", (req, res) => {
+  r.post("/scratchpad/restore-tab", validateBody(BODIES.misc["POST /scratchpad/restore-tab"]), (req, res) => {
     const tabId = String(req.body?.tabId || "").trim();
     if (!tabId) return res.status(400).json({ ok: false, error: "tabId required" });
     const result = store.restoreScratchpadTab(tabId);
     res.json({ ok: result.success, ...result });
   });
 
-  r.post("/scratchpad/delete-archived", (req, res) => {
+  r.post("/scratchpad/delete-archived", validateBody(BODIES.misc["POST /scratchpad/delete-archived"]), (req, res) => {
     const tabId = String(req.body?.tabId || "").trim();
     if (!tabId) return res.status(400).json({ ok: false, error: "tabId required" });
     const result = store.deleteArchivedScratchpadTab(tabId);

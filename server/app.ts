@@ -18,6 +18,8 @@ import { miscRoutes } from "./routes/misc.js";
 import { sseRoutes } from "./routes/sse.js";
 import { sendSSE } from "./routes/sse.js";
 import type { RouteContext } from "./routes/types.js";
+import { validateBody } from "./request-body.js";
+import { BODIES } from "./routes/bodies.js";
 
 // Paths that ADDITIONALLY require the vault to be unlocked (see the gating
 // matrix below). Exported so the route lock-matrix test can assert against
@@ -145,7 +147,7 @@ export function createApp({ paths, store, audit, watchers }: CreateAppDeps): { a
   //     A token holder while locked learns vault METADATA, never secret values.
 
   // --- Analyze (Paste & Analyze — standalone) ---
-  app.post("/api/analyze", async (req, res) => {
+  app.post("/api/analyze", validateBody(BODIES.app["POST /api/analyze"]), async (req, res) => {
     try {
       const settings = ctx.store.getSettings();
       // Clients send the pasted text as `content` (Scratchpad detect, Home and

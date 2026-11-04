@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { issueSseTicket } from "../auth.js";
 import type { RouteContext } from "./types.js";
+import { validateBody } from "../request-body.js";
+import { BODIES } from "./bodies.js";
 
 // SSE client management
 const clients = new Set<any>();
@@ -27,7 +29,7 @@ export function sseRoutes(_ctx: RouteContext) {
   // EventSource cannot send headers, so clients exchange the pairing token for
   // a one-time, 30-second ticket (validated by the auth middleware on
   // /api/events?ticket=...).
-  r.post("/sse/ticket", (_req, res) => {
+  r.post("/sse/ticket", validateBody(BODIES.sse["POST /sse/ticket"]), (_req, res) => {
     res.json({ ticket: issueSseTicket() });
   });
 

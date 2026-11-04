@@ -12,6 +12,8 @@ import {
 import { askVault } from "../services/ask.js";
 import { wrapAsync } from "../asyncWrap.js";
 import type { RouteContext } from "./types.js";
+import { validateBody } from "../request-body.js";
+import { BODIES } from "./bodies.js";
 
 export function aiRoutes(ctx: RouteContext) {
   const r = Router();
@@ -96,7 +98,7 @@ export function aiRoutes(ctx: RouteContext) {
     return tabs.some((t: any) => t.protected && normalize(String(t.content ?? "")).includes(needle));
   };
 
-  r.post("/proofread", async (req, res) => {
+  r.post("/proofread", validateBody(BODIES.ai["POST /proofread"]), async (req, res) => {
     const text = String(req.body?.text ?? "").trim();
     if (!text) return res.status(400).json({ error: "Text is required" });
     if (protectedAiGuard(req.body?.tab_id, text)) {
@@ -155,7 +157,7 @@ export function aiRoutes(ctx: RouteContext) {
     }
   });
 
-  r.post("/autocomplete", async (req, res) => {
+  r.post("/autocomplete", validateBody(BODIES.ai["POST /autocomplete"]), async (req, res) => {
     const prefix = String(req.body?.prefix ?? "").trim();
     // Clamp: `Number(x) || 64` passes negatives/floats through to providers.
     const maxTokens = Math.max(1, Math.min(512, Math.floor(Number(req.body?.maxTokens) || 64)));
@@ -182,7 +184,7 @@ export function aiRoutes(ctx: RouteContext) {
   // NOTE: the old `GET /ollama/models` duplicate was removed (audit AUD-022)
   // — `/status` already returns `ollama_models` and nothing called this.
 
-  r.post("/ollama/ensure", wrapAsync(async (_req, res) => {
+  r.post("/ollama/ensure", validateBody(BODIES.ai["POST /ollama/ensure"]), wrapAsync(async (_req, res) => {
     // Multi-GB downloads are not something a token-holder may start before
     // the user has even unlocked (R4 route-matrix finding).
     if (store.isLocked()) return res.status(423).json({ error: "Vault is locked" });
@@ -217,7 +219,7 @@ export function aiRoutes(ctx: RouteContext) {
     });
   }));
 
-  r.post("/ollama/warm", wrapAsync(async (_req, res) => {
+  r.post("/ollama/warm", validateBody(BODIES.ai["POST /ollama/warm"]), wrapAsync(async (_req, res) => {
     const s = store.getSettings();
     const ollama = await checkOllama(s, true);
     if (!ollama.online) {
@@ -263,7 +265,7 @@ export function aiRoutes(ctx: RouteContext) {
     });
   }));
 
-  r.post("/ask", async (req, res) => {
+  r.post("/ask", validateBody(BODIES.ai["POST /ask"]), async (req, res) => {
     const query = String(req.body?.query ?? "").trim();
     if (!query) return res.status(400).json({ error: "Query is required" });
     try {
@@ -279,7 +281,7 @@ export function aiRoutes(ctx: RouteContext) {
     }
   });
 
-  r.post("/rewrite", async (req, res) => {
+  r.post("/rewrite", validateBody(BODIES.ai["POST /rewrite"]), async (req, res) => {
     if (protectedAiGuard(req.body?.tab_id, String(req.body?.text ?? ""))) {
       return res.status(423).json({ error: "This note is protected from AI processing" });
     }

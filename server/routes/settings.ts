@@ -4,6 +4,8 @@ import { sendSSE } from "./sse.js";
 import { isHttpUrl } from "../validate.js";
 import { reindexAllEntries } from "../services/vault.js";
 import type { RouteContext } from "./types.js";
+import { validateBody } from "../request-body.js";
+import { BODIES } from "./bodies.js";
 
 // API keys are write-only: they are accepted by POST and never returned.
 // GET responses carry `*_api_key_configured` booleans instead.
@@ -36,7 +38,7 @@ export function settingsRoutes(ctx: RouteContext) {
     res.json(maskSettings(store.getSettings()));
   });
 
-  r.post("/settings", (req, res) => {
+  r.post("/settings", validateBody(BODIES.settings["POST /settings"]), (req, res) => {
     const body = req.body || {};
     const allowed: (keyof ReturnType<typeof store.getSettings>)[] = [
       "ai_provider",

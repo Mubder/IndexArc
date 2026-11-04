@@ -6,6 +6,8 @@ import { wrapAsync } from "../asyncWrap.js";
 import type { RouteContext } from "./types.js";
 import path from "path";
 import { findUsages, hygienePatch, hygieneSummary } from "../hygiene.js";
+import { validateBody } from "../request-body.js";
+import { BODIES } from "./bodies.js";
 
 export function entriesRoutes(ctx: RouteContext) {
   const r = Router();
@@ -14,7 +16,7 @@ export function entriesRoutes(ctx: RouteContext) {
   // cap the batch so one 2 MB body can't enqueue thousands of them.
   const MAX_SAVE_ITEMS = 200;
 
-  r.post("/save", async (req, res) => {
+  r.post("/save", validateBody(BODIES.entries["POST /save"]), async (req, res) => {
     const settings = store.getSettings();
     const paste_id = req.body?.paste_id as string | undefined;
     const items = req.body?.candidates || req.body?.items;
@@ -66,7 +68,7 @@ export function entriesRoutes(ctx: RouteContext) {
     }
   });
 
-  r.post("/park", wrapAsync(async (req, res) => {
+  r.post("/park", validateBody(BODIES.entries["POST /park"]), wrapAsync(async (req, res) => {
     const settings = store.getSettings();
     const items = Array.isArray(req.body?.candidates) ? req.body.candidates : [req.body];
     if (items.length > MAX_SAVE_ITEMS) {
@@ -108,7 +110,7 @@ export function entriesRoutes(ctx: RouteContext) {
     res.json(hygieneSummary(store.listEntries()));
   });
 
-  r.patch("/:id/hygiene", (req, res) => {
+  r.patch("/:id/hygiene", validateBody(BODIES.entries["PATCH /:id/hygiene"]), (req, res) => {
     let patch;
     try {
       patch = hygienePatch(req.body);
@@ -140,7 +142,7 @@ export function entriesRoutes(ctx: RouteContext) {
     res.json(e);
   });
 
-  r.patch("/:id", wrapAsync(async (req, res) => {
+  r.patch("/:id", validateBody(BODIES.entries["PATCH /:id"]), wrapAsync(async (req, res) => {
     const updated = await clarifyEntry(store, store.getSettings(), req.params.id, {
       type: req.body?.type,
       name: req.body?.name,
@@ -161,7 +163,7 @@ export function entriesRoutes(ctx: RouteContext) {
     res.json({ success: true });
   });
 
-  r.post("/bulk-delete", (req, res) => {
+  r.post("/bulk-delete", validateBody(BODIES.entries["POST /bulk-delete"]), (req, res) => {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
     if (ids.length === 0) return res.json({ success: true, removed: 0 });
     const removed = store.bulkDeleteEntries(ids);
@@ -170,7 +172,7 @@ export function entriesRoutes(ctx: RouteContext) {
     res.json({ success: true, removed });
   });
 
-  r.post("/check-duplicate", (req, res) => {
+  r.post("/check-duplicate", validateBody(BODIES.entries["POST /check-duplicate"]), (req, res) => {
     const value = String(req.body?.value ?? "").trim();
     if (!value) return res.status(400).json({ error: "Value is required" });
 

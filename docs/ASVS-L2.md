@@ -143,7 +143,7 @@ server-side unlocked state. No cookies are used anywhere.
 |---|---|---|---|
 | 5.1.1 | HTTP parameter pollution defenses | Partial | Bodies are JSON; values coerced with `asString`/`asStringArray` ([server/validate.ts](../server/validate.ts)). No schema library. |
 | 5.1.3 | Positive input validation | Partial | Allowlists for settings keys, egress booleans, snapshot names, URL schemes (`isHttpUrl`). Many routes coerce rather than validate. |
-| 5.1.4 | Structured data strongly typed | Partial | TypeScript on the server, but request bodies are not schema-validated at runtime. |
+| 5.1.4 | Structured data strongly typed | Met | TypeScript on the server, and every request body is schema-checked at runtime (see 13.2.2). |
 | 5.1.5 | Redirects/forwards allowlisted | Met | Main window navigation is vetoed except to the local server origin (`will-navigate`, [electron-main.cjs](../electron-main.cjs)); the server issues no redirects. |
 | 5.2.1 | HTML from WYSIWYG editors sanitized | Met | DOMPurify allowlist at render (`sanitizeNoteHtml`) and at storage/ingest (`sanitizeNoteHtmlForStorage`) ([src/sanitize.ts](../src/sanitize.ts)). Test: [src/sanitize.fuzz.test.ts](../src/sanitize.fuzz.test.ts). |
 | 5.2.2 | Unstructured data sanitized | Partial | Scanned file fragments are sanitized before render ([src/components/NoteDetailModal.tsx](../src/components/NoteDetailModal.tsx)). One detached-element `innerHTML` assignment of editor HTML without DOMPurify remains in [src/components/scratchpad/useScratchEditor.ts](../src/components/scratchpad/useScratchEditor.ts) (BIDI text extraction); CSP `script-src 'self'` blocks inline handlers there. |
@@ -270,7 +270,7 @@ server-side unlocked state. No cookies are used anywhere.
 | 13.1.4 | Authorization at URI and resource level | Met | Token for every `/api` route, lock gate per path. Test: [server/route-matrix.test.ts](../server/route-matrix.test.ts) "every registered route has an explicit policy". |
 | 13.1.5 | Requests with unexpected content types rejected | Partial | `express.json` ignores non-JSON bodies (route then sees an empty body and returns 400); no explicit 415. |
 | 13.2.1 | Only intended HTTP methods enabled | Met | Duplicate/unknown routes caught by the route-matrix test; unknown `/api` paths return 404. |
-| 13.2.2 | JSON schema validation | **Gap** | No runtime schema validation (see 5.1.4). |
+| 13.2.2 | JSON schema validation | Met | Every POST/PUT/PATCH route checks its body against a zod schema before the handler runs ([server/routes/bodies.ts](../server/routes/bodies.ts), [server/request-body.ts](../server/request-body.ts)). A non-object body or a known field of the wrong type or size gets 400 `invalid_body`; the response names the field, never the value. A test fails if a new mutating route has no schema ([server/request-body.test.ts](../server/request-body.test.ts)). |
 | 13.2.3 | CSRF protection on RESTful APIs | Met | See 4.2.2. |
 | 13.2.5 | Content-Type checked | Partial | As 13.1.5. |
 | 13.2.6 | Message headers/payload trustworthy | Met | Token header + Host + Sec-Fetch-Site. |
@@ -339,10 +339,10 @@ Counts for the ASVS tables above (Electron checklist counted separately).
 
 | Status | ASVS rows | Electron rows |
 |---|---|---|
-| Met | 121 | 14 |
-| Partial | 43 | 5 |
+| Met | 123 | 14 |
+| Partial | 42 | 5 |
 | N/A | 23 | 1 |
-| Gap | 5 | 0 |
+| Gap | 4 | 0 |
 | **Total** | **192** | **20** |
 
 Priority gaps for the roadmap:
@@ -354,7 +354,7 @@ Priority gaps for the roadmap:
 5. ~~Password policy (2.1.1, 2.1.7, 2.1.8, 2.1.12)~~ landed 2026-11-04: 12-character minimum, offline common-password check, strength meter, reveal toggle.
 6. ~~Change password (2.1.5)~~ landed 2026-11-04.
 7. **Recovery (2.5.6) follow-ups.** Landed 2026-11-04. Still to do: say in the UI that a password change does not revoke the code, and bind the seal's AAD to a vault id.
-8. **13.2.2 Runtime schema validation** of request bodies.
+8. ~~13.2.2 Runtime schema validation of request bodies~~ landed 2026-11-04: zod schema on every POST/PUT/PATCH route.
 9. **SAST / secret scanning in CI (10.1.1, Partial).** Add CodeQL and enable GitHub secret scanning.
 10. **Electron hardening (items 12, 17, 18).** Add a `will-attach-webview` deny handler, sender-check `flush-complete`, unit-test `isTrustedSender`; consider a custom protocol or named-pipe transport.
 
