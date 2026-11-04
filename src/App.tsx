@@ -11,13 +11,10 @@ import {
 } from "lucide-react";
 
 import {
-  VaultEntry,
-  AnalyzeCandidate,
   SystemStatus,
   Settings,
   Tab,
   LibraryFilter,
-  FolderScanSession,
   WatchedFolderRow,
   HealthReport,
 } from "./types";
@@ -57,6 +54,7 @@ import { usePasteActions } from "./components/app/usePasteActions";
 import { useConfirmDialog } from "./components/app/useConfirmDialog";
 import { useToasts } from "./components/app/useToasts";
 import { useSettingsPatch } from "./components/app/useSettingsPatch";
+import { useVault, vaultStore } from "./state/vaultStore";
 
 export default function App() {
   // All valid Tab values (write and read sides must be symmetric — "analyze"
@@ -74,8 +72,10 @@ export default function App() {
     return (saved === "light" || saved === "dark") ? saved : "dark";
   });
   const [status, setStatus] = useState<SystemStatus | null>(null);
-  const [entries, setEntries] = useState<VaultEntry[]>([]);
-  const [attention, setAttention] = useState<VaultEntry[]>([]);
+  // Secret-bearing vault/session state lives in one store (src/state/vaultStore.ts).
+  const entries = useVault((s) => s.entries);
+  const attention = useVault((s) => s.attention);
+  const { entries: setEntries, attention: setAttention } = vaultStore.set;
   const [logs, setLogs] = useState<{ time: string; type: string; message: string }[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -94,21 +94,21 @@ export default function App() {
   const { showToast, toasts } = useToasts();
 
   // paste / analyze
-  const [paste, setPaste] = useState("");
+  const paste = useVault((s) => s.paste);
+  const pasteId = useVault((s) => s.pasteId);
+  const candidates = useVault((s) => s.candidates);
+  const selected = useVault((s) => s.selected);
+  const providerUsed = useVault((s) => s.providerUsed);
+  const { paste: setPaste, pasteId: setPasteId, candidates: setCandidates, selected: setSelected, providerUsed: setProviderUsed } = vaultStore.set;
   const [analyzing, setAnalyzing] = useState(false);
-  const [pasteId, setPasteId] = useState<string | null>(null);
-  const [candidates, setCandidates] = useState<AnalyzeCandidate[]>([]);
-  const [selected, setSelected] = useState<Record<string, boolean>>({});
-  const [providerUsed, setProviderUsed] = useState("");
 
   // ask
   const [query, setQuery] = useState("");
   const [asking, setAsking] = useState(false);
-  const [askResults, setAskResults] = useState<
-    { entry: VaultEntry; score: number; match_reason: string }[]
-  >([]);
-  const [askAnswer, setAskAnswer] = useState<string | null>(null);
-  const [askAnswerProvider, setAskAnswerProvider] = useState<string>("");
+  const askResults = useVault((s) => s.askResults);
+  const askAnswer = useVault((s) => s.askAnswer);
+  const askAnswerProvider = useVault((s) => s.askAnswerProvider);
+  const { askResults: setAskResults, askAnswer: setAskAnswer, askAnswerProvider: setAskAnswerProvider } = vaultStore.set;
 
   // library
   const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("all");
@@ -120,7 +120,8 @@ export default function App() {
   const [folderWatch, setFolderWatch] = useState(true);
   const [folderUseAi, setFolderUseAi] = useState(true);
   const [scanning, setScanning] = useState(false);
-  const [scanSession, setScanSession] = useState<FolderScanSession | null>(null);
+  const scanSession = useVault((s) => s.scanSession);
+  const setScanSession = vaultStore.set.scanSession;
   const [watchedFolders, setWatchedFolders] = useState<WatchedFolderRow[]>([]);
   const [applyingScan, setApplyingScan] = useState(false);
   const scanSessionIdRef = useRef<string | null>(null);
@@ -234,14 +235,7 @@ export default function App() {
   // the manual button, and server-side auto-lock / lock-on-minimize that the
   // UI only learns about through fetchAll.
   const purgeSecretState = useCallback(() => {
-    setEntries([]);
-    setAttention([]);
-    setPaste("");
-    setCandidates([]);
-    setAskResults([]);
-    setAskAnswer(null);
-    setAskAnswerProvider("");
-    setScanSession(null);
+    vaultStore.purgeSecrets();
     purgeScratchpadMirrorOnLock();
   }, []);
 
