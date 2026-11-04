@@ -2,7 +2,8 @@ import { Router } from "express";
 import fs from "fs";
 import path from "path";
 import { ProtectedTabError } from "../store.js";
-import { addLog } from "../logs.js";
+import { addLog, getLogs } from "../logs.js";
+import { buildDiagnostics, readCrashes, recordCrash } from "../diagnostics.js";
 import { findAlternateVaultRoots } from "../paths.js";
 import { checkOllama } from "../ai/providers.js";
 import { throttle, recordFailure, recordSuccess } from "./throttle.js";
@@ -34,7 +35,7 @@ export function miscRoutes(ctx: RouteContext) {
   // counts, disk writability, integrity warnings, backups, Ollama, and —
   // critically — whether the user's real data lives in a DIFFERENT folder
   // than the one currently served (the #1 cause of "empty after relaunch").
-  r.get("/health", async (_req, res) => {
+  const buildHealth = async (): Promise<Record<string, any>> => {
     try {
       const settings = store.getSettings();
       const vaultFile = ctx.paths.vaultFile;
@@ -261,7 +262,7 @@ export function miscRoutes(ctx: RouteContext) {
       const infoBad = checks.some((c) => c.severity === "info" && !c.ok);
       const overall = criticalBad ? "attention" : infoBad ? "degraded" : "healthy";
 
-      res.json({
+      return {
         ok: true,
         now: new Date().toISOString(),
         overall,
@@ -304,11 +305,38 @@ export function miscRoutes(ctx: RouteContext) {
         ollama,
         alternates,
         checks,
-      });
+      };
     } catch (e: any) {
       // Health must never 500 — a failing probe is itself a diagnosis.
-      res.json({ ok: false, overall: "attention", error: e?.message || "health check failed", checks: [] });
+      return { ok: false, overall: "attention", error: e?.message || "health check failed", checks: [] };
     }
+  };
+  r.get("/health", async (_req, res) => {
+    res.json(await buildHealth());
+  });
+
+  // One-click redacted diagnostics (R5): health + recent logs + environment,
+  // with secret-shaped strings, e-mail addresses and the user's home path
+  // removed. Meant to be attached to a bug report.
+  // Opt-in crash log (R5): the renderer reports React/window errors here.
+  // Messages + stacks only, redacted before they touch disk; never values.
+  r.post("/diagnostics/crash", (req, res) => {
+    if (!store.getSettings().crash_reports_enabled) return res.json({ recorded: false });
+    const b = req.body || {};
+    recordCrash(ctx.paths.logsDir, { source: "renderer", message: String(b.message ?? "").slice(0, 2000), stack: String(b.stack ?? "").slice(0, 8000) });
+    res.json({ recorded: true });
+  });
+
+  r.get("/diagnostics/export", async (_req, res) => {
+    const crashOn = !!store.getSettings().crash_reports_enabled;
+    const bundle = buildDiagnostics({
+      health: await buildHealth(),
+      logs: getLogs(),
+      settings: store.getSettingsForDiagnostics(),
+      crashes: crashOn ? readCrashes(ctx.paths.logsDir) : [],
+    });
+    res.setHeader("Content-Disposition", `attachment; filename="indexarc-diagnostics-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.json(bundle);
   });
 
   r.get("/backups", (_req, res) => {

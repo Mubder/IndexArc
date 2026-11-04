@@ -142,6 +142,7 @@ export interface Settings {
   clipboard_clear_seconds?: number;
   lock_on_minimize?: boolean;
   update_check_on_start?: boolean;
+  crash_reports_enabled?: boolean;
   // Write-only key fields: GET /api/settings never returns key material — it
   // returns these booleans instead. Key inputs in the UI keep drafts locally
   // and only send non-empty values.

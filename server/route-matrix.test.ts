@@ -28,6 +28,13 @@ const POLICY: Record<string, Policy> = {
   "POST /api/vault/lock": "token",
   "POST /api/vault/setup-password": "token",
   "POST /api/vault/remove-password": "token",
+  "POST /api/vault/change-password": "token",
+  "GET /api/vault/recovery": "token+unlocked",
+  "POST /api/vault/recovery": "token+unlocked",
+  "POST /api/vault/recovery/remove": "token+unlocked",
+  "POST /api/vault/recover": "token",
+  "GET /api/diagnostics/export": "token",
+  "POST /api/diagnostics/crash": "token",
 
   // --- analyze ---
   "POST /api/analyze": "token+unlocked",
@@ -166,6 +173,7 @@ interface Resp {
   status: number;
   body: string;
   contentType: string;
+  cacheControl: string;
 }
 
 let port = 0;
@@ -195,14 +203,14 @@ function send(
         // SSE never ends: take the first chunk and hang up.
         if (contentType.startsWith("text/event-stream")) {
           res.once("data", (c: Buffer) => {
-            resolve({ status: res.statusCode || 0, body: c.toString("utf8"), contentType });
+            resolve({ status: res.statusCode || 0, body: c.toString("utf8"), contentType, cacheControl: String(res.headers["cache-control"] || "") });
             req.destroy();
           });
           return;
         }
         res.on("data", (c: Buffer) => chunks.push(c));
         res.on("end", () =>
-          resolve({ status: res.statusCode || 0, body: Buffer.concat(chunks).toString("utf8"), contentType })
+          resolve({ status: res.statusCode || 0, body: Buffer.concat(chunks).toString("utf8"), contentType, cacheControl: String(res.headers["cache-control"] || "") })
         );
       }
     );
@@ -314,6 +322,14 @@ describe("R4 route lock matrix", () => {
     for (const r of apiRoutes()) {
       const gated = protectedPaths.some((p) => r.path === p || r.path.startsWith(p + "/"));
       expect(POLICY[key(r)] === "token+unlocked", `${key(r)} gated=${gated}`).toBe(gated);
+    }
+  });
+
+  it("every GET /api response is Cache-Control: no-store (no decrypted data in the HTTP cache)", async () => {
+    for (const r of apiRoutes().filter((x) => x.method === "GET")) {
+      const res = await send("GET", concrete(r.path), { headers: { "X-IndexArc-Token": token } });
+      if (res.contentType.startsWith("text/event-stream")) continue;
+      expect(res.cacheControl, key(r)).toContain("no-store");
     }
   });
 

@@ -89,6 +89,8 @@ export interface AppSettings {
   clipboard_clear_seconds?: number;
   /** Desktop only: check GitHub Releases for a new version at startup (opt-in egress). */
   update_check_on_start?: boolean;
+  /** Opt-in: keep a redacted local log of crashes for the diagnostics export (R5). */
+  crash_reports_enabled?: boolean;
   enable_ai_proofreader?: boolean;
   /**
    * EGRESS CONSENT (audit H2): cloud AI providers (Gemini/OpenAI/Groq/
@@ -134,6 +136,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lock_on_minimize: false,
   clipboard_clear_seconds: 45,
   update_check_on_start: false,
+  crash_reports_enabled: false,
   enable_ai_proofreader: true,
   ai_cloud_consent: false,
   languagetool_enabled: false,

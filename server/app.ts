@@ -33,6 +33,9 @@ export const protectedPaths = [
   "/api/proofread",
   "/api/rewrite",
   "/api/ollama/ensure",
+  // Recovery-key status / create / remove. NOT /api/vault/recover (the
+  // locked-state "forgot password" entry point, a different path).
+  "/api/vault/recovery",
 ];
 
 export interface CreateAppDeps {
@@ -78,6 +81,13 @@ export function createApp({ paths, store, audit, watchers }: CreateAppDeps): { a
     res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    next();
+  });
+
+  // API responses carry decrypted vault data: keep them out of Chromium's
+  // HTTP disk cache (ASVS 8.2.1). Routes may still override (SSE: no-cache).
+  app.use("/api", (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
     next();
   });
 

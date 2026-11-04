@@ -1,6 +1,7 @@
 import { Shield } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import type { TranslationDict } from "../../utils/i18n";
+import { ChangePasswordCard, RecoveryKeyCard } from "./KeyManagement";
 
 export interface SecuritySectionProps {
   handleRemovePassword: () => Promise<void>;
@@ -35,6 +36,12 @@ export function SecuritySection({ handleRemovePassword, handleSetupPassword, sec
 
         {vaultStatus?.encryption_enabled ? (
           <div className="space-y-3 pt-1">
+            {!vaultStatus.is_locked && (
+              <>
+                <ChangePasswordCard t={t} />
+                <RecoveryKeyCard t={t} />
+              </>
+            )}
             <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-dim)" }}>
               {t("sec_remove_desc")}
             </p>

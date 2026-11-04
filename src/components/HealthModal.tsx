@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import { copyTextToClipboard } from "../lib/clipboard";
-import { CheckCircle2, XCircle, AlertTriangle, Copy, RefreshCw, X, HardDrive, Database } from "lucide-react";
+import { CheckCircle2, XCircle, AlertTriangle, Copy, RefreshCw, X, HardDrive, Database, Download } from "lucide-react";
 import { HealthReport, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
 import { useDialogA11y } from "../hooks/useDialogA11y";
@@ -67,6 +67,22 @@ export const HealthModal: React.FC<HealthModalProps> = ({
   const overallLabel =
     overall === "healthy" ? t("health_healthy") : overall === "degraded" ? t("health_degraded") : t("health_attention");
 
+  // Redacted bundle for bug reports (server strips secrets, e-mails, home path).
+  const downloadReport = useCallback(async () => {
+    try {
+      const res = await fetch("/api/diagnostics/export");
+      if (!res.ok) return;
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `indexarc-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      /* the health view itself still works */
+    }
+  }, []);
+
   const copyDiagnostics = async () => {
     try {
       await copyTextToClipboard(JSON.stringify(report ?? { error }, null, 2));
@@ -112,6 +128,15 @@ export const HealthModal: React.FC<HealthModalProps> = ({
             style={{ background: "transparent", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
           >
             <RefreshCw className="w-3 h-3" /> {t("health_refresh_btn")}
+          </button>
+          <button
+            type="button"
+            onClick={downloadReport}
+            title={t("health_download_hint")}
+            className="px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1"
+            style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+          >
+            <Download className="w-3 h-3" /> {t("health_download_btn")}
           </button>
           <button
             type="button"

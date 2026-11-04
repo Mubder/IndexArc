@@ -147,7 +147,10 @@ export async function deriveKeyAsync(
       hashLength: 32,
       outputType: "binary",
     });
-    return Buffer.from(hash);
+    // Buffer.from copies — wipe the library's own output array.
+    const key = Buffer.from(hash);
+    hash.fill(0);
+    return key;
   }
   const iterations = Math.max(1, Math.floor(kdf.iterations));
   return new Promise((resolve, reject) => {

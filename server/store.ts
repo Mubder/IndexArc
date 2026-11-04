@@ -16,6 +16,10 @@ import { deriveKeyAsync, generateSalt, decryptString, encryptString, envelopePay
 import { RecordDb, RECORD_TABLES, type RecordRow, type RecordTable } from "./db/recordDb.js";
 import type { KdfParams } from "./crypto.js";
 import { addLog } from "./logs.js";
+import { RECOVERY_ALG, generateRecoveryKey, openWithRecoveryCode, sealToRecoveryKey } from "./recovery.js";
+
+/** AAD for the previous vault key kept in vault.db meta during a re-key. */
+const PREV_KEY_AAD = "indexarc:v2:prevkey";
 
 /** Thrown when a save would mutate/remove a protected tab (map to HTTP 423). */
 export class ProtectedTabError extends Error {
@@ -43,7 +47,9 @@ const VECTOR_SCHEMA = 2;
 export const STORAGE_V2 = "sqlite";
 
 /** Key order-independent KDF fingerprint. */
+/** Comparable form of KDF params (normalised first: drops derived fields). */
 function kdfKey(k: KdfParams): string {
+  k = kdfFromEnvelope({ kdf: k });
   const o = k as unknown as Record<string, unknown>;
   return JSON.stringify(Object.keys(o).sort().map((x) => [x, o[x]]));
 }
@@ -504,6 +510,213 @@ export class VaultStore {
     return this.exclusive(() => this.removePasswordImpl(password));
   }
 
+  /** Re-key everything under a new password. False when `oldPassword` is wrong. */
+  changePassword(oldPassword: string, newPassword: string): Promise<boolean> {
+    return this.exclusive(async () => {
+      const verified = await this.verifiedKey(oldPassword);
+      if (!verified) return false;
+      this.installKey(verified.key, verified.header);
+      const newSalt = generateSalt();
+      await this.rekeyTo(await deriveKeyAsync(newPassword, newSalt), newSalt);
+      addLog("SECURITY", "Master password changed — every file and record re-encrypted under the new key.");
+      return true;
+    });
+  }
+
+  /**
+   * Forgotten password: open the vault key with the recovery code, then
+   * re-key under `newPassword`. Throws with a user-facing message on failure.
+   */
+  recoverWithCode(code: string, newPassword: string): Promise<void> {
+    return this.exclusive(async () => {
+      this.completeInterruptedCommit();
+      const header = readJsonStrict<any>(this.paths.vaultFile, null);
+      if (!header?.encrypted) throw new Error("This vault has no master password — nothing to recover.");
+      const rec = readJsonStrict<any>(this.paths.recoveryFile, null);
+      if (!rec?.sealed) throw new Error("No recovery key was set up for this vault.");
+      const key = openWithRecoveryCode(rec.sealed, code);
+      try {
+        decryptString(header.ciphertext, key, header.iv, header.authTag);
+      } catch {
+        key.fill(0);
+        throw new Error("This recovery key is out of date for this vault (it was replaced or the vault was restored from an older copy).");
+      }
+      this.installKey(key, header);
+      try {
+        await this.reconcileDbKey("", header);
+      } catch {}
+      this.maybeMigrateToV2();
+      const newSalt = generateSalt();
+      await this.rekeyTo(await deriveKeyAsync(newPassword, newSalt), newSalt);
+      addLog("SECURITY", "Vault opened with the recovery key; master password reset.");
+    });
+  }
+
+  /** Derive and check a password against vault.json; null when wrong. */
+  private async verifiedKey(password: string): Promise<{ key: Buffer; header: any } | null> {
+    this.completeInterruptedCommit();
+    const header = readJsonStrict<any>(this.paths.vaultFile, null);
+    if (!header?.encrypted) throw new Error("This vault has no master password.");
+    const key = await deriveKeyAsync(password, header.salt, kdfFromEnvelope(header));
+    try {
+      decryptString(header.ciphertext, key, header.iv, header.authTag);
+      return { key, header };
+    } catch {
+      key.fill(0);
+      return null;
+    }
+  }
+
+  private installKey(key: Buffer, header: any): void {
+    if (this.encryptionKey && this.encryptionKey !== key) {
+      try {
+        this.encryptionKey.fill(0);
+      } catch {}
+    }
+    this.encryptionKey = key;
+    this.encryptionSaltHex = header.salt;
+    this.encryptionKdf = kdfFromEnvelope(header);
+    this.clearCache();
+  }
+
+  /**
+   * Re-encrypt every file and record under `newKey` (new salt, current KDF).
+   * Files are staged and committed as one set (commitStagedWrites). v2 rows
+   * are rewritten AFTER that commit; until then the db keeps the old key
+   * sealed under the new one (meta prev_key), so a crash in between is
+   * repaired at the next unlock with the NEW password (reconcileDbKey).
+   */
+  private async rekeyTo(newKey: Buffer, newSalt: string): Promise<void> {
+    if (!this.encryptionKey) throw new Error("Vault is locked");
+    const v2 = this.isV2();
+    const vault = this.readVault();
+    let vectors: VectorsFile = { version: VECTOR_SCHEMA, chunks: [] };
+    try {
+      vectors = this.readVectors();
+    } catch {}
+    const companions = [this.paths.scratchpadFile, this.paths.scratchpadArchiveFile, this.paths.noteRevisionsFile, this.paths.scanSessionsFile].map(
+      (f) => [f, this.readProtectedJson<any>(f, null)] as const
+    );
+    const old = { key: this.encryptionKey, salt: this.encryptionSaltHex, kdf: this.encryptionKdf };
+    const db = v2 ? this.db() : null;
+    if (db) {
+      const prev = encryptString(old.key.toString("hex"), newKey, PREV_KEY_AAD);
+      db.tx(() => db.setMeta("prev_key", JSON.stringify(prev)));
+    }
+    this.encryptionKey = newKey;
+    this.encryptionSaltHex = newSalt;
+    this.encryptionKdf = currentKdf();
+    this.stagedWrites = new Map();
+    try {
+      if (v2) this.writeHeaderV2();
+      else {
+        this.writeVault(vault);
+        this.writeVectors(vectors);
+      }
+      for (const [file, obj] of companions) if (obj) this.writeProtectedJson(file, obj);
+      this.commitStagedWrites(this.stagedWrites);
+    } catch (e) {
+      this.stagedWrites = null;
+      if (fs.existsSync(this.commitMarkerFile())) {
+        try {
+          this.completeInterruptedCommit();
+        } catch {
+          this.lock();
+          throw e;
+        }
+      } else {
+        this.encryptionKey = old.key;
+        this.encryptionSaltHex = old.salt;
+        this.encryptionKdf = old.kdf;
+        try {
+          db?.tx(() => db.deleteMeta("prev_key"));
+        } catch {}
+        newKey.fill(0);
+        this.clearCache();
+        throw e;
+      }
+    } finally {
+      this.stagedWrites = null;
+    }
+    // Header committed under the new key: now the rows (clears prev_key).
+    if (v2) this.writeDbTables(vault.entries, vectors.chunks);
+    try {
+      old.key.fill(0);
+    } catch {}
+    this.clearCache();
+    this.refreshRecoverySeal();
+    this.touchEmergencySnapshot();
+  }
+
+  // ── Recovery key ─────────────────────────────────────────────────────────
+  // data/recovery.json = { public key, the CURRENT vault key sealed to it }.
+  // Resealed after every key change; the private half (the recovery code)
+  // is shown to the user once and never stored. See server/recovery.ts.
+
+  recoveryStatus(): { enabled: boolean; current: boolean; created_at: string | null } {
+    const rec = readJsonStrict<any>(this.paths.recoveryFile, null);
+    if (!rec?.public_key) return { enabled: false, current: false, created_at: null };
+    const header = readJsonStrict<any>(this.paths.vaultFile, null);
+    let current = false;
+    try {
+      current = !!header?.encrypted && rec.key_salt === header.salt && rec.key_kdf === kdfKey(kdfFromEnvelope(header));
+    } catch {}
+    return { enabled: true, current, created_at: rec.created_at || null };
+  }
+
+  /** New recovery key (replaces any previous one). Returns the code — show once. */
+  createRecoveryKey(): string {
+    if (!this.isEncryptionEnabled()) throw new Error("Set a master password first.");
+    if (!this.encryptionKey) throw new Error("Vault is locked");
+    const { code, publicKey } = generateRecoveryKey();
+    this.writeRecoverySeal(publicKey, new Date().toISOString());
+    addLog("SECURITY", "Recovery key created (any previous recovery key no longer works).");
+    return code;
+  }
+
+  removeRecoveryKey(): void {
+    if (this.isLocked()) throw new Error("Vault is locked");
+    try {
+      fs.unlinkSync(this.paths.recoveryFile);
+      addLog("SECURITY", "Recovery key removed.");
+    } catch {}
+  }
+
+  private writeRecoverySeal(publicKey: string, createdAt: string): void {
+    if (!this.encryptionKey || !this.encryptionSaltHex) return;
+    atomicWrite(
+      this.paths.recoveryFile,
+      JSON.stringify(
+        {
+          version: 1,
+          alg: RECOVERY_ALG,
+          created_at: createdAt,
+          public_key: publicKey,
+          key_salt: this.encryptionSaltHex,
+          key_kdf: kdfKey(this.keyKdf()),
+          sealed: sealToRecoveryKey(this.encryptionKey, publicKey),
+        },
+        null,
+        2
+      )
+    );
+  }
+
+  /** Keep the sealed copy on the current key (after re-key, KDF upgrade, unlock). */
+  private refreshRecoverySeal(): void {
+    try {
+      const rec = readJsonStrict<any>(this.paths.recoveryFile, null);
+      if (!rec?.public_key || !this.encryptionKey) return;
+      if (rec.key_salt === this.encryptionSaltHex && rec.sealed) {
+        // Same salt can still mean a new key (KDF upgrade): check it opens.
+        if (rec.key_kdf === kdfKey(this.keyKdf())) return;
+      }
+      this.writeRecoverySeal(rec.public_key, rec.created_at || new Date().toISOString());
+    } catch (e: any) {
+      addLog("SECURITY", `Recovery key could not be refreshed (${e?.message}) — create a new one in Settings.`);
+    }
+  }
+
   private async unlockImpl(password: string): Promise<boolean> {
     this.completeInterruptedCommit();
     const epoch = this.lockEpoch;
@@ -575,6 +788,7 @@ export class VaultStore {
       // period if its window has elapsed (staged plaintext copies are then
       // finally deleted; see stagePlaintextArtifactsForGrace).
       this.maybeClearEncryptionGrace();
+      this.refreshRecoverySeal();
       return true;
     } catch {
       return false;
@@ -653,6 +867,7 @@ export class VaultStore {
       oldKey?.fill(0);
     } catch {}
     addLog("SYSTEM", "Vault re-keyed with current KDF standard (Argon2id) — envelopes upgraded.");
+    this.refreshRecoverySeal();
     this.touchEmergencySnapshot();
   }
 
@@ -736,6 +951,9 @@ export class VaultStore {
     if (this.isEncryptionEnabled()) {
       throw new Error("Vault is already encrypted. Remove the current password first.");
     }
+    try {
+      fs.unlinkSync(this.paths.recoveryFile);
+    } catch {}
     const salt = generateSalt();
     const key = await deriveKeyAsync(password, salt);
     this.encryptionKey = key;
@@ -1026,6 +1244,9 @@ export class VaultStore {
       }
       this._scratchpadCache = null;
       this._scratchpadArchiveCache = null;
+      try {
+        fs.unlinkSync(this.paths.recoveryFile);
+      } catch {}
       this.touchEmergencySnapshot();
       return true;
     } catch (e: any) {
@@ -1080,6 +1301,18 @@ export class VaultStore {
     } catch {
       return "";
     }
+  }
+
+  /** Settings for a diagnostics bundle: every secret field → configured flag. */
+  getSettingsForDiagnostics(): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    let s: Record<string, unknown> = {};
+    try {
+      s = this.getSettings() as unknown as Record<string, unknown>;
+    } catch {}
+    const secret = new Set<string>(VaultStore.SECRET_SETTING_FIELDS as readonly string[]);
+    for (const [k, v] of Object.entries(s)) out[k] = secret.has(k) || /key|token|secret|password/i.test(k) ? { configured: !!v } : v;
+    return out;
   }
 
   getSettings(): AppSettings {
@@ -1202,6 +1435,7 @@ export class VaultStore {
   /** Record which key the rows are sealed under (inside the caller's tx). */
   private writeKeyState(): void {
     const db = this.db();
+    db.deleteMeta("prev_key");
     if (this.encryptionKey) {
       db.setMeta("enc", "1");
       db.setMeta("salt", this.encryptionSaltHex || readJsonStrict<any>(this.paths.vaultFile, null)?.salt || "");
@@ -1268,9 +1502,23 @@ export class VaultStore {
     const metaKdf = db.getMeta("kdf");
     // Both sides through kdfFromEnvelope: it normalises the params (drops
     // derived fields such as hashLength), so equal KDFs compare equal.
-    if (enc === "1" && db.getMeta("salt") === header.salt && metaKdf && kdfKey(kdfFromEnvelope({ kdf: JSON.parse(metaKdf) })) === kdfKey(hdrKdf)) return;
+    if (enc === "1" && db.getMeta("salt") === header.salt && metaKdf && kdfKey(JSON.parse(metaKdf)) === kdfKey(hdrKdf)) {
+      // A re-key that never committed its header leaves prev_key behind.
+      if (db.getMeta("prev_key") !== null) db.deleteMeta("prev_key");
+      return;
+    }
     let rowKey: Buffer | null = null;
-    if (enc === "1" && metaKdf) rowKey = await deriveKeyAsync(password, db.getMeta("salt") || "", kdfFromEnvelope({ kdf: JSON.parse(metaKdf) }));
+    // A committed re-key (new password) left the old key sealed under the
+    // header key; otherwise the rows are under the same password with other
+    // KDF params / salt (KDF upgrade) and the old key is re-derived.
+    const prev = db.getMeta("prev_key");
+    if (prev) {
+      try {
+        const p = JSON.parse(prev);
+        rowKey = Buffer.from(decryptString(p.ciphertext, this.encryptionKey, p.iv, p.authTag, PREV_KEY_AAD), "hex");
+      } catch {}
+    }
+    if (!rowKey && enc === "1" && metaKdf) rowKey = await deriveKeyAsync(password, db.getMeta("salt") || "", kdfFromEnvelope({ kdf: JSON.parse(metaKdf) }));
     try {
       db.tx(() => {
         for (const table of RECORD_TABLES) {
@@ -1975,12 +2223,15 @@ export class VaultStore {
   async verifyMasterPassword(password: string): Promise<boolean> {
     const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
     if (!raw || !raw.encrypted) return false;
+    let key: Buffer | null = null;
     try {
-      const key = await deriveKeyAsync(password, raw.salt, kdfFromEnvelope(raw));
+      key = await deriveKeyAsync(password, raw.salt, kdfFromEnvelope(raw));
       decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
       return true;
     } catch {
       return false;
+    } finally {
+      key?.fill(0);
     }
   }
 

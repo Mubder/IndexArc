@@ -680,6 +680,40 @@ export interface TranslationDict {
   failed_generic: string;
   logs_empty: string;
   update_download_failed: string;
+  // R5: password change + recovery key
+  pw_change_title: string;
+  pw_change_desc: string;
+  pw_current: string;
+  pw_new: string;
+  pw_confirm: string;
+  pw_change_btn: string;
+  pw_mismatch: string;
+  pw_too_short: string;
+  pw_changed: string;
+  rk_title: string;
+  rk_desc: string;
+  rk_status_none: string;
+  rk_status_ok: string;
+  rk_status_stale: string;
+  rk_create_btn: string;
+  rk_replace_btn: string;
+  rk_remove_btn: string;
+  rk_password_prompt: string;
+  rk_shown_once: string;
+  rk_copy: string;
+  rk_download: string;
+  rk_saved_confirm: string;
+  rk_replaced_note: string;
+  rk_forgot: string;
+  rk_recover_title: string;
+  rk_code_label: string;
+  rk_recover_btn: string;
+  rk_back: string;
+  rk_file_header: string;
+  health_download_btn: string;
+  health_download_hint: string;
+  crash_reports_label: string;
+  crash_reports_desc: string;
 }
 
 export const translations: Record<UiLanguage, TranslationDict> = {
@@ -1361,6 +1395,40 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     failed_generic: "Failed",
     logs_empty: "No logs yet",
     update_download_failed: "download failed",
+    // R5: password change + recovery key
+    pw_change_title: "Change master password",
+    pw_change_desc: "Re-encrypts every file and record under the new password.",
+    pw_current: "Current password",
+    pw_new: "New password (8+ characters)",
+    pw_confirm: "Repeat new password",
+    pw_change_btn: "Change password",
+    pw_mismatch: "The new passwords do not match",
+    pw_too_short: "Password must be at least 8 characters",
+    pw_changed: "Master password changed",
+    rk_title: "Recovery key",
+    rk_desc: "A one-time code that resets a forgotten master password. Anyone with this code and your vault files can open the vault, so keep it offline, like the password itself.",
+    rk_status_none: "Not set up. A forgotten password means lost data.",
+    rk_status_ok: "Set up",
+    rk_status_stale: "Out of date. Create a new one.",
+    rk_create_btn: "Create recovery key",
+    rk_replace_btn: "Replace recovery key",
+    rk_remove_btn: "Remove",
+    rk_password_prompt: "Master password (to confirm)",
+    rk_shown_once: "Write this down or save it now. It will not be shown again.",
+    rk_copy: "Copy",
+    rk_download: "Save as file",
+    rk_saved_confirm: "I saved it",
+    rk_replaced_note: "Any previous recovery key no longer works.",
+    rk_forgot: "Forgot password? Use your recovery key",
+    rk_recover_title: "Reset with recovery key",
+    rk_code_label: "Recovery key",
+    rk_recover_btn: "Reset password and unlock",
+    rk_back: "Back to password",
+    rk_file_header: "IndexArc recovery key",
+    health_download_btn: "Download report",
+    health_download_hint: "Redacted diagnostics for a bug report: no secrets, e-mail addresses or your user name",
+    crash_reports_label: "Keep a crash log for bug reports",
+    crash_reports_desc: "Records error messages and stack traces only, redacted on this device. Nothing is sent anywhere; the log goes into Download report in App health.",
   },
   ar: {
     tab_home: "الرئيسية",
@@ -2040,6 +2108,40 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     failed_generic: "فشل",
     logs_empty: "لا توجد سجلات بعد",
     update_download_failed: "فشل التنزيل",
+    // R5: password change + recovery key
+    pw_change_title: "تغيير كلمة المرور الرئيسية",
+    pw_change_desc: "يعيد تشفير كل ملف وسجل بكلمة المرور الجديدة.",
+    pw_current: "كلمة المرور الحالية",
+    pw_new: "كلمة المرور الجديدة (8 أحرف على الأقل)",
+    pw_confirm: "أعد كتابة كلمة المرور الجديدة",
+    pw_change_btn: "تغيير كلمة المرور",
+    pw_mismatch: "كلمتا المرور الجديدتان غير متطابقتين",
+    pw_too_short: "يجب أن تتكون كلمة المرور من 8 أحرف على الأقل",
+    pw_changed: "تم تغيير كلمة المرور الرئيسية",
+    rk_title: "مفتاح الاسترداد",
+    rk_desc: "رمز يُستخدم لمرة واحدة لإعادة تعيين كلمة مرور منسية. من يملك هذا الرمز وملفات الخزنة يستطيع فتحها، لذا احفظه بعيدًا عن الإنترنت مثل كلمة المرور نفسها.",
+    rk_status_none: "غير مُعدّ. نسيان كلمة المرور يعني فقدان البيانات.",
+    rk_status_ok: "مُعدّ",
+    rk_status_stale: "قديم. أنشئ مفتاحًا جديدًا.",
+    rk_create_btn: "إنشاء مفتاح استرداد",
+    rk_replace_btn: "استبدال مفتاح الاسترداد",
+    rk_remove_btn: "إزالة",
+    rk_password_prompt: "كلمة المرور الرئيسية (للتأكيد)",
+    rk_shown_once: "دوّن هذا الرمز أو احفظه الآن. لن يُعرض مرة أخرى.",
+    rk_copy: "نسخ",
+    rk_download: "حفظ كملف",
+    rk_saved_confirm: "لقد حفظته",
+    rk_replaced_note: "أي مفتاح استرداد سابق لم يعد يعمل.",
+    rk_forgot: "نسيت كلمة المرور؟ استخدم مفتاح الاسترداد",
+    rk_recover_title: "إعادة التعيين بمفتاح الاسترداد",
+    rk_code_label: "مفتاح الاسترداد",
+    rk_recover_btn: "إعادة تعيين كلمة المرور وفتح الخزنة",
+    rk_back: "العودة إلى كلمة المرور",
+    rk_file_header: "مفتاح استرداد IndexArc",
+    health_download_btn: "تنزيل التقرير",
+    health_download_hint: "تشخيص منقّح لإرفاقه ببلاغ خطأ: بلا أسرار أو عناوين بريد أو اسم المستخدم",
+    crash_reports_label: "الاحتفاظ بسجل الأعطال لبلاغات الأخطاء",
+    crash_reports_desc: "يسجّل رسائل الأخطاء وتتبّع المكدّس فقط، بعد تنقيحها على هذا الجهاز. لا يُرسل أي شيء؛ يُضاف السجل إلى «تنزيل التقرير» في صحة التطبيق.",
   },
 };
 

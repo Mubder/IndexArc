@@ -1,0 +1,4 @@
+Contact: https://github.com/Mubder/IndexArc/security/advisories/new
+Expires: 2027-11-04T00:00:00.000Z
+Preferred-Languages: en, ar
+Policy: https://github.com/Mubder/IndexArc/blob/main/SECURITY.md

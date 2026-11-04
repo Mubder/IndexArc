@@ -118,6 +118,92 @@ export function vaultRoutes(ctx: RouteContext) {
     }
   });
 
+  r.post("/change-password", async (req, res) => {
+    // Verifies the current password itself, so it works locked or unlocked;
+    // throttled like unlock (a success is proof of the password).
+    const gate = throttle(req, res, { max: 10 });
+    if (!gate) return;
+    const { current_password, new_password } = req.body || {};
+    if (!current_password) return res.status(400).json({ error: "Current password is required" });
+    if (!new_password || String(new_password).length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters long" });
+    }
+    try {
+      const ok = await store.changePassword(String(current_password), String(new_password));
+      if (!ok) {
+        recordFailure(req);
+        audit?.log("vault.rekey", "failure — wrong password");
+        return setTimeout(() => res.status(401).json({ error: "Incorrect master password" }), gate.delayMs || 500);
+      }
+      recordSuccess(req);
+      audit?.log("vault.rekey", "master password changed");
+      sendSSE("vault-changed", { locked: false });
+      res.json({ success: true, recovery: store.recoveryStatus() });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  // The /recovery* routes check the lock themselves: the protectedPaths gate
+  // in app.ts is mounted after this router, so it never sees them.
+  r.get("/recovery", (_req, res) => {
+    if (store.isLocked()) return res.status(423).json({ error: "Vault is locked", is_locked: true });
+    res.json(store.recoveryStatus());
+  });
+
+  r.post("/recovery", async (req, res) => {
+    // A recovery code outlives lock and password changes, so minting one
+    // needs the master password — not just a token on an unlocked session.
+    const gate = throttle(req, res, { max: 10 });
+    if (!gate) return;
+    if (store.isLocked()) return res.status(423).json({ error: "Vault is locked", is_locked: true });
+    const { password } = req.body || {};
+    if (!password) return res.status(400).json({ error: "Password is required" });
+    if (!(await store.verifyMasterPassword(String(password)))) {
+      recordFailure(req);
+      return setTimeout(() => res.status(401).json({ error: "Incorrect master password" }), gate.delayMs || 500);
+    }
+    try {
+      recordSuccess(req);
+      const code = store.createRecoveryKey();
+      audit?.log("vault.recovery", "recovery key created");
+      res.json({ code, ...store.recoveryStatus() });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  r.post("/recovery/remove", (_req, res) => {
+    if (store.isLocked()) return res.status(423).json({ error: "Vault is locked", is_locked: true });
+    store.removeRecoveryKey();
+    audit?.log("vault.recovery", "recovery key removed");
+    res.json(store.recoveryStatus());
+  });
+
+  r.post("/recover", async (req, res) => {
+    // Locked-state entry point, like unlock: throttled harder. The code is
+    // 256 bits, so this is about noise, not brute force.
+    const gate = throttle(req, res, { max: 5 });
+    if (!gate) return;
+    const { recovery_code, new_password } = req.body || {};
+    if (!recovery_code) return res.status(400).json({ error: "Recovery code is required" });
+    if (!new_password || String(new_password).length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters long" });
+    }
+    try {
+      await store.recoverWithCode(String(recovery_code), String(new_password));
+      recordSuccess(req);
+      addLog("SECURITY", "Vault recovered with recovery key");
+      audit?.log("vault.recover", "success — password reset with recovery key");
+      sendSSE("vault-changed", { locked: false });
+      res.json({ success: true });
+    } catch (e: any) {
+      recordFailure(req);
+      audit?.log("vault.recover", "failure");
+      setTimeout(() => res.status(401).json({ error: e?.message || "Recovery failed" }), gate.delayMs || 500);
+    }
+  });
+
   return r;
 }
 

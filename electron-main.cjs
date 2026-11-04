@@ -921,6 +921,7 @@ function spawnBackend(preferredPort) {
     INDEXARC_ROOT: portableRoot,
     INDEXARC_DIST_DIR: distDir,
     INDEXARC_API_TOKEN: apiToken,
+    INDEXARC_VERSION: app.getVersion(),
   };
   if (settingsKey) env.INDEXARC_SETTINGS_KEY = settingsKey;
   else delete env.INDEXARC_SETTINGS_KEY;

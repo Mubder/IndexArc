@@ -11,6 +11,21 @@ export interface PrivacySectionProps {
 export function PrivacySection({ onPatchSettings, settings, t }: PrivacySectionProps) {
   return (
     <>
+      {/* Opt-in crash log (R5) */}
+      <div className="space-y-2 rounded-xl p-4" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!settings.crash_reports_enabled}
+            onChange={(e) => onPatchSettings({ crash_reports_enabled: e.target.checked })}
+            className="accent-blue-500 mt-0.5"
+          />
+          <span className="text-xs space-y-1">
+            <span className="block" style={{ color: "var(--text)" }}>{t("crash_reports_label")}</span>
+            <span className="block text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{t("crash_reports_desc")}</span>
+          </span>
+        </label>
+      </div>
       {/* Auto-Lock */}
       <div className="space-y-3 rounded-xl p-4" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
         <h3 className="text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5" style={{ color: "var(--cyan)" }}>

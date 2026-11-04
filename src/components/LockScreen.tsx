@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Lock, Unlock, ShieldAlert } from "lucide-react";
+import { Lock, Unlock, ShieldAlert, LifeBuoy } from "lucide-react";
 import { Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
 
@@ -12,6 +12,11 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Forgot-password flow: recovery code + new password.
+  const [recovering, setRecovering] = useState(false);
+  const [code, setCode] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [newPw2, setNewPw2] = useState("");
 
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
@@ -41,6 +46,41 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
       setLoading(false);
     }
   };
+
+  const handleRecover = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (newPw.length < 8) return setError(t("pw_too_short"));
+    if (newPw !== newPw2) return setError(t("pw_mismatch"));
+    setLoading(true);
+    try {
+      const res = await fetch("/api/vault/recover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recovery_code: code, new_password: newPw }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setCode("");
+        setNewPw("");
+        setNewPw2("");
+        onUnlockSuccess();
+      } else {
+        setError(data.error || t("failed_generic"));
+      }
+    } catch (err: any) {
+      setError(err.message || t("connection_failed"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fieldStyle = {
+    background: "var(--bg-input)",
+    border: "1px solid var(--border-input)",
+    color: "var(--text)",
+    fontFamily: "var(--font-mono)",
+  } as const;
 
   return (
     <div
@@ -78,6 +118,45 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
           {t("sec_locked_subtitle")}
         </p>
 
+        {recovering ? (
+          <form onSubmit={handleRecover} className="w-full space-y-3" aria-labelledby="recover-title">
+            <h3 id="recover-title" className="text-sm font-semibold flex items-center gap-1.5" style={{ color: "var(--text)" }}>
+              <LifeBuoy className="w-4 h-4" /> {t("rk_recover_title")}
+            </h3>
+            <label className="block text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-dim)" }}>
+              {t("rk_code_label")}
+              <textarea
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                rows={3}
+                autoFocus
+                spellCheck={false}
+                disabled={loading}
+                className="mt-2 w-full rounded-xl px-4 py-3 text-sm focus:outline-none normal-case tracking-normal font-normal"
+                style={fieldStyle}
+              />
+            </label>
+            <input type="password" autoComplete="new-password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder={t("pw_new")} aria-label={t("pw_new")} disabled={loading} className="w-full rounded-xl px-4 py-3 text-sm focus:outline-none" style={fieldStyle} />
+            <input type="password" autoComplete="new-password" value={newPw2} onChange={(e) => setNewPw2(e.target.value)} placeholder={t("pw_confirm")} aria-label={t("pw_confirm")} disabled={loading} className="w-full rounded-xl px-4 py-3 text-sm focus:outline-none" style={fieldStyle} />
+            {error && (
+              <div role="alert" className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs" style={{ color: "var(--danger)", background: "var(--danger-bg)", border: "1px solid rgba(248, 113, 113, 0.2)" }}>
+                <ShieldAlert className="w-4 h-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+            <button
+              type="submit"
+              disabled={loading || !code || !newPw || !newPw2}
+              className="w-full disabled:opacity-40 font-semibold text-sm py-3 rounded-xl flex items-center justify-center gap-2 cursor-pointer text-white"
+              style={{ background: "linear-gradient(135deg, var(--accent), #1d4ed8)" }}
+            >
+              {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : t("rk_recover_btn")}
+            </button>
+            <button type="button" onClick={() => { setRecovering(false); setError(""); }} className="w-full text-xs underline" style={{ color: "var(--text-dim)" }}>
+              {t("rk_back")}
+            </button>
+          </form>
+        ) : (
         <form onSubmit={handleUnlock} className="w-full space-y-4">
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-dim)" }}>
@@ -134,7 +213,11 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
               </>
             )}
           </button>
+          <button type="button" onClick={() => { setRecovering(true); setError(""); }} className="w-full text-xs underline" style={{ color: "var(--text-dim)" }}>
+            {t("rk_forgot")}
+          </button>
         </form>
+        )}
       </div>
     </div>
   );

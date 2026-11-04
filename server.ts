@@ -11,6 +11,7 @@ import { getLastActivity } from "./server/auth.js";
 import { sendSSE } from "./server/routes/sse.js";
 import { createApp } from "./server/app.js";
 import { closeAllRecordDbs } from "./server/db/recordDb.js";
+import { recordCrash } from "./server/diagnostics.js";
 
 const paths = ensurePortableLayout();
 const store = new VaultStore(paths);
@@ -71,12 +72,23 @@ parentPort?.on("message", (e) => {
 // Crash handlers. Messages only — a stack can carry absolute paths and
 // fragments of request data. An uncaught exception leaves the process in an
 // unknown state: flush and exit; the shell restarts the server.
+function maybeRecordCrash(source: string, err: any) {
+  try {
+    if (store.getSettings().crash_reports_enabled) {
+      recordCrash(paths.logsDir, { source, message: String(err?.message || err), stack: String(err?.stack || "") });
+    }
+  } catch {
+    /* never let crash logging crash */
+  }
+}
 process.on("unhandledRejection", (reason: any) => {
   addLog("ERROR", `Unhandled rejection: ${reason?.message || String(reason)}`);
+  maybeRecordCrash("server:unhandledRejection", reason);
 });
 process.on("uncaughtException", (err: any) => {
   addLog("ERROR", `Uncaught exception: ${err?.message || String(err)} — restarting server`);
   console.error("[server] uncaught exception:", err?.message || err);
+  maybeRecordCrash("server:uncaughtException", err);
   shutdown(1);
 });
 const { app } = createApp({ paths, store, audit, watchers });

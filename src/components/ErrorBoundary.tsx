@@ -12,6 +12,16 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // Opt-in crash log (server ignores it unless Settings → Privacy enables
+    // it, and redacts before writing).
+    try {
+      void fetch("/api/diagnostics/crash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: error?.message, stack: `${error?.stack || ""}
+${info?.componentStack || ""}` }),
+      }).catch(() => {});
+    } catch {}
     // eslint-disable-next-line no-console
     console.error("IndexArc crash:", error, info);
     try {
