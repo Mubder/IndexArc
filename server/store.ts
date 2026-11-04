@@ -12,7 +12,8 @@ import type {
   WatchedFolder,
 } from "./types.js";
 import { DEFAULT_SETTINGS } from "./types.js";
-import { deriveKeyAsync, generateSalt, decryptString, envelopePayload, kdfFromEnvelope, kdfNeedsUpgrade, currentKdf } from "./crypto.js";
+import { deriveKeyAsync, generateSalt, decryptString, encryptString, envelopePayload, kdfFromEnvelope, kdfNeedsUpgrade, currentKdf } from "./crypto.js";
+import { RecordDb, RECORD_TABLES, type RecordRow, type RecordTable } from "./db/recordDb.js";
 import type { KdfParams } from "./crypto.js";
 import { addLog } from "./logs.js";
 
@@ -35,6 +36,34 @@ interface VaultFile {
 // are dropped, never re-served, and entries are re-embedded on their next
 // save under the redacted indexText rules.
 const VECTOR_SCHEMA = 2;
+
+// Storage v2 (R3.2): vault.json is a small header (KDF, salt, key check);
+// entries and vectors live one-record-per-row in data/vault.db, each row
+// sealed with AES-256-GCM and AAD = (table, id, schema).
+export const STORAGE_V2 = "sqlite";
+
+/** Key order-independent KDF fingerprint. */
+function kdfKey(k: KdfParams): string {
+  const o = k as unknown as Record<string, unknown>;
+  return JSON.stringify(Object.keys(o).sort().map((x) => [x, o[x]]));
+}
+
+/** Embeddings are stored as packed float64 (exact, ~2x smaller than JSON). */
+function packChunk(c: VectorChunk): Record<string, unknown> {
+  const { embedding, ...rest } = c;
+  if (!Array.isArray(embedding)) return { ...rest, embedding: null };
+  return { ...rest, embedding: null, emb_f64: Buffer.from(new Float64Array(embedding).buffer).toString("base64") };
+}
+
+function unpackChunk(o: any): VectorChunk {
+  if (typeof o?.emb_f64 === "string") {
+    const b = Buffer.from(o.emb_f64, "base64");
+    const copy = b.buffer.slice(b.byteOffset, b.byteOffset + b.length);
+    o.embedding = Array.from(new Float64Array(copy));
+    delete o.emb_f64;
+  }
+  return o as VectorChunk;
+}
 
 interface VectorsFile {
   version: typeof VECTOR_SCHEMA;
@@ -169,8 +198,48 @@ function readJsonOrQuarantine<T>(filePath: string, fallback: T, label: string): 
 // True when every vault-key-protected file carried by an emergency snapshot
 // is an encrypted envelope (settings.json is not vault-key protected). Absent
 // files don't count against it — restoring them is a no-op.
-function snapshotIsFullyEncrypted(snapshot: any): boolean {
+/** Parsed header fields of emergency snapshot files, keyed by full path. */
+const snapshotMetaCache = new Map<
+  string,
+  { size: number; mtimeMs: number; created_at: string; encrypted: boolean; has_vault: boolean; has_notes: boolean }
+>();
+
+/**
+ * Header fields of a snapshot file without JSON.parse-ing tens of MB. The
+ * writer (buildSnapshot) emits created_at/encrypted first and every file as a
+ * base64 string or null — base64 never contains a quote, so `"key":"` marks a
+ * present file. Anything unexpected falls back to a full parse.
+ */
+function peekSnapshotMeta(buf: Buffer): { created_at: string | null; encrypted: boolean; has_vault: boolean; has_notes: boolean } {
+  const head = buf.subarray(0, 512).toString("utf8");
+  const m = /^\{"format":"indexarc-emergency","version":1,"created_at":"([^"]+)","encrypted":(true|false),"files":\{/.exec(head);
+  if (!m) {
+    const parsed = JSON.parse(buf.toString("utf8"));
+    return {
+      created_at: parsed?.created_at || null,
+      encrypted: !!parsed?.encrypted,
+      has_vault: !!(parsed?.files?.vault || parsed?.files?.vault_db),
+      has_notes: !!(parsed?.files?.scratchpad || parsed?.files?.scratchpad_archive),
+    };
+  }
+  const has = (k: string) => buf.includes(`"${k}":"`);
+  return {
+    created_at: m[1],
+    encrypted: m[2] === "true",
+    has_vault: has("vault") || has("vault_db"),
+    has_notes: has("scratchpad") || has("scratchpad_archive"),
+  };
+}
+
+function snapshotIsFullyEncrypted(snapshot: any, tmpDir = os.tmpdir()): boolean {
   const files = snapshot?.files || {};
+  if (files.vault_db != null) {
+    try {
+      if (!RecordDb.imageIsFullyEncrypted(Buffer.from(files.vault_db, "base64"), tmpDir)) return false;
+    } catch {
+      return false;
+    }
+  }
   for (const key of ["vault", "vectors", "scratchpad", "scratchpad_archive", "note_revisions"]) {
     const b64 = files[key];
     if (b64 == null) continue;
@@ -253,6 +322,8 @@ export class VaultStore {
   }
   private _settingsCache: AppSettings | null = null;
   private _entriesCache: VaultEntry[] | null = null;
+  private _vectorsCache: VectorChunk[] | null = null;
+  private _db: RecordDb | null = null;
   private _foldersCache: WatchedFolder[] | null = null;
   private _scratchpadCache: any[] | null = null;
   private _scratchpadArchiveCache: any[] | null = null;
@@ -313,6 +384,7 @@ export class VaultStore {
   clearCache() {
     this._settingsCache = null;
     this._entriesCache = null;
+    this._vectorsCache = null;
     this._foldersCache = null;
     this._scratchpadCache = null;
     this._scratchpadArchiveCache = null;
@@ -473,6 +545,18 @@ export class VaultStore {
       // freshly decrypted content is served.
       this._scratchpadCache = null;
       this._scratchpadArchiveCache = null;
+      // Storage v2: bring rows in line with the header's key (crash recovery
+      // for password operations), and move a v1 vault into SQLite.
+      try {
+        await this.reconcileDbKey(password, raw);
+      } catch (e: any) {
+        addLog("DATA", `vault.db key reconcile failed (${e?.message}) — rows stay as they are; reads will report the problem.`);
+      }
+      try {
+        this.maybeMigrateToV2();
+      } catch (e: any) {
+        addLog("DATA", `Storage upgrade to SQLite failed (${e?.message}) — the JSON vault stays in use. Retried on next unlock.`);
+      }
       // Transparent KDF migration: a legacy (or weaker-parameter) envelope is
       // re-encrypted with the current Argon2id parameters on successful
       // unlock. The user never sees this — the same password simply derives
@@ -548,6 +632,14 @@ export class VaultStore {
       } else {
         this.encryptionKey = oldKey;
         this.encryptionKdf = oldKdf;
+        // v2 rows were rewritten immediately (only file writes are staged):
+        // put them back under the old key so this session keeps working.
+        if (this.isV2()) {
+          this.stagedWrites = null;
+          try {
+            this.writeDbTables(vault.entries, vectors.chunks);
+          } catch {}
+        }
         try {
           newKey.fill(0);
         } catch {}
@@ -660,6 +752,11 @@ export class VaultStore {
 
     this.writeVault(vault);
     this.writeVectors(vectors);
+    if (this.isV2() && this.db().exists()) {
+      try {
+        this.db().compact(); // freed plaintext pages are rewritten away
+      } catch {}
+    }
 
     // Eagerly pull the companion files into the encrypted envelope (they were
     // plaintext until this point).
@@ -759,8 +856,12 @@ export class VaultStore {
     // carries no .json/.prev suffix at the top level, so it is skipped.
     try {
       for (const f of fs.readdirSync(this.paths.backupsDir)) {
-        if (!/\.(json|prev)$/.test(f)) continue;
         const full = path.join(this.paths.backupsDir, f);
+        if (/\.plain\.sqlite$/.test(f)) {
+          if (this.moveIntoGrace(full, graceDir)) stagedBackups++;
+          continue;
+        }
+        if (!/\.(json|prev)$/.test(f)) continue;
         if (isPlaintextJson(full) && this.moveIntoGrace(full, graceDir)) stagedBackups++;
       }
     } catch {}
@@ -888,6 +989,12 @@ export class VaultStore {
         revisions: {},
       });
       const sessions = this.readSessions();
+      // v2 rows are decrypted now, while the key is still live.
+      const v2 = this.isV2(raw);
+      const plainRows =
+        v2 && this.db().exists()
+          ? RECORD_TABLES.map((table) => [table, this.db().all(table).map((r) => [r, this.openRow(table, r, key)] as const)] as const)
+          : null;
 
       try {
         this.encryptionKey?.fill(0);
@@ -897,8 +1004,19 @@ export class VaultStore {
       // Explicit, password-verified decryption: plaintext is now intended.
       this.setEncryptionExpected(false);
 
-      atomicWrite(this.paths.vaultFile, JSON.stringify(vault, null, 2));
-      atomicWrite(this.paths.vectorsFile, JSON.stringify(vectors));
+      if (plainRows) {
+        // Rows first, header second: a crash in between leaves an encrypted
+        // header over plaintext rows, which the next unlock re-encrypts.
+        const db = this.db();
+        db.tx(() => {
+          for (const [table, rows] of plainRows) {
+            db.replaceAll(table, rows.map(([r, obj]) => this.sealRow(table, r.id, r.entry_id, obj, null)));
+          }
+          this.writeKeyState();
+        });
+      }
+      atomicWrite(this.paths.vaultFile, JSON.stringify(v2 ? { version: 2, storage: STORAGE_V2, entries: [] } : vault, null, 2));
+      if (!v2) atomicWrite(this.paths.vectorsFile, JSON.stringify(vectors));
       atomicWrite(this.paths.scratchpadFile, JSON.stringify({ version: 2, tabs: scratch }, null, 2));
       atomicWrite(this.paths.scratchpadArchiveFile, JSON.stringify({ version: 1, tabs: archive }, null, 2));
       atomicWrite(this.paths.noteRevisionsFile, JSON.stringify(revs, null, 2));
@@ -910,7 +1028,8 @@ export class VaultStore {
       this._scratchpadArchiveCache = null;
       this.touchEmergencySnapshot();
       return true;
-    } catch {
+    } catch (e: any) {
+      addLog("SECURITY", `Remove password failed (${e?.message || e}) — nothing was decrypted on disk.`);
       return false;
     } finally {
       try {
@@ -1045,8 +1164,197 @@ export class VaultStore {
   }
 
   // --- Vault ---
+  // ── Storage v2: SQLite records (R3.2) ──────────────────────────────────
+  private db(): RecordDb {
+    if (!this._db) this._db = new RecordDb(this.paths.vaultDbFile);
+    return this._db;
+  }
+
+  /** v2 when vault.json says so, or when there is no vault yet. */
+  private isV2(header: any = readJsonStrict<any>(this.paths.vaultFile, null)): boolean {
+    return !header || header.storage === STORAGE_V2;
+  }
+
+  private static aad(table: RecordTable, id: string): string {
+    return `indexarc:v2:${table}:${id}`;
+  }
+
+  /** Seal one record. `key` null = plaintext row (unencrypted vault only). */
+  private sealRow(table: RecordTable, id: string, entryId: string, obj: unknown, key: Buffer | null = this.encryptionKey): RecordRow {
+    const json = JSON.stringify(obj);
+    if (key) {
+      const e = encryptString(json, key, VaultStore.aad(table, id));
+      return { id, entry_id: entryId, iv: Buffer.from(e.iv, "hex"), tag: Buffer.from(e.authTag, "hex"), body: Buffer.from(e.ciphertext, "hex") };
+    }
+    this.refusePlaintextWrite(table === "entries" ? "vault entries" : "vectors");
+    return { id, entry_id: entryId, iv: null, tag: null, body: Buffer.from(json, "utf8") };
+  }
+
+  private openRow<T>(table: RecordTable, row: RecordRow, key: Buffer | null = this.encryptionKey): T {
+    if (row.iv && row.tag) {
+      if (!key) throw new Error("Vault is locked");
+      const text = decryptString(row.body.toString("hex"), key, row.iv.toString("hex"), row.tag.toString("hex"), VaultStore.aad(table, row.id));
+      return JSON.parse(text) as T;
+    }
+    return JSON.parse(row.body.toString("utf8")) as T;
+  }
+
+  /** Record which key the rows are sealed under (inside the caller's tx). */
+  private writeKeyState(): void {
+    const db = this.db();
+    if (this.encryptionKey) {
+      db.setMeta("enc", "1");
+      db.setMeta("salt", this.encryptionSaltHex || readJsonStrict<any>(this.paths.vaultFile, null)?.salt || "");
+      db.setMeta("kdf", JSON.stringify(this.keyKdf()));
+    } else {
+      db.setMeta("enc", "0");
+      db.deleteMeta("salt");
+      db.deleteMeta("kdf");
+    }
+  }
+
+  /** Small vault.json header: KDF + salt + an encrypted key check. */
+  private writeHeaderV2(): void {
+    const body = { version: 2, storage: STORAGE_V2, entries: [] as VaultEntry[] };
+    const rawDisk = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
+    if ((rawDisk && rawDisk.encrypted) || this.encryptionKey) {
+      if (!this.encryptionKey) throw new Error("Vault is locked");
+      const salt = this.encryptionSaltHex || rawDisk?.salt || generateSalt();
+      const env = envelopePayload(JSON.stringify(body), this.encryptionKey, salt, 2, this.keyKdf());
+      this.persist(this.paths.vaultFile, JSON.stringify({ ...env, storage: STORAGE_V2 }, null, 2));
+    } else {
+      this.refusePlaintextWrite("vault.json");
+      this.persist(this.paths.vaultFile, JSON.stringify(body, null, 2));
+    }
+    this.recordIntegrity(this.paths.vaultFile);
+  }
+
+  /** Replace both tables under the current key, in one transaction. */
+  private writeDbTables(entries: VaultEntry[] | null, chunks: VectorChunk[] | null): void {
+    const db = this.db();
+    db.tx(() => {
+      if (entries) db.replaceAll("entries", entries.map((e) => this.sealRow("entries", e.id, e.id, e)));
+      if (chunks) db.replaceAll("vectors", chunks.map((c) => this.sealRow("vectors", c.id, c.entry_id, packChunk(c))));
+      this.writeKeyState();
+    });
+    if (entries) this._entriesCache = null;
+    if (chunks) this._vectorsCache = null;
+  }
+
+  /** One row-level change: checks lock state, creates the header if needed. */
+  private rowWrite(fn: (db: RecordDb) => void): void {
+    const header = readJsonStrict<any>(this.paths.vaultFile, null);
+    if (header?.encrypted && !this.encryptionKey) throw new Error("Vault is locked");
+    if (!header) this.writeHeaderV2();
+    const db = this.db();
+    db.tx(() => {
+      if (db.getMeta("enc") === null) this.writeKeyState();
+      fn(db);
+    });
+    this.touchEmergencySnapshot();
+  }
+
+  /**
+   * After unlock: if rows are sealed under a different key than the header
+   * (a password operation crashed half-way) or are still plaintext under an
+   * encrypted header, re-seal them under the header's key.
+   */
+  private async reconcileDbKey(password: string, header: any): Promise<void> {
+    if (!this.isV2(header) || !header?.encrypted || !this.encryptionKey) return;
+    const db = this.db();
+    if (!db.exists()) return;
+    const enc = db.getMeta("enc");
+    const hdrKdf = kdfFromEnvelope(header);
+    const metaKdf = db.getMeta("kdf");
+    // Both sides through kdfFromEnvelope: it normalises the params (drops
+    // derived fields such as hashLength), so equal KDFs compare equal.
+    if (enc === "1" && db.getMeta("salt") === header.salt && metaKdf && kdfKey(kdfFromEnvelope({ kdf: JSON.parse(metaKdf) })) === kdfKey(hdrKdf)) return;
+    let rowKey: Buffer | null = null;
+    if (enc === "1" && metaKdf) rowKey = await deriveKeyAsync(password, db.getMeta("salt") || "", kdfFromEnvelope({ kdf: JSON.parse(metaKdf) }));
+    try {
+      db.tx(() => {
+        for (const table of RECORD_TABLES) {
+          const rows = db.all(table).map((r) => this.sealRow(table, r.id, r.entry_id, this.openRow(table, r, rowKey ?? this.encryptionKey)));
+          db.replaceAll(table, rows);
+        }
+        this.writeKeyState();
+      });
+    } finally {
+      rowKey?.fill(0);
+    }
+    if (enc !== "1") {
+      try {
+        db.compact();
+      } catch {}
+    }
+    this._entriesCache = null;
+    this._vectorsCache = null;
+    addLog("DATA", `vault.db rows re-sealed under the current key (${enc === "1" ? "interrupted re-key" : "plaintext rows under an encrypted header"}).`);
+  }
+
+  /** Move a v1 (JSON) vault into SQLite. Needs the key when encrypted. */
+  private maybeMigrateToV2(): void {
+    const header = readJsonStrict<any>(this.paths.vaultFile, null);
+    if (!header) return;
+    if (this.isV2(header)) {
+      // Leftover from a migration interrupted after the header switched.
+      if (fs.existsSync(this.paths.vectorsFile)) {
+        try {
+          fs.unlinkSync(this.paths.vectorsFile);
+        } catch {}
+      }
+      return;
+    }
+    if (header.encrypted && !this.encryptionKey) return;
+    const v1 = this.readVaultV1();
+    let chunks: VectorChunk[] = [];
+    try {
+      chunks = this.readVectorsV1().chunks;
+    } catch {}
+    // Rollback path: a full snapshot of the v1 files, taken before anything
+    // changes (restorable from Settings → Emergency Plan).
+    try {
+      this.flushEmergencySnapshot();
+    } catch {}
+    this.writeDbTables(v1.entries, chunks);
+    this.writeHeaderV2();
+    try {
+      fs.unlinkSync(this.paths.vectorsFile);
+    } catch {}
+    this.clearCache();
+    addLog("DATA", `Storage upgraded to SQLite (data/vault.db): ${v1.entries.length} entries, ${chunks.length} vectors. A snapshot of the previous files was taken first.`);
+  }
+
   private readVault(): VaultFile {
     if (this._entriesCache) return { version: 1, entries: this._entriesCache };
+    const header = readJsonStrict<any>(this.paths.vaultFile, null);
+    if (!this.isV2(header) && (!header.encrypted || this.encryptionKey)) this.maybeMigrateToV2();
+    if (this.isV2()) {
+      const h = readJsonStrict<any>(this.paths.vaultFile, null);
+      if (h?.encrypted && !this.encryptionKey) throw new Error("Vault is locked");
+      const db = this.db();
+      let entries: VaultEntry[] = [];
+      // Header gone but sealed rows present (quarantined, mid-sync): nothing
+      // can be decrypted, so read as empty — writes are refused separately
+      // by refusePlaintextWrite. Not cached.
+      if (!h && !this.encryptionKey && db.exists() && db.getMeta("enc") === "1") return { version: 1, entries: [] };
+      if (db.exists()) {
+        try {
+          entries = db.all("entries").map((r) => this.openRow<VaultEntry>("entries", r));
+        } catch (e: any) {
+          if (e?.message === "Vault is locked") throw e;
+          throw new Error("Failed to decrypt vault: incorrect key or corrupted record");
+        }
+      }
+      entries.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+      this._entriesCache = entries;
+      return { version: 1, entries };
+    }
+    return this.readVaultV1();
+  }
+
+  /** The original JSON-file reader (v1 vaults, and migration input). */
+  private readVaultV1(): VaultFile {
     const raw = readJsonStrict<any>(this.paths.vaultFile, { version: 1, entries: [] });
     if (raw.encrypted) {
       if (!this.encryptionKey) {
@@ -1066,6 +1374,19 @@ export class VaultStore {
   }
 
   private writeVault(vault: VaultFile) {
+    if (this.isV2()) {
+      const disk = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
+      if (disk?.encrypted && !this.encryptionKey) throw new Error("Vault is locked");
+      // Turning encryption on: header first, so a crash leaves an encrypted
+      // header over plaintext rows (re-sealed at the next unlock), never
+      // encrypted rows behind a header that says "unencrypted".
+      const encrypting = !!this.encryptionKey && !disk?.encrypted;
+      if (encrypting) this.writeHeaderV2();
+      this.writeDbTables(vault.entries, null);
+      if (!encrypting) this.writeHeaderV2();
+      this.touchEmergencySnapshot();
+      return;
+    }
     const rawDisk = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
     const isDiskEncrypted = rawDisk && rawDisk.encrypted;
 
@@ -1123,6 +1444,11 @@ export class VaultStore {
       created_at: now,
       updated_at: now,
     };
+    if (this.isV2()) {
+      this.rowWrite((db) => db.put("entries", this.sealRow("entries", entry.id, entry.id, entry)));
+      if (this._entriesCache) this._entriesCache.unshift(entry);
+      return entry;
+    }
     vault.entries.unshift(entry);
     this.writeVault(vault);
     return entry;
@@ -1132,19 +1458,38 @@ export class VaultStore {
     const vault = this.readVault();
     const idx = vault.entries.findIndex((e) => e.id === id);
     if (idx === -1) return null;
-    vault.entries[idx] = {
+    const next: VaultEntry = {
       ...vault.entries[idx],
       ...patch,
       id: vault.entries[idx].id,
       created_at: vault.entries[idx].created_at,
       updated_at: new Date().toISOString(),
     };
+    if (this.isV2()) {
+      this.rowWrite((db) => db.put("entries", this.sealRow("entries", next.id, next.id, next)));
+      if (this._entriesCache) {
+        const i = this._entriesCache.findIndex((e) => e.id === id);
+        if (i >= 0) this._entriesCache[i] = next;
+      }
+      return next;
+    }
+    vault.entries[idx] = next;
     this.writeVault(vault);
     return vault.entries[idx];
   }
 
   deleteEntry(id: string): boolean {
     const vault = this.readVault();
+    if (this.isV2()) {
+      const existed = vault.entries.some((e) => e.id === id);
+      this.rowWrite((db) => {
+        db.delete("entries", id);
+        db.deleteByEntry("vectors", id);
+      });
+      if (this._entriesCache) this._entriesCache = this._entriesCache.filter((e) => e.id !== id);
+      if (this._vectorsCache) this._vectorsCache = this._vectorsCache.filter((c) => c.entry_id !== id);
+      return existed;
+    }
     const before = vault.entries.length;
     vault.entries = vault.entries.filter((e) => e.id !== id);
     this.writeVault(vault);
@@ -1155,6 +1500,18 @@ export class VaultStore {
   bulkDeleteEntries(ids: string[]): number {
     const idSet = new Set(ids);
     const vault = this.readVault();
+    if (this.isV2()) {
+      const removed = vault.entries.filter((e) => idSet.has(e.id)).length;
+      this.rowWrite((db) => {
+        for (const id of idSet) {
+          db.delete("entries", id);
+          db.deleteByEntry("vectors", id);
+        }
+      });
+      if (this._entriesCache) this._entriesCache = this._entriesCache.filter((e) => !idSet.has(e.id));
+      if (this._vectorsCache) this._vectorsCache = this._vectorsCache.filter((c) => !idSet.has(c.entry_id));
+      return removed;
+    }
     const before = vault.entries.length;
     vault.entries = vault.entries.filter((e) => !idSet.has(e.id));
     const removed = before - vault.entries.length;
@@ -1185,6 +1542,30 @@ export class VaultStore {
 
   // --- Vectors ---
   private readVectors(): VectorsFile {
+    const header = readJsonStrict<any>(this.paths.vaultFile, null);
+    if (!this.isV2(header) && (!header.encrypted || this.encryptionKey)) this.maybeMigrateToV2();
+    if (this.isV2()) {
+      if (this._vectorsCache) return { version: VECTOR_SCHEMA, chunks: this._vectorsCache };
+      const h = readJsonStrict<any>(this.paths.vaultFile, null);
+      if (h?.encrypted && !this.encryptionKey) throw new Error("Vault is locked");
+      const db = this.db();
+      let chunks: VectorChunk[] = [];
+      if (!h && !this.encryptionKey && db.exists() && db.getMeta("enc") === "1") return { version: VECTOR_SCHEMA, chunks: [] };
+      if (db.exists()) {
+        try {
+          chunks = db.all("vectors").map((r) => unpackChunk(this.openRow<any>("vectors", r)));
+        } catch (e: any) {
+          if (e?.message === "Vault is locked") throw e;
+          throw new Error("Failed to decrypt vectors");
+        }
+      }
+      this._vectorsCache = chunks;
+      return { version: VECTOR_SCHEMA, chunks };
+    }
+    return this.readVectorsV1();
+  }
+
+  private readVectorsV1(): VectorsFile {
     const parse = (raw: any): VectorsFile => {
       if (!raw || typeof raw !== "object" || raw.version !== VECTOR_SCHEMA || !Array.isArray(raw.chunks)) {
         if (raw && Array.isArray(raw.chunks) && raw.chunks.length) {
@@ -1211,6 +1592,12 @@ export class VaultStore {
   }
 
   private writeVectors(v: VectorsFile) {
+    if (this.isV2()) {
+      const disk = readJsonStrict<any>(this.paths.vaultFile, null);
+      if (disk?.encrypted && !this.encryptionKey) throw new Error("Vault is locked");
+      this.writeDbTables(null, v.chunks);
+      return;
+    }
     const rawDisk = readJsonOrQuarantine<any>(this.paths.vectorsFile, null, "vectors.json");
     const isDiskEncrypted = rawDisk && rawDisk.encrypted;
 
@@ -1229,6 +1616,18 @@ export class VaultStore {
   }
 
   upsertVector(chunk: VectorChunk) {
+    if (this.isV2()) {
+      this.rowWrite((db) => {
+        db.deleteByEntry("vectors", chunk.entry_id);
+        db.delete("vectors", chunk.id);
+        db.put("vectors", this.sealRow("vectors", chunk.id, chunk.entry_id, packChunk(chunk)));
+      });
+      if (this._vectorsCache) {
+        this._vectorsCache = this._vectorsCache.filter((c) => c.id !== chunk.id && c.entry_id !== chunk.entry_id);
+        this._vectorsCache.push(chunk);
+      }
+      return;
+    }
     const v = this.readVectors();
     v.chunks = v.chunks.filter((c) => c.id !== chunk.id && c.entry_id !== chunk.entry_id);
     v.chunks.push(chunk);
@@ -1236,6 +1635,11 @@ export class VaultStore {
   }
 
   removeVectorsForEntry(entryId: string) {
+    if (this.isV2()) {
+      this.rowWrite((db) => db.deleteByEntry("vectors", entryId));
+      if (this._vectorsCache) this._vectorsCache = this._vectorsCache.filter((c) => c.entry_id !== entryId);
+      return;
+    }
     const v = this.readVectors();
     v.chunks = v.chunks.filter((c) => c.entry_id !== entryId);
     this.writeVectors(v);
@@ -1951,10 +2355,15 @@ export class VaultStore {
         .filter((f) => /^vault-.*\.json$/.test(f))
         .sort(byMtime);
       const newest = existing[existing.length - 1];
+      // v2: the header rarely changes — the database revision decides.
+      const v2db = this.isV2() && this.db().exists() ? this.db() : null;
+      const revFile = path.join(dir, ".vault-db-rev");
+      const dbRev = v2db ? String(v2db.rev()) : "";
       if (newest) {
         try {
           const prev = fs.readFileSync(path.join(dir, newest));
-          if (prev.equals(raw)) return null;
+          const lastRev = fs.existsSync(revFile) ? fs.readFileSync(revFile, "utf8").trim() : "";
+          if (prev.equals(raw) && (!v2db || lastRev === dbRev)) return null;
         } catch {}
       }
 
@@ -1979,6 +2388,13 @@ export class VaultStore {
         } catch {}
       };
       companion(this.paths.vectorsFile, "vectors");
+      if (v2db) {
+        try {
+          const kind = v2db.getMeta("enc") === "1" ? "enc" : "plain";
+          v2db.copyTo(path.join(dir, `vault-db-${stamp}.${kind}.sqlite`));
+          fs.writeFileSync(revFile, dbRev);
+        } catch {}
+      }
       companion(this.paths.scratchpadFile, "scratchpad");
       // Distinct prefixes — "scratchpad-archive" would collide with the
       // "scratchpad-" prune pool and the two kinds would evict each other.
@@ -1996,12 +2412,12 @@ export class VaultStore {
   private pruneBackups(keep: number) {
     try {
       const dir = this.paths.backupsDir;
-      const prune = (prefix: string) => {
+      const prune = (prefix: string, ext = ".json") => {
         // Order by mtime, not filename sort — non-conforming filenames (e.g. a
         // hand-restored copy) must not decide which backups survive.
         const files = fs
           .readdirSync(dir)
-          .filter((f) => f.startsWith(prefix) && f.endsWith(".json"))
+          .filter((f) => f.startsWith(prefix) && f.endsWith(ext))
           .sort((a, b) => {
             try {
               return fs.statSync(path.join(dir, a)).mtimeMs - fs.statSync(path.join(dir, b)).mtimeMs;
@@ -2019,6 +2435,7 @@ export class VaultStore {
         }
       };
       prune("vault-");
+      prune("vault-db-", ".sqlite");
       prune("vectors-");
       prune("scratchpad-");
       prune("notes-archive-");
@@ -2211,6 +2628,16 @@ export class VaultStore {
         scratchpad_archive: readB64(this.paths.scratchpadArchiveFile),
         note_revisions: readB64(this.paths.noteRevisionsFile),
         settings: readB64(this.paths.settingsFile),
+        // Storage v2: a consistent copy of the record database.
+        vault_db: (() => {
+          try {
+            if (!this.isV2()) return null;
+            const bytes = this.db().snapshotBytes(this.paths.tmpDir);
+            return bytes && bytes.length ? bytes.toString("base64") : null;
+          } catch {
+            return null;
+          }
+        })(),
       },
     };
     return { payload: JSON.stringify(snapshot), encrypted: snapshot.encrypted };
@@ -2228,6 +2655,7 @@ export class VaultStore {
       // detection). Snapshot when ANY bundled file exists, not just the vault.
       const anySource = [
         this.paths.vaultFile,
+        this.paths.vaultDbFile,
         this.paths.vectorsFile,
         this.paths.scratchpadFile,
         this.paths.scratchpadArchiveFile,
@@ -2373,16 +2801,22 @@ export class VaultStore {
           let encrypted = false;
           let has_vault = false;
           let has_notes = false;
-          try {
-            const parsed = JSON.parse(fs.readFileSync(full, "utf-8"));
-            if (parsed?.created_at) created_at = parsed.created_at;
-            encrypted = !!parsed?.encrypted;
-            // Lets the UI badge snapshots that contain no vault/notes at all
-            // ("empty" — restoring one is a no-op), so users don't pick the
-            // newest entry blindly when it holds nothing.
-            has_vault = !!parsed?.files?.vault;
-            has_notes = !!(parsed?.files?.scratchpad || parsed?.files?.scratchpad_archive);
-          } catch {}
+          // Snapshots are written once and never modified, and a big vault's
+          // can be tens of MB: parse each only once per (size, mtime).
+          const cached = snapshotMetaCache.get(full);
+          if (cached && cached.size === st.size && cached.mtimeMs === st.mtimeMs) {
+            ({ created_at, encrypted, has_vault, has_notes } = cached);
+          } else {
+            try {
+              // has_vault/has_notes let the UI badge snapshots that contain
+              // no vault/notes at all ("empty" — restoring one is a no-op),
+              // so users don't pick the newest entry blindly.
+              const meta = peekSnapshotMeta(fs.readFileSync(full));
+              if (meta.created_at) created_at = meta.created_at;
+              ({ encrypted, has_vault, has_notes } = meta);
+              snapshotMetaCache.set(full, { size: st.size, mtimeMs: st.mtimeMs, created_at, encrypted, has_vault, has_notes });
+            } catch {}
+          }
           const prev = byName.get(f);
           if (prev) {
             prev.locations.push(dir);
@@ -2488,7 +2922,13 @@ export class VaultStore {
       [this.paths.scratchpadArchiveFile, snapshot.files.scratchpad_archive],
       [this.paths.noteRevisionsFile, snapshot.files.note_revisions],
       [this.paths.settingsFile, snapshot.files.settings],
+      [this.paths.vaultDbFile, snapshot.files.vault_db],
     ];
+    // The live database must be closed (and its WAL dropped) before its file
+    // is replaced; it reopens lazily on the next read.
+    // Closing is harmless if staging fails (it reopens lazily); the file is
+    // only swapped in the rename phase below.
+    this._db?.close();
 
     // Two phases so a failure can't leave a MIXED file set (some files from
     // the snapshot, some from before, possibly under different keys):
@@ -2524,6 +2964,15 @@ export class VaultStore {
     }
     for (let i = 0; i < staged.length; i++) {
       const [tmp, file] = staged[i];
+      if (file === this.paths.vaultDbFile) {
+        // A WAL left by the previous database must never be replayed onto
+        // the restored one.
+        for (const side of [`${file}-wal`, `${file}-shm`]) {
+          try {
+            fs.unlinkSync(side);
+          } catch {}
+        }
+      }
       try {
         withIoRetry(file, () => fs.renameSync(tmp, file));
         fsyncDir(path.dirname(file));

@@ -10,6 +10,7 @@ import { FolderWatcherManager } from "./server/services/folderWatcher.js";
 import { getLastActivity } from "./server/auth.js";
 import { sendSSE } from "./server/routes/sse.js";
 import { createApp } from "./server/app.js";
+import { closeAllRecordDbs } from "./server/db/recordDb.js";
 
 const paths = ensurePortableLayout();
 const store = new VaultStore(paths);
@@ -54,6 +55,12 @@ function shutdown(code: number) {
     /* best-effort */
   }
   watchers.stopAll();
+  // Checkpoint the WAL into data/vault.db so the file is self-contained.
+  try {
+    closeAllRecordDbs();
+  } catch {
+    /* best-effort */
+  }
   process.exit(code);
 }
 

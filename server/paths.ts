@@ -90,6 +90,8 @@ export function ensurePortableLayout(root: string = getAppRoot()) {
     backupsDir: path.join(root, "backups"),
     vaultFile: path.join(root, "data", "vault.json"),
     vectorsFile: path.join(root, "data", "vectors.json"),
+    /** SQLite record store for entries + vectors (storage v2, R3.2). */
+    vaultDbFile: path.join(root, "data", "vault.db"),
     settingsFile: path.join(root, "config", "settings.json"),
     watchedFoldersFile: path.join(root, "data", "watched_folders.json"),
     scanSessionsFile: path.join(root, "data", "scan_sessions.json"),

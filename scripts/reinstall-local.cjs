@@ -31,7 +31,13 @@ const vaultBefore = {
   kdf: vaultRaw.kdf ? vaultRaw.kdf.algo : null,
   entries: Array.isArray(vaultRaw.entries) ? vaultRaw.entries.length : null,
 };
-console.log("before:", JSON.stringify(vaultBefore), "| dir =", before);
+// v2 vaults keep records in data/vault.db; its bytes must survive unchanged.
+const dbHash = (dir) => {
+  const f = path.join(dir, "data", "vault.db");
+  return fs.existsSync(f) ? require("crypto").createHash("sha256").update(fs.readFileSync(f)).digest("hex") : null;
+};
+const dbBefore = dbHash(before);
+console.log("before:", JSON.stringify(vaultBefore), "| vault.db =", dbBefore ? dbBefore.slice(0, 12) : "none", "| dir =", before);
 
 console.log("silent install:", setupPath);
 execFileSync(setupPath, ["/S"], { stdio: "ignore", timeout: 240000 });
@@ -49,4 +55,5 @@ const vaultAfter = {
 console.log("after:", JSON.stringify(vaultAfter), "| exe mtime =", fs.statSync(path.join(after, "IndexArc.exe")).mtime.toISOString());
 if (vaultAfter.encrypted !== vaultBefore.encrypted) throw new Error("encryption state changed by reinstall!");
 if (vaultBefore.entries !== null && vaultAfter.entries !== vaultBefore.entries) throw new Error("entry count changed!");
+if (dbBefore && dbHash(after) !== dbBefore) throw new Error("DATA CHANGED — data/vault.db differs after reinstall");
 console.log("PASS ✅ reinstall preserved the vault (encrypted=" + vaultAfter.encrypted + ", kdf=" + vaultAfter.kdf + ", entries=" + vaultAfter.entries + ")");

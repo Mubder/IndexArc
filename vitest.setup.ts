@@ -8,3 +8,19 @@ import path from "path";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "indexarc-test-emergency-"));
 process.env.INDEXARC_EMERGENCY_DIR = dir;
+
+// SQLite keeps vault.db open; on Windows an open file cannot be deleted, so
+// close every record database before a test removes its temp root.
+import { closeAllRecordDbs } from "./server/db/recordDb";
+for (const name of ["rmSync", "rmdirSync"] as const) {
+  const orig = fs[name] as (...a: unknown[]) => unknown;
+  (fs as unknown as Record<string, unknown>)[name] = (...args: unknown[]) => {
+    closeAllRecordDbs();
+    return orig.apply(fs, args);
+  };
+}
+const origRm = fs.promises.rm;
+fs.promises.rm = ((...args: Parameters<typeof origRm>) => {
+  closeAllRecordDbs();
+  return origRm.apply(fs.promises, args);
+}) as typeof origRm;

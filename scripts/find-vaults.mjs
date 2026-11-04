@@ -24,7 +24,13 @@ function scan(dir, results = []) {
       } else if (e.name === "vault.json") {
         try {
           const j = JSON.parse(fs.readFileSync(p, "utf-8"));
-          results.push({ path: p, encrypted: !!j.encrypted, entries: j.entries?.length || "blob" });
+          const db = path.join(path.dirname(p), "vault.db");
+          results.push({
+            path: p,
+            encrypted: !!j.encrypted,
+            storage: j.storage || "json",
+            entries: j.storage === "sqlite" ? (fs.existsSync(db) ? `vault.db ${fs.statSync(db).size} bytes` : "vault.db MISSING") : j.entries?.length || "blob",
+          });
         } catch {
           results.push({ path: p, encrypted: "?", entries: "?" });
         }
@@ -60,7 +66,7 @@ for (const r of roots) {
   if (v.length) {
     console.log("ROOT:", r);
     for (const x of v) {
-      console.log("  ", x.path, "encrypted:", x.encrypted, "entries:", x.entries);
+      console.log("  ", x.path, "encrypted:", x.encrypted, "storage:", x.storage, "entries:", x.entries);
     }
   }
 }

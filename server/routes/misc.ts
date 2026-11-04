@@ -290,6 +290,12 @@ export function miscRoutes(ctx: RouteContext) {
           archived: archivedCount,
         },
         vectors: { path: vectorsFile, exists: fs.existsSync(vectorsFile), size: fileSizeOrNull(vectorsFile) },
+        vault_db: {
+          path: ctx.paths.vaultDbFile,
+          exists: fs.existsSync(ctx.paths.vaultDbFile),
+          size: fileSizeOrNull(ctx.paths.vaultDbFile),
+          wal_size: fileSizeOrNull(`${ctx.paths.vaultDbFile}-wal`),
+        },
         settings: { path: settingsFile, exists: fs.existsSync(settingsFile) },
         storage: { writable, dir: ctx.paths.dataDir },
         integrity: { warnings: integrityWarnings },
