@@ -3,6 +3,7 @@ import { copyTextToClipboard } from "../lib/clipboard";
 import { HelpCircle, KeyRound, LayoutGrid, List, RefreshCw, Search, StickyNote, Terminal, Inbox, Copy, AlertTriangle, Eye, EyeOff, Maximize2, Check, Edit3, Trash2 } from "lucide-react";
 import { LibraryFilter, VaultEntry, Settings } from "../types";
 import { EntryCard } from "./EntryCard";
+import { VirtualRows, VirtualTbody, VIRTUALIZE_FROM } from "./library/VirtualList";
 import { NoteDetailModal } from "./NoteDetailModal";
 import { getTranslation } from "../utils/i18n";
 import { maskValue } from "../utils";
@@ -184,6 +185,30 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
       bgColor: "rgba(249, 115, 22, 0.1)",
     },
   ];
+
+  // Large libraries render only the rows near the viewport.
+  const virtualize = libraryFiltered.length >= VIRTUALIZE_FROM;
+  const renderCard = (e: VaultEntry) => (
+    <EntryCard
+      entry={e}
+      onOpenClarify={onOpenClarify}
+      onDeleteEntry={onDeleteEntry}
+      onOpenDetail={(entry) => setActiveDetailEntry(entry)}
+      viewMode="grid"
+      settings={settings}
+    />
+  );
+  const renderRow = (e: VaultEntry, measure?: (el: Element | null) => void, index?: number) => (
+    <LibraryTableRow
+      entry={e}
+      onOpenClarify={onOpenClarify}
+      onDeleteEntry={onDeleteEntry}
+      onOpenDetail={(entry) => setActiveDetailEntry(entry)}
+      settings={settings}
+      rowRef={measure}
+      dataIndex={index}
+    />
+  );
 
   return (
     <div className="space-y-4">
@@ -379,18 +404,12 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
         </div>
       </div>
 
-      {viewMode === "grid" ? (
+      {viewMode === "grid" && virtualize ? (
+        <VirtualRows items={libraryFiltered} grid estimate={190} getKey={(e) => e.id} renderItem={renderCard} />
+      ) : viewMode === "grid" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {libraryFiltered.map((e) => (
-            <EntryCard
-              key={e.id}
-              entry={e}
-              onOpenClarify={onOpenClarify}
-              onDeleteEntry={onDeleteEntry}
-              onOpenDetail={(entry) => setActiveDetailEntry(entry)}
-              viewMode="grid"
-              settings={settings}
-            />
+            <React.Fragment key={e.id}>{renderCard(e)}</React.Fragment>
           ))}
         </div>
       ) : (
@@ -404,18 +423,21 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
                 <th className="text-right">Actions</th>
               </tr>
             </thead>
-            <tbody>
-              {libraryFiltered.map((e) => (
-                <LibraryTableRow
-                  key={e.id}
-                  entry={e}
-                  onOpenClarify={onOpenClarify}
-                  onDeleteEntry={onDeleteEntry}
-                  onOpenDetail={(entry) => setActiveDetailEntry(entry)}
-                  settings={settings}
-                />
-              ))}
-            </tbody>
+            {virtualize ? (
+              <VirtualTbody
+                items={libraryFiltered}
+                estimate={56}
+                colSpan={4}
+                getKey={(e) => e.id}
+                renderRow={(e, measure, index) => renderRow(e, measure, index)}
+              />
+            ) : (
+              <tbody>
+                {libraryFiltered.map((e) => (
+                  <React.Fragment key={e.id}>{renderRow(e)}</React.Fragment>
+                ))}
+              </tbody>
+            )}
           </table>
         </div>
       )}
@@ -459,7 +481,10 @@ const LibraryTableRow: React.FC<{
   onDeleteEntry: (id: string) => Promise<void>;
   onOpenDetail?: (entry: VaultEntry) => void;
   settings: Settings | null;
-}> = ({ entry, onOpenClarify, onDeleteEntry, onOpenDetail, settings }) => {
+  /** Set by the virtualized table to measure the row height. */
+  rowRef?: (el: Element | null) => void;
+  dataIndex?: number;
+}> = ({ entry, onOpenClarify, onDeleteEntry, onOpenDetail, settings, rowRef, dataIndex }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -478,6 +503,8 @@ const LibraryTableRow: React.FC<{
 
   return (
     <tr
+      ref={rowRef}
+      data-index={dataIndex}
       onClick={() => isNote && onOpenDetail?.(entry)}
       className="app-table-row group"
     >
