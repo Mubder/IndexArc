@@ -103,6 +103,8 @@ jobs:
         run: npm run build
       - name: Verify dist bundle completeness
         run: npm run check:dist
+      - name: Build the standalone CLI
+        run: npm run build:cli
       - name: Build Windows installer (portable + NSIS)
         run: npx electron-builder --win portable nsis --x64
         env:

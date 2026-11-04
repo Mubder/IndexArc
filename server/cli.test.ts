@@ -22,6 +22,9 @@ const NEW_PASSWORD = "cli-test-password-2";
 const OPENAI = "sk-cli-test-openai-0123456789abcdef";
 const STRIPE = "sk_test_cli_stripe_ABCDEF987654";
 const BIN = path.resolve(__dirname, "..", "bin", "indexarc.mjs");
+// INDEXARC_CLI_BIN runs these same tests against the standalone executable
+// (scripts/build-cli-sea.mjs), e.g. build/cli/indexarc.exe.
+const STANDALONE = process.env.INDEXARC_CLI_BIN ? path.resolve(process.env.INDEXARC_CLI_BIN) : null;
 
 let port = 0;
 const pairing = () => String(process.env.INDEXARC_API_TOKEN || "");
@@ -41,7 +44,7 @@ async function call(method: string, p: string, opts: { bearer?: string; pairing?
 
 function runCli(args: string[], env: Record<string, string>): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    execFile(process.execPath, [BIN, ...args], { env: { ...process.env, ...env }, timeout: 20_000 }, (err: any, stdout, stderr) =>
+    execFile(STANDALONE ?? process.execPath, STANDALONE ? args : [BIN, ...args], { env: { ...process.env, ...env }, timeout: 20_000 }, (err: any, stdout, stderr) =>
       resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, stdout: String(stdout), stderr: String(stderr) })
     );
   });

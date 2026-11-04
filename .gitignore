@@ -27,6 +27,9 @@ Thumbs.db
 /.commandcode/
 skills-lock.json
 /.claude/
+# Standalone CLI build output (scripts/build-cli-sea.mjs)
+/build/cli/
+/build/cli-work/
 coverage/
 playwright-report/
 test-results/

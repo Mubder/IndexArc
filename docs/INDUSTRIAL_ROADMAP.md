@@ -48,7 +48,6 @@ Every engineering item in R1–R6 has landed with tests, except those listed und
   - password policy: 12-character minimum, breached-password check, strength meter, reveal toggle;
   - AAD on the JSON envelopes and the `vault.json` header (SQLite rows already have it);
   - a single key-lifecycle document.
-- A self-contained CLI binary (Node SEA) and PATH registration by the installer.
 
 ---
 
@@ -276,7 +275,7 @@ Every engineering item in R1–R6 has landed with tests, except those listed und
 - **Regex timing guard** (`server/ai/regex-safety.test.ts`): it parses all 68 regex literals in `heuristics.ts` and `folderScan.ts` with the TS compiler and runs each against 47 adversarial ~50k inputs in a worker with a watchdog. The budget is 100 ms per `test()`. **2 quadratic patterns found** in `heuristics.ts` and kept in `KNOWN_SLOW` with `it.fails`: `/\s*(?:&&|\|\||;)\s*/` (`isCommand` split, ~2.2 s at 50k spaces) and `/\s*[=\-_*]{3,}\s*/g` (`stripSectionRule`, ~1.9 s). This test is a stand-in for the `safe-regex` lint rule, which is still open.
 - **Policy notes from the matrix (for review, unchanged):** `POST /api/settings` is writable while the vault is locked. A token holder can flip `ai_cloud_consent` or repoint `ollama_base_url` and `local_openai_base_url` before the user unlocks. `POST /api/ollama/ensure` (multi-GB model pulls) and `/api/emergency/create` are also reachable while locked.
 - **Done since:** crypto property tests with fast-check, fuzz smoke, and a v8 coverage gate on `server/` (9423244). That commit also requires 16-byte GCM tags. Electron e2e lifecycle test in CI (1c88816). Accessible dialogs and the remaining UI strings in i18n (2778101). The three egress bugs and both quadratic regexes are fixed: `KNOWN_SLOW` is empty and no `it.fails` remain. The matrix now also checks that every `GET /api` route answers with `Cache-Control: no-store`.
-- **Still open:** the unlocked-state pass of the route matrix, an eslint `safe-regex` rule (the timing guard stands in for it), and an eslint rule. CodeQL landed 2026-11-04. The e2e flake (about one run in seven) is fixed: `app.firstWindow()` sometimes returned the detached DevTools window that unpackaged runs open, so the test waited for a password field inside DevTools. The test now waits for the window showing the app, and attaches the main-process output and renderer console when it fails (15/15 runs green after the fix).
+- **Still open:** the unlocked-state pass of the route matrix, and an eslint `safe-regex` rule (the timing guard stands in for it). CodeQL landed 2026-11-04. The e2e flake (about one run in seven) is fixed: `app.firstWindow()` sometimes returned the detached DevTools window that unpackaged runs open, so the test waited for a password field inside DevTools. The test now waits for the window showing the app, and attaches the main-process output and renderer console when it fails (15/15 runs green after the fix).
 
 ---
 
@@ -326,7 +325,7 @@ These are what make people choose IndexArc over a generic password manager. Each
   - Tokens are created in Settings → CLI access after the master password, shown once, and revocable. They authenticate only the two read endpoints.
   - Tokens are stored as HMAC digests keyed from the vault key, so a planted digest does not work, and a re-key revokes them.
   - CLI reads are audited and do not extend auto-lock.
-  - The CLI ships in `resources/cli/` and runs on the user's Node 18 or later.
+  - The CLI ships in `resources/cli/` as a standalone executable (Node SEA, no Node install needed), and the Windows installer puts it on the user's PATH (2026-11-04). `indexarc.mjs` ships next to it.
 - **R6.2 Import/export (99e078d):**
   - Import from `.env`, Bitwarden JSON, 1Password/generic CSV, KeePass XML and IndexArc exports, with review and de-duplication before saving.
   - Export to an encrypted `.iaexport` (Argon2id + AES-GCM, passphrase of 12+ characters) or a plain `.env` behind an explicit warning.

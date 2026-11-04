@@ -2,13 +2,17 @@
 <!--
   SignPath artifact configuration "app" (slug must be: app).
   Input: the unpacked Windows app (dist-desktop/win-unpacked) uploaded by
-  .github/workflows/desktop-builds.yml. Signs only IndexArc's own executable;
+  .github/workflows/desktop-builds.yml. Signs only IndexArc's own executables
+  (the app and the indexarc command-line tool);
   Electron's DLLs are third-party files and are left as shipped.
   Paste into SignPath → Project → Artifact configurations. See docs/CODE_SIGNING.md.
 -->
 <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
   <zip-file>
     <pe-file path="IndexArc.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="resources/cli/indexarc.exe">
       <authenticode-sign />
     </pe-file>
   </zip-file>

@@ -80,7 +80,7 @@ jobs:
         if: env.SIGN_AZURE == 'true'
         shell: bash
         run: |
-          npm run build && npm run check:dist
+          npm run build && npm run check:dist && npm run build:cli
           node scripts/azure-sign-config.mjs electron-builder.azure.json
           npx electron-builder --config electron-builder.azure.json --win portable nsis --x64 --publish never
         env:
@@ -99,7 +99,7 @@ jobs:
         env:
           PUBLISHER: ${{ vars.AZURE_SIGNING_PUBLISHER_NAME }}
         run: |
-          $files = @(Get-ChildItem dist-desktop -Filter 'IndexArc-*.exe') + @(Get-Item dist-desktop/win-unpacked/IndexArc.exe)
+          $files = @(Get-ChildItem dist-desktop -Filter 'IndexArc-*.exe') + @(Get-Item dist-desktop/win-unpacked/IndexArc.exe) + @(Get-Item dist-desktop/win-unpacked/resources/cli/indexarc.exe)
           $bad = $false
           foreach ($f in $files) {
             $s = Get-AuthenticodeSignature $f.FullName
@@ -117,7 +117,7 @@ jobs:
       #    blockmap, whose hashes the signature just changed.
       - name: Package unpacked app (to sign)
         if: env.SIGN_SIGNPATH == 'true'
-        run: npm run build && npm run check:dist && npx electron-builder --win dir --x64 --publish never
+        run: npm run build && npm run check:dist && npm run build:cli && npx electron-builder --win dir --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 

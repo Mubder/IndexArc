@@ -10,6 +10,8 @@ Commit messages follow the convention in
 ## [Unreleased]
 
 ### Added
+- The `indexarc` command-line tool is now a standalone program (no Node install needed), and the
+  Windows installer adds it to your PATH; uninstalling removes it.
 - CI checks performance at 10k entries on every push (`npm run bench`): p95 save under 50 ms and
   p95 Ask under 300 ms, with the timings in the job summary.
 - Master password strength meter and a show/hide button on every password field.

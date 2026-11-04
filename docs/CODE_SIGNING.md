@@ -7,7 +7,7 @@ builds in two ways. It picks one by itself, and only for **release** events:
 |---|---|---|
 | Turns on when | repository variable `AZURE_SIGNING_ENDPOINT` is set | `SIGNPATH_ORGANIZATION_ID` is set and Azure is not |
 | Publisher Windows shows | **your verified name** (or your company's) | "SignPath Foundation" |
-| Signed | app exe, Electron's DLLs, installer, **uninstaller**, portable exe | app exe, installer, portable exe |
+| Signed | app exe, `indexarc.exe` (CLI), Electron's DLLs, installer, **uninstaller**, portable exe | app exe, `indexarc.exe` (CLI), installer, portable exe |
 | Cost | about US$10/month (Basic plan) | free for open-source projects |
 | Approval per release | automatic | manual click in SignPath |
 | Who can sign up | limited by country and identity checks (below) | qualifying open-source projects |
@@ -97,7 +97,7 @@ each signed file was built by this repository's GitHub Actions.
 ### What the workflow does
 
 1. `electron-builder --win dir` packages the app unpacked (`dist-desktop/win-unpacked`).
-2. SignPath signs `IndexArc.exe` inside it (artifact configuration **`app`**).
+2. SignPath signs `IndexArc.exe` and `resources/cli/indexarc.exe` inside it (artifact configuration **`app`**).
 3. `scripts/write-app-update-yml.mjs` writes `resources/app-update.yml` with
    `publisherName: SignPath Foundation`. `--prepackaged` builds skip the step
    that normally writes it.

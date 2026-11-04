@@ -45,6 +45,19 @@ function installLocation() {
   return path.join(os.homedir(), ".IndexArc");
 }
 
+/** The current user's PATH as stored (unexpanded), split into non-empty segments. */
+function userPathSegments() {
+  try {
+    const out = execFileSync("reg", ["query", "HKCU\\Environment", "/v", "Path"], { encoding: "utf8" });
+    const m = out.match(/REG_(?:EXPAND_)?SZ\s+(.*)$/m);
+    return m ? m[1].trim().split(";").filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+const sameDir = (a, b) => a.replace(/\\+$/, "").toLowerCase() === b.replace(/\\+$/, "").toLowerCase();
+
 function runInstaller(setup, label) {
   console.log(`[installer-preservation] ${label}: running ${path.basename(setup)} /S …`);
   execFileSync(setup, ["/S"], { stdio: "ignore" });
@@ -54,6 +67,8 @@ function runInstaller(setup, label) {
 function main() {
   if (process.platform !== "win32") fail("Windows only");
   const setup = findSetup();
+
+  const pathBefore = userPathSegments();
 
   // 1) First install.
   runInstaller(setup, "first");
@@ -83,11 +98,34 @@ function main() {
   if (v.entries?.[0]?.marker !== marker) fail("vault.json survived but its content changed");
   ok("vault + settings survived the reinstall intact");
 
+  // 4b) The `indexarc` command: standalone binary, on the user's PATH once
+  // (the reinstall removed and re-added it), other PATH entries untouched.
+  const cliDir = path.join(root, "resources", "cli");
+  const cliExe = path.join(cliDir, "indexarc.exe");
+  if (!fs.existsSync(cliExe)) fail("resources/cli/indexarc.exe missing");
+  const help = execFileSync(cliExe, ["help"], { encoding: "utf8" });
+  if (!/indexarc/i.test(help)) fail("indexarc.exe did not print its help");
+  const installed = userPathSegments();
+  const hits = installed.filter((s) => sameDir(s, cliDir)).length;
+  if (hits !== 1) fail(`expected the CLI folder on the user PATH once, found ${hits}× in: ${installed.join(";")}`);
+  const others = installed.filter((s) => !sameDir(s, cliDir));
+  if (others.join(";") !== pathBefore.filter((s) => !sameDir(s, cliDir)).join(";")) fail("the install changed other user PATH entries");
+  ok("indexarc.exe runs and its folder is on the user PATH exactly once");
+
   // 5) Cleanup: silent uninstall (also validates our customRemoveFiles on
   // explicit uninstall) — data dirs are expected to REMAIN, which is fine on CI.
   try {
     execFileSync('"' + path.join(root, "Uninstall IndexArc.exe") + '" /S', { stdio: "ignore", shell: true });
   } catch {}
+  // The uninstaller re-launches itself from a temp copy, so wait for it.
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline && userPathSegments().some((s) => sameDir(s, cliDir))) {
+    execFileSync(process.execPath, ["-e", "setTimeout(() => {}, 1000)"]);
+  }
+  const after = userPathSegments();
+  if (after.some((s) => sameDir(s, cliDir))) fail("uninstall left the CLI folder on the user PATH");
+  if (after.join(";") !== pathBefore.filter((s) => !sameDir(s, cliDir)).join(";")) fail("uninstall changed other user PATH entries");
+  ok("uninstall removed the CLI folder from the user PATH and nothing else");
   console.log("[installer-preservation] PASS ✅");
 }
 
