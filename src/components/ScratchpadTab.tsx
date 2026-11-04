@@ -75,7 +75,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   // 409 conflict banner state: the server's current version of the tab whose
   // save conflicted, offered to the user when an autosave raced another window.
   const [conflictTab, setConflictTab] = useState<any>(null);
-  const { protectConfirmInput, protectError, protectInputRef, protectModal, protectShowInput, protectedIdsRef, setProtectConfirmInput, setProtectError, setProtectModal, setProtectShowInput, submitProtect, togglePin } = useNoteProtection({ activeId, setTabs, tabs });
+  const { protectConfirmInput, protectError, protectInputRef, protectModal, protectShowInput, protectedIdsRef, setProtectConfirmInput, setProtectError, setProtectModal, setProtectShowInput, submitProtect, togglePin } = useNoteProtection({ activeId, setTabs, tabs, t });
 
   const shellRef = useRef<HTMLDivElement>(null);
   const scratchRootRef = useRef<HTMLDivElement>(null);
@@ -248,10 +248,10 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         tiptap.commands.setContent(restored, { emitUpdate: true });
         tiptap.chain().focus().run();
       } catch {}
-      setStatusMsg("Restored multiline paragraph formatting!");
+      setStatusMsg(t("scratchpad_paragraphs_restored"));
       setTimeout(() => setStatusMsg(""), 3000);
     }
-  }, [tiptap, activeId, recordSnapshot]);
+  }, [tiptap, activeId, recordSnapshot, settings]);
 
   const handleRestoreRevision = useCallback(
     (rev: NoteRevision) => {
@@ -276,8 +276,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     lastNonEmptyContentRef.current[clearedAlert.tabId] = html;
     setTabs((prev) => prev.map((x) => (x.id === clearedAlert.tabId ? { ...x, content: html } : x)));
     setClearedAlert(null);
-    setStatus("Note content restored!");
-  }, [clearedAlert, setStatus, tiptap]);
+    setStatus(t("scratchpad_content_restored"));
+  }, [clearedAlert, setStatus, tiptap, settings]);
 
   // Intercept Tab / ArrowRight to accept inline ghost text auto-complete,
   // and Ctrl/Cmd+Z/Y for undo/redo history.
@@ -385,7 +385,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
             className="px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer"
             style={{ background: "rgba(248,113,113,0.25)", color: "#fecaca", border: "1px solid rgba(248,113,113,0.5)" }}
           >
-            Retry now
+            {t("scratchpad_retry_now")}
           </button>
         </div>
       )}
@@ -514,6 +514,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         restoreTab={restoreTab}
         setPreviewArchivedTab={setPreviewArchivedTab}
         setStatus={setStatus}
+        t={t}
       />
 
       <RevisionHistoryModal
@@ -542,7 +543,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           </div>
           <div className="text-xs">
             <div className="font-bold text-white">{t("scratchpad_content_cleared")}</div>
-            <div className="text-[11px] text-neutral-400">Accidental Ctrl+Z or clear detected.</div>
+            <div className="text-[11px] text-neutral-400">{t("scratchpad_cleared_detected")}</div>
           </div>
           <button
             type="button"

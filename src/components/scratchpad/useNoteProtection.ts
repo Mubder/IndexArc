@@ -2,16 +2,21 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { setSyncedScratchpadTabs } from "../../scratchpadSaveQueue";
 import type { Dispatch, SetStateAction } from "react";
 import type { ScratchTab } from "../../types";
+import type { TranslationDict } from "../../utils/i18n";
 
 export interface UseNoteProtectionArgs {
   activeId: string;
   setTabs: Dispatch<SetStateAction<ScratchTab[]>>;
   tabs: ScratchTab[];
+  t: (key: keyof TranslationDict) => string;
 }
 
 // Pin and protect state for notes, including the unprotect confirm modal.
 // Moved verbatim from ScratchpadTab (R3.4); the component wires the inputs.
-export function useNoteProtection({ activeId, setTabs, tabs }: UseNoteProtectionArgs) {
+export function useNoteProtection({ activeId, setTabs, tabs, t }: UseNoteProtectionArgs) {
+  // Read the translator via a ref so memoized callbacks keep stable deps.
+  const tRef = useRef(t);
+  tRef.current = t;
   // Live set of protected tab ids (read inside callbacks without re-binding deps)
   const protectedIdsRef = useRef<Set<string>>(new Set());
   protectedIdsRef.current = new Set(tabs.filter((t) => (t as any).protected).map((t) => t.id));
@@ -82,10 +87,10 @@ export function useNoteProtection({ activeId, setTabs, tabs }: UseNoteProtection
         setProtectConfirmInput("");
         setProtectError("");
       } else {
-        setProtectError(data.error || "Confirmation failed");
+        setProtectError(data.error || tRef.current("protect_confirm_failed"));
       }
     } catch (e: any) {
-      setProtectError(e?.message || "Request failed");
+      setProtectError(e?.message || tRef.current("request_failed"));
     }
   }, [protectModal, protectConfirmInput]);
 

@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { VaultEntry } from "../../types";
+import type { TranslationDict } from "../../utils/i18n";
 
 export interface UseClarifyArgs {
   fetchAll: () => Promise<void>;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
+  t: (key: keyof TranslationDict) => string;
 }
 
 // The clarify dialog: what the user is clarifying and the submit that saves it.
 // Moved verbatim from App.tsx (R3.4); App wires the inputs.
-export function useClarify({ fetchAll, showToast }: UseClarifyArgs) {
+export function useClarify({ fetchAll, showToast, t }: UseClarifyArgs) {
   // clarify modal
   const [clarify, setClarify] = useState<VaultEntry | null>(null);
   const [clarifyType, setClarifyType] = useState("");
@@ -28,7 +30,7 @@ export function useClarify({ fetchAll, showToast }: UseClarifyArgs) {
     if (!clarify) return;
     const secretLike = clarifyFamily === "secret" || clarifyFamily === "unknown";
     if (secretLike && !clarifyName.trim()) {
-      showToast("Name is required / الاسم مطلوب", "error");
+      showToast(t("toast_name_required"), "error");
       return;
     }
     const value = clarifyValue.trim() || clarify.value;
@@ -50,10 +52,10 @@ export function useClarify({ fetchAll, showToast }: UseClarifyArgs) {
         // Surface the refusal — a silent no-op left the modal open with no
         // explanation (locked vault, validation error, network…).
         const err = await res.json().catch(() => null);
-        showToast(err?.error || "Save failed / فشل الحفظ", "error");
+        showToast(err?.error || t("save_failed"), "error");
       }
     } catch {
-      showToast("Network error / خطأ في الاتصال", "error");
+      showToast(t("toast_network_error"), "error");
     }
   };
 

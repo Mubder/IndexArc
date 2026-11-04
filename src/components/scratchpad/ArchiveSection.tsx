@@ -33,7 +33,7 @@ export function ArchiveSection({ archivedCount, archivedTabs, deleteArchivedTab,
             <span className="flex items-center gap-2">
               <Archive className="w-3.5 h-3.5 text-amber-400/80" />
               <span>{t("scratchpad_archived")} ({archivedCount})</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 font-mono text-zinc-400">Cold Storage</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 font-mono text-zinc-400">{t("archive_cold_storage")}</span>
             </span>
             <span className="text-zinc-500">{showArchived ? "▾" : "▸"}</span>
           </button>
@@ -42,11 +42,11 @@ export function ArchiveSection({ archivedCount, archivedTabs, deleteArchivedTab,
               {loadingArchived && (
                 <div className="py-4 flex items-center justify-center gap-2 text-xs text-zinc-400">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Loading archive...</span>
+                  <span>{t("archive_loading")}</span>
                 </div>
               )}
               {!loadingArchived && archivedTabs && archivedTabs.length === 0 && (
-                <div className="py-2 text-center text-xs text-zinc-500">No archived notes</div>
+                <div className="py-2 text-center text-xs text-zinc-500">{t("archive_none")}</div>
               )}
               {!loadingArchived && archivedTabs && archivedTabs.map((tab) => (
                 <div
@@ -58,9 +58,9 @@ export function ArchiveSection({ archivedCount, archivedTabs, deleteArchivedTab,
                     className="flex-1 truncate text-xs cursor-pointer hover:underline"
                     style={{ color: "var(--text-muted)" }}
                     onClick={() => setPreviewArchivedTab(tab)}
-                    title="Click to preview (read-only)"
+                    title={t("archive_click_preview")}
                   >
-                    {tab.title || "Untitled"}
+                    {tab.title || t("untitled")}
                   </span>
                   {tab.archivedAt && (
                     <span className="text-[10px] text-zinc-500 hidden sm:inline">
@@ -71,9 +71,9 @@ export function ArchiveSection({ archivedCount, archivedTabs, deleteArchivedTab,
                     type="button"
                     onClick={() => setPreviewArchivedTab(tab)}
                     className="opacity-70 hover:opacity-100 transition-opacity text-xs px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-zinc-300"
-                    title="View note"
+                    title={t("archive_view_note")}
                   >
-                    View
+                    {t("archive_view")}
                   </button>
                   <button
                     type="button"

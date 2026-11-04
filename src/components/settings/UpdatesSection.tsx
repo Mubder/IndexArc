@@ -63,7 +63,7 @@ export function UpdatesSection({ onPatchSettings, settings, t }: UpdatesSectionP
     const r = await api.downloadUpdate?.();
     if (!r?.ok) {
       setProgress(null);
-      setError(r?.reason || "download failed");
+      setError(r?.reason || t("update_download_failed"));
     }
   };
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useId } from "react";
 import { copyTextToClipboard } from "../lib/clipboard";
 import {
   X,
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { VaultEntry, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
+import { useDialogA11y } from "../hooks/useDialogA11y";
 import { isArabicText } from "../utils";
 import { sanitizeNoteHtml } from "../sanitize";
 
@@ -47,10 +48,12 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [isMaximized, setIsMaximized] = useState(false);
+  const dialogRef = useDialogA11y(isOpen && !!entry, onClose);
+  const titleId = useId();
 
   useEffect(() => {
     if (entry) {
-      setEditTitle(entry.name || "Untitled Note");
+      setEditTitle(entry.name || t("note_untitled"));
       const richContent = entry.raw_fragment || entry.notes || entry.value;
       setEditBody(richContent);
     }
@@ -102,10 +105,10 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
       } else {
         // The App-level handler already toasted; keep a local hint too so the
         // modal explains why it stayed in edit mode.
-        setSaveError("Save failed — your edits are still here, retry when the vault is reachable.");
+        setSaveError(t("note_save_failed_retry"));
       }
     } catch {
-      setSaveError("Save failed — your edits are still here, retry when the vault is reachable.");
+      setSaveError(t("note_save_failed_retry"));
     } finally {
       setIsSaving(false);
     }
@@ -121,6 +124,10 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md transition-all animate-fade-in">
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className={`rounded-2xl flex flex-col min-w-0 transition-all duration-300 shadow-2xl ${
           isMaximized ? "w-[98vw] h-[96vh]" : "w-full max-w-4xl max-h-[90vh]"
         }`}
@@ -144,6 +151,8 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
             <div className="min-w-0">
               {isEditing ? (
                 <input
+                  id={titleId}
+                  aria-label={t("note_title_label")}
                   value={editTitle}
                   onChange={(e) => setEditTitle(e.target.value)}
                   dir="auto"
@@ -156,6 +165,7 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
                 />
               ) : (
                 <h3
+                  id={titleId}
                   className={`text-base font-semibold truncate ${
                     isArTitle ? "font-arabic ar-text" : ""
                   }`}
@@ -168,9 +178,9 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
               <div className="flex items-center gap-3 text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>
                 <span>{new Date(entry.created_at).toLocaleDateString()}</span>
                 <span>•</span>
-                <span>{wordCount} words</span>
+                <span>{wordCount} {t("note_words")}</span>
                 <span>•</span>
-                <span>~{readingTime} min read</span>
+                <span>~{readingTime} {t("note_min_read")}</span>
               </div>
             </div>
           </div>
@@ -181,7 +191,8 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
               onClick={() => setIsMaximized(!isMaximized)}
               className="p-2 rounded-xl transition-all hover:bg-[var(--bg-hover)]"
               style={{ color: "var(--text-muted)" }}
-              title={isMaximized ? "Restore Size" : "Maximize View"}
+              title={isMaximized ? t("note_restore_size") : t("note_maximize")}
+              aria-label={isMaximized ? t("note_restore_size") : t("note_maximize")}
             >
               {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
@@ -191,6 +202,7 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
               onClick={onClose}
               className="p-2 rounded-xl transition-all hover:bg-[var(--bg-hover)]"
               style={{ color: "var(--text-muted)" }}
+              aria-label={t("close_btn")}
             >
               <X className="w-5 h-5" />
             </button>
@@ -214,7 +226,7 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
                   border: "1px solid var(--border-glow)",
                 }}
               >
-                <ExternalLink className="w-3.5 h-3.5" /> Reopen in Scratchpad
+                <ExternalLink className="w-3.5 h-3.5" /> {t("note_reopen_scratchpad")}
               </button>
             )}
 
@@ -225,7 +237,7 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
               style={{ background: "var(--bg-input)", color: "var(--text)", border: "1px solid var(--border)" }}
             >
               {copiedType === "text" ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              {copiedType === "text" ? "Copied!" : "Copy Text"}
+              {copiedType === "text" ? t("copied_bang") : t("note_copy_text")}
             </button>
 
             {richHtml && (
@@ -236,7 +248,7 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
                 style={{ background: "var(--bg-input)", color: "var(--text)", border: "1px solid var(--border)" }}
               >
                 {copiedType === "html" ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <CodeIcon className="w-3.5 h-3.5" />}
-                {copiedType === "html" ? "Copied!" : "Copy HTML"}
+                {copiedType === "html" ? t("copied_bang") : t("note_copy_html")}
               </button>
             )}
 
@@ -269,7 +281,7 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
                 className="px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all"
                 style={{ background: "var(--emerald)", color: "#000" }}
               >
-                <Save className="w-3.5 h-3.5" /> {isSaving ? "Saving..." : "Save Changes"}
+                <Save className="w-3.5 h-3.5" /> {isSaving ? t("note_saving") : t("note_save_changes")}
               </button>
             ) : (
               onSaveEntry && (
@@ -279,7 +291,7 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
                   className="px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 transition-all"
                   style={{ background: "var(--bg-input)", color: "var(--cyan)", border: "1px solid var(--border)" }}
                 >
-                  <Edit3 className="w-3.5 h-3.5" /> Edit Note
+                  <Edit3 className="w-3.5 h-3.5" /> {t("note_edit")}
                 </button>
               )
             )}
@@ -294,6 +306,7 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
                 value={editBody}
                 onChange={(e) => setEditBody(e.target.value)}
                 dir="auto"
+                aria-label={t("note_body_label")}
                 className="w-full flex-1 min-h-[300px] p-4 rounded-xl text-sm font-mono focus:outline-none transition-all resize-none"
                 style={{
                   background: "var(--bg-input)",
@@ -336,10 +349,10 @@ export const NoteDetailModal: React.FC<NoteDetailModalProps> = ({
         >
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1">
-              <Type className="w-3.5 h-3.5" /> {charCount} characters
+              <Type className="w-3.5 h-3.5" /> {charCount} {t("note_characters")}
             </span>
             <span className="flex items-center gap-1">
-              <Clock className="w-3.5 h-3.5" /> Created {new Date(entry.created_at).toLocaleString()}
+              <Clock className="w-3.5 h-3.5" /> {t("note_created")} {new Date(entry.created_at).toLocaleString()}
             </span>
           </div>
 

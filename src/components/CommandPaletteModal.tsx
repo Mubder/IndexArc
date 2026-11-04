@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Search, X, StickyNote, KeyRound, Terminal, Compass, ArrowRight } from "lucide-react";
 import { VaultEntry, Tab, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
+import { useDialogA11y } from "../hooks/useDialogA11y";
 import { isArabicText, maskValue } from "../utils";
 
 interface CommandPaletteModalProps {
@@ -26,17 +27,16 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  // Focus trap, Escape-to-close and focus restore (useDialogA11y).
+  const dialogRef = useDialogA11y(isOpen, onClose);
 
-  // Keyboard listener for Ctrl+K / Cmd+K
+  // Keyboard listener for Ctrl+K / Cmd+K (Escape is handled by useDialogA11y)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         if (isOpen) onClose();
         else onOpen(); // toggle — previously this only cleared the query, so the advertised Ctrl+K could never OPEN the palette
-      }
-      if (e.key === "Escape" && isOpen) {
-        onClose();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -99,6 +99,10 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4 bg-black/75 backdrop-blur-md animate-fade-in">
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("palette_dialog_label")}
         className="w-full max-w-2xl rounded-2xl flex flex-col min-w-0 shadow-2xl overflow-hidden transition-all"
         style={{
           background: "var(--bg-surface)",
@@ -112,14 +116,15 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         >
           <Search className="w-5 h-5 shrink-0" style={{ color: "var(--accent-bright)" }} />
           <input
-            autoFocus
+            data-autofocus
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
               setSelectedIndex(0);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Search notes, secrets, commands, or tabs... (Esc to close)"
+            placeholder={t("palette_search_placeholder")}
+            aria-label={t("palette_dialog_label")}
             dir="auto"
             className="w-full bg-transparent text-base focus:outline-none"
             style={{ color: "var(--text)" }}
@@ -127,6 +132,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
           <button
             type="button"
             onClick={onClose}
+            aria-label={t("close_btn")}
             className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-xs font-mono"
             style={{ color: "var(--text-muted)", border: "1px solid var(--border)" }}
           >
@@ -140,7 +146,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
           {showNav && (
             <div>
               <div className="px-3 py-1.5 text-[10px] uppercase font-semibold tracking-wider" style={{ color: "var(--text-muted)" }}>
-                Quick Navigation
+                {t("palette_quick_nav")}
               </div>
               <div className="space-y-1">
                 {navActions.map((action, i) => (
@@ -168,11 +174,11 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
           {/* Vault Entries */}
           <div>
             <div className="px-3 py-1.5 text-[10px] uppercase font-semibold tracking-wider" style={{ color: "var(--text-muted)" }}>
-              Vault Results ({filteredEntries.length})
+              {t("palette_vault_results")} ({filteredEntries.length})
             </div>
             {filteredEntries.length === 0 ? (
               <p className="px-3 py-4 text-xs italic" style={{ color: "var(--text-muted)" }}>
-                No matching notes, secrets, or commands found.
+                {t("palette_no_matches")}
               </p>
             ) : (
               <div className="space-y-1">
@@ -239,8 +245,8 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
           className="px-4 py-2 border-t flex items-center justify-between text-[11px]"
           style={{ borderColor: "var(--border)", background: "var(--bg-base)", color: "var(--text-muted)" }}
         >
-          <span>Use <strong>Ctrl + K</strong> anytime to toggle · <strong>↑↓</strong> navigate · <strong>Enter</strong> select</span>
-          <span>IndexArc Search</span>
+          <span>{t("palette_hint_use")} <strong>Ctrl + K</strong> {t("palette_hint_toggle")} · <strong>↑↓</strong> {t("palette_hint_navigate")} · <strong>Enter</strong> {t("palette_hint_select")}</span>
+          <span>{t("palette_footer_brand")}</span>
         </div>
       </div>
     </div>

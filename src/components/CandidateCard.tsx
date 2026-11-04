@@ -60,8 +60,8 @@ export const CandidateCard: React.FC<CandidateCardProps> = ({
             onClick={() => onDiscard(c.temp_id)}
             className="ml-auto p-1.5 rounded-full hover:bg-[var(--danger-bg)] transition-colors border"
             style={{ color: "var(--danger)", borderColor: "rgba(248,113,113,0.25)", background: "var(--bg-input)" }}
-            title="Discard — remove this candidate"
-            aria-label="Discard candidate"
+            title={t("candidate_discard_title")}
+            aria-label={t("candidate_discard_label")}
           >
             <X className="w-4 h-4" />
           </button>

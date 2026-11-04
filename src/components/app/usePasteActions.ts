@@ -2,6 +2,8 @@ import { AnalyzeCandidate } from "../../types";
 import { findDuplicateHits } from "../../utils";
 import type { Dispatch, SetStateAction } from "react";
 import type { Tab } from "../../types";
+import type { TranslationDict } from "../../utils/i18n";
+import { fill } from "../home/DashboardCards";
 
 export interface UsePasteActionsArgs {
   candidates: AnalyzeCandidate[];
@@ -18,11 +20,12 @@ export interface UsePasteActionsArgs {
   setTab: Dispatch<SetStateAction<Tab>>;
   showConfirm: (title: string, message: string, onConfirm: () => void, confirmText?: string | undefined) => Promise<void>;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
+  t: (key: keyof TranslationDict) => string;
 }
 
 // Paste & Analyze: analyze, edit or discard candidates, save the selected ones.
 // Moved verbatim from App.tsx (R3.4); App wires the inputs.
-export function usePasteActions({ candidates, fetchAll, paste, pasteId, selected, setAnalyzing, setCandidates, setPaste, setPasteId, setProviderUsed, setSelected, setTab, showConfirm, showToast }: UsePasteActionsArgs) {
+export function usePasteActions({ candidates, fetchAll, paste, pasteId, selected, setAnalyzing, setCandidates, setPaste, setPasteId, setProviderUsed, setSelected, setTab, showConfirm, showToast, t }: UsePasteActionsArgs) {
   const handleAnalyze = async () => {
     if (!paste.trim()) return;
     setAnalyzing(true);
@@ -103,7 +106,7 @@ export function usePasteActions({ candidates, fetchAll, paste, pasteId, selected
         setTab("home");
       } else {
         const err = await res.json();
-        showToast(err.error || "Save failed", "error");
+        showToast(err.error || t("save_failed"), "error");
       }
     };
     // Pre-save duplicate screen: values already in the vault trigger a
@@ -113,17 +116,17 @@ export function usePasteActions({ candidates, fetchAll, paste, pasteId, selected
       const hits = await findDuplicateHits(items);
       if (hits.length) {
         const names = hits.map((h) => `"${h.existing_name}"`).slice(0, 4).join(", ");
-        const more = hits.length > 4 ? ` +${hits.length - 4} more` : "";
+        const more = hits.length > 4 ? ` ${fill(t("more_count"), { n: hits.length - 4 })}` : "";
         // showConfirm resolves on BOTH confirm and cancel — track the choice.
         let confirmed = false;
         await showConfirm(
-          "Possible duplicates",
-          `${hits.length} of ${items.length} already exist in the vault (${names}${more}). Save anyway?`,
+          t("dup_confirm_title"),
+          fill(t("dup_confirm_msg"), { n: hits.length, total: items.length, names: `${names}${more}` }),
           async () => {
             confirmed = true;
             await doSave();
           },
-          "Save anyway"
+          t("dup_save_anyway")
         ).catch(() => {});
         if (confirmed) return;
         // Cancelled: deselect the duplicates, keep the rest selected.
@@ -133,7 +136,7 @@ export function usePasteActions({ candidates, fetchAll, paste, pasteId, selected
           for (const id of dupIds) delete n[id];
           return n;
         });
-        showToast(`Duplicates deselected — save again for the ${items.length - hits.length} new one(s)`, "info");
+        showToast(fill(t("dup_deselected"), { n: items.length - hits.length }), "info");
         return;
       }
     } catch {

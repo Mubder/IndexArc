@@ -5,6 +5,7 @@ import { uid } from "./noteTabs";
 import { setSyncedScratchpadTabs } from "../../scratchpadSaveQueue";
 import type { Dispatch, SetStateAction } from "react";
 import type { TranslationDict } from "../../utils/i18n";
+import { fill } from "../home/DashboardCards";
 
 export interface UseArchiveArgs {
   activeId: string;
@@ -48,7 +49,7 @@ export function useArchive({ activeId, setActiveId, setStatus, setTabs, t, tabs 
   // Archive soft-hides a tab into cold storage
   const archiveTab = async (id: string) => {
     const target = tabs.find((x) => x.id === id);
-    if (!window.confirm(`Are you sure you want to archive note "${target?.title || "Scratch"}"?`)) return;
+    if (!window.confirm(fill(t("confirm_archive_note"), { title: target?.title || "Scratch" }))) return;
 
     // SERVER FIRST: the server decides (it refuses protected notes). Local
     // state only changes after a confirmed success — an optimistic removal
@@ -121,7 +122,7 @@ export function useArchive({ activeId, setActiveId, setStatus, setTabs, t, tabs 
   };
 
   const deleteArchivedTab = async (id: string, title?: string) => {
-    if (!window.confirm(`Are you sure you want to permanently delete "${title || "Untitled"}"?`)) return;
+    if (!window.confirm(fill(t("confirm_delete_archived_note"), { title: title || t("untitled") }))) return;
     if (archivedTabs !== null) {
       setArchivedTabs((prev) => (prev ? prev.filter((x) => x.id !== id) : null));
     }

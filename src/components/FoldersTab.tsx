@@ -131,7 +131,7 @@ export const FoldersTab: React.FC<FoldersTabProps> = ({
                   ) : (
                     t("not_watching_label")
                   )}
-                  {f.last_scan_at && ` · last scan ${new Date(f.last_scan_at).toLocaleString()}`}
+                  {f.last_scan_at && ` · ${t("last_scan")} ${new Date(f.last_scan_at).toLocaleString()}`}
                 </div>
               </div>
               <div className="flex gap-1 shrink-0">

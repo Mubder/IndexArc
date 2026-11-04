@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { CheckCircle2, XCircle, AlertTriangle, Copy, RefreshCw, X, HardDrive, Database } from "lucide-react";
 import { HealthReport, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
+import { useDialogA11y } from "../hooks/useDialogA11y";
 
 interface HealthModalProps {
   isOpen: boolean;
@@ -29,17 +30,22 @@ export const HealthModal: React.FC<HealthModalProps> = ({
   // refetch while the modal was open).
   const initialRef = useRef(initial);
   initialRef.current = initial;
+  const dialogRef = useDialogA11y(isOpen, onClose);
+  const titleId = useId();
+  // Read via ref so fetchHealth stays stable (it is an effect dependency).
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const fetchHealth = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const res = await fetch("/api/health");
-      if (!res.ok) throw new Error(`Health check failed (HTTP ${res.status})`);
+      if (!res.ok) throw new Error(`${tRef.current("health_check_failed")} (HTTP ${res.status})`);
       const data = (await res.json()) as HealthReport;
       setReport(data);
     } catch (e: any) {
-      setError(e?.message || "Health check failed — is the vault server running?");
+      setError(e?.message || tRef.current("health_check_unreachable"));
       setReport({ ok: false, overall: "attention", error: e?.message || "unreachable", checks: [] });
     } finally {
       setLoading(false);
@@ -52,15 +58,6 @@ export const HealthModal: React.FC<HealthModalProps> = ({
       fetchHealth();
     }
   }, [isOpen, fetchHealth]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -88,17 +85,18 @@ export const HealthModal: React.FC<HealthModalProps> = ({
       className="fixed inset-0 z-[100] flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
       onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("health_title")}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl p-5 space-y-4"
         style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("health_title")}</span>
+          <span id={titleId} className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("health_title")}</span>
           <span
             className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
             style={{ color: overallColor, background: "var(--bg-input)", border: "1px solid var(--border)" }}
@@ -128,7 +126,7 @@ export const HealthModal: React.FC<HealthModalProps> = ({
             onClick={onClose}
             className="p-1.5 rounded-lg"
             style={{ color: "var(--text-muted)" }}
-            aria-label="Close"
+            aria-label={t("close_btn")}
           >
             <X className="w-4 h-4" />
           </button>
@@ -153,11 +151,11 @@ export const HealthModal: React.FC<HealthModalProps> = ({
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]" style={{ color: "var(--text-muted)" }}>
               <span className="flex items-center gap-1">
                 <Database className="w-3 h-3" />
-                {t("health_vault_label")}: {report.vault?.total ?? "—"} entries · {fmtKb(report.vault?.size)}
-                {report.vault?.locked ? " · locked" : report.vault?.encrypted ? " · encrypted" : ""}
+                {t("health_vault_label")}: {report.vault?.total ?? "—"} {t("health_entries_unit")} · {fmtKb(report.vault?.size)}
+                {report.vault?.locked ? ` · ${t("health_locked")}` : report.vault?.encrypted ? ` · ${t("health_encrypted")}` : ""}
               </span>
-              <span>Notes: {report.scratchpad?.tabs ?? "—"} active · {fmtKb(report.scratchpad?.size)}</span>
-              <span>Backups: {report.backups?.count ?? 0} · Snapshots: {report.emergency?.count ?? 0}</span>
+              <span>{t("health_notes_label")}: {report.scratchpad?.tabs ?? "—"} {t("health_active_unit")} · {fmtKb(report.scratchpad?.size)}</span>
+              <span>{t("health_backups_label")}: {report.backups?.count ?? 0} · {t("health_snapshots_label")}: {report.emergency?.count ?? 0}</span>
             </div>
           </div>
         )}
@@ -183,22 +181,22 @@ export const HealthModal: React.FC<HealthModalProps> = ({
             </div>
           ))}
           {!loading && (report?.checks ?? []).length === 0 && !error && (
-            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>No check results.</p>
+            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>{t("health_no_results")}</p>
           )}
         </div>
 
         {(report?.alternates ?? []).length > 0 && (
           <div className="rounded-xl p-3 space-y-1.5" style={{ background: "var(--amber-bg)", border: "1px solid rgba(251,191,36,0.25)" }}>
             <div className="text-xs font-semibold" style={{ color: "var(--amber)" }}>
-              Other data folders on this machine
+              {t("health_alternates_title")}
             </div>
             {(report?.alternates ?? []).map((a) => (
               <div key={a.root} className="text-[11px] break-all" style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
-                {a.root} — {a.vaultEncrypted ? "encrypted vault" : `${a.vaultEntries ?? 0} entries`} · {a.scratchpadTabs ?? 0} notes
+                {a.root} — {a.vaultEncrypted ? t("health_encrypted_vault") : `${a.vaultEntries ?? 0} ${t("health_entries_unit")}`} · {a.scratchpadTabs ?? 0} {t("health_notes_unit")}
               </div>
             ))}
             <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-              If this folder looks empty, your data is probably in one of these. Relaunch that build/folder — or restore a snapshot below.
+              {t("health_alternates_hint")}
             </p>
           </div>
         )}

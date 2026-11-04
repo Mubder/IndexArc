@@ -1,6 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { Busy, NoteBidiMode, ScratchTab, Settings } from "../../types";
 import type { TranslationDict } from "../../utils/i18n";
+import { fill } from "../home/DashboardCards";
 import type { Editor } from "@tiptap/react";
 import type { SpellRect } from "./domText";
 import { Loader2, KeyRound, Save, Copy, Trash2, Sparkles, Wand2, Zap, ZapOff, AlignJustify, History, ArrowLeftRight, LifeBuoy, Undo2, Bold, Italic, Underline, Highlighter, BookPlus, EyeOff, ArrowUp, ArrowDown } from "lucide-react";
@@ -119,7 +120,7 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
               <button
                 type="button"
                 onClick={() => {
-                  if (window.confirm("Are you sure you want to clear this note's content?")) {
+                  if (window.confirm(t("confirm_clear_note"))) {
                     recordSnapshot(activeId, active?.content || "", "Before Clear");
                     setContent(activeId, "");
                   }
@@ -163,7 +164,7 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
             <button
               type="button"
               onClick={togglePredictions}
-              title={enablePredictions ? "AI Predictions Enabled (Click to Disable)" : "AI Predictions Disabled (Click to Enable)"}
+              title={enablePredictions ? t("predictions_enabled_title") : t("predictions_disabled_title")}
               aria-pressed={enablePredictions}
               className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
               style={{
@@ -173,7 +174,7 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
               }}
             >
               {enablePredictions ? <Zap className="w-3.5 h-3.5 shrink-0" /> : <ZapOff className="w-3.5 h-3.5 shrink-0" />}
-              <span>Predictions: <strong>{enablePredictions ? "ON" : "OFF"}</strong></span>
+              <span>{t("predictions_label")}: <strong>{enablePredictions ? t("state_on") : t("state_off")}</strong></span>
             </button>
           </div>
 
@@ -188,10 +189,10 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
                 disabled={!(active?.content || "").trim()}
                 className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ background: "rgba(56, 189, 248, 0.1)", color: "#38bdf8", border: "1px solid rgba(56, 189, 248, 0.3)" }}
-                title="Restore multi-line paragraphs & auto-format structure"
+                title={t("format_paragraphs_title")}
               >
                 <AlignJustify className="w-3.5 h-3.5 shrink-0" />
-                <span>Format Paragraphs</span>
+                <span>{t("format_paragraphs")}</span>
               </button>
             )}
             <button
@@ -313,26 +314,26 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
                 <EditorContent editor={tiptap} className="note-editor-wrap" />
                 {tiptap && !tiptap.state.selection.empty && (
                   <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 p-1 rounded-full" style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border-glow)", boxShadow: "0 8px 24px rgba(0,0,0,0.22)" }}>
-                    <button type="button" onClick={() => tiptap.chain().focus().toggleBold().run()} className="p-1.5 rounded-full" style={{ background: tiptap.isActive("bold") ? "var(--accent)" : "transparent", color: tiptap.isActive("bold") ? "#fff" : "var(--text-muted)" }} title="Bold"><Bold className="w-3.5 h-3.5" /></button>
-                    <button type="button" onClick={() => tiptap.chain().focus().toggleItalic().run()} className="p-1.5 rounded-full" style={{ background: tiptap.isActive("italic") ? "var(--accent)" : "transparent", color: tiptap.isActive("italic") ? "#fff" : "var(--text-muted)" }} title="Italic"><Italic className="w-3.5 h-3.5" /></button>
-                    <button type="button" onClick={() => tiptap.chain().focus().toggleUnderline().run()} className="p-1.5 rounded-full" style={{ background: tiptap.isActive("underline") ? "var(--accent)" : "transparent", color: tiptap.isActive("underline") ? "#fff" : "var(--text-muted)" }} title="Underline"><Underline className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => tiptap.chain().focus().toggleBold().run()} className="p-1.5 rounded-full" style={{ background: tiptap.isActive("bold") ? "var(--accent)" : "transparent", color: tiptap.isActive("bold") ? "#fff" : "var(--text-muted)" }} title={t("scratchpad_bold")}><Bold className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => tiptap.chain().focus().toggleItalic().run()} className="p-1.5 rounded-full" style={{ background: tiptap.isActive("italic") ? "var(--accent)" : "transparent", color: tiptap.isActive("italic") ? "#fff" : "var(--text-muted)" }} title={t("scratchpad_italic")}><Italic className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => tiptap.chain().focus().toggleUnderline().run()} className="p-1.5 rounded-full" style={{ background: tiptap.isActive("underline") ? "var(--accent)" : "transparent", color: tiptap.isActive("underline") ? "#fff" : "var(--text-muted)" }} title={t("scratchpad_underline")}><Underline className="w-3.5 h-3.5" /></button>
                     <span className="w-px h-4 mx-1" style={{ background: "var(--border)" }} />
-                    <button type="button" onClick={() => tiptap.chain().focus().toggleHighlight({ color: highlightColor }).run()} className="p-1.5 rounded-full" style={{ color: "var(--text-dim)" }} title="Highlight"><Highlighter className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => tiptap.chain().focus().toggleHighlight({ color: highlightColor }).run()} className="p-1.5 rounded-full" style={{ color: "var(--text-dim)" }} title={t("scratchpad_highlight")}><Highlighter className="w-3.5 h-3.5" /></button>
                   </div>
                 )}
                 {slashOpen && (
                   <div className="absolute left-3 bottom-14 z-20 flex flex-col gap-1 p-1.5 rounded-xl shadow-2xl" style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border-glow)", minWidth: 180 }}>
-                    <div className="px-2 py-1 text-[10px] font-semibold" style={{ color: "var(--text-muted)" }}>Slash commands — type "/"</div>
-                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleHeading({ level: 1 }).run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs flex items-center gap-2" style={{ color: "var(--text)" }}><span className="font-bold">H1</span> Heading 1</button>
-                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleHeading({ level: 2 }).run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs flex items-center gap-2" style={{ color: "var(--text)" }}><span className="font-bold">H2</span> Heading 2</button>
-                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleBulletList().run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs" style={{ color: "var(--text)" }}>• Bullet list</button>
-                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleBlockquote().run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs" style={{ color: "var(--text)" }}>❝ Quote</button>
+                    <div className="px-2 py-1 text-[10px] font-semibold" style={{ color: "var(--text-muted)" }}>{t("slash_commands_hint")}</div>
+                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleHeading({ level: 1 }).run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs flex items-center gap-2" style={{ color: "var(--text)" }}><span className="font-bold">H1</span> {t("slash_heading_1")}</button>
+                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleHeading({ level: 2 }).run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs flex items-center gap-2" style={{ color: "var(--text)" }}><span className="font-bold">H2</span> {t("slash_heading_2")}</button>
+                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleBulletList().run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs" style={{ color: "var(--text)" }}>• {t("slash_bullet_list")}</button>
+                    <button type="button" onClick={() => { const from = tiptap.state.selection.from; tiptap.chain().focus().deleteRange({ from: from - 1, to: from }).toggleBlockquote().run(); setSlashOpen(false); }} className="text-left px-2 py-1.5 rounded-lg hover:bg-accent-bg text-xs" style={{ color: "var(--text)" }}>❝ {t("slash_quote")}</button>
                   </div>
                 )}
               </div>
             ) : (
               <div className="note-editor relative z-10 w-full p-4 text-sm" style={{ color: "var(--text-muted)" }}>
-                Loading editor…
+                {t("loading_editor")}
               </div>
             )}
             {spellRects.length > 0 && (
@@ -375,7 +376,7 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
                 }}
               >
                 <Zap className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="text-muted">Prediction:</span>
+                <span className="text-muted">{t("prediction_label")}:</span>
                 <span className="font-medium text-white italic">{ghostCompletion}</span>
                 <button
                   type="button"
@@ -399,13 +400,14 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
                     color: "var(--accent-bright)",
                   }}
                 >
-                  Tab ↹ Accept
+                  Tab ↹ {t("prediction_accept")}
                 </button>
                 <button
                   type="button"
                   onClick={() => setGhostCompletion("")}
                   className="text-muted hover:text-white text-xs px-1 cursor-pointer"
-                  title="Dismiss"
+                  title={t("dismiss_btn")}
+                  aria-label={t("dismiss_btn")}
                 >
                   ✕
                 </button>
@@ -425,14 +427,14 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
                 }}
               >
                 <div className="px-2 py-1 font-semibold text-muted border-b border-border flex items-center justify-between">
-                  <span>Spelling: <strong className="text-white">{contextMenu.word}</strong></span>
-                  <button onClick={() => setContextMenu(null)} className="opacity-60 hover:opacity-100">✕</button>
+                  <span>{t("spell_label")}: <strong className="text-white">{contextMenu.word}</strong></span>
+                  <button onClick={() => setContextMenu(null)} className="opacity-60 hover:opacity-100" aria-label={t("close_btn")}>✕</button>
                 </div>
 
                 {contextMenu.loading ? (
                   <div className="flex items-center gap-2 px-2 py-2 text-muted italic">
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-accent-bright" />
-                    <span>Finding suggestions...</span>
+                    <span>{t("spell_finding")}</span>
                   </div>
                 ) : contextMenu.suggestions.length > 0 ? (
                   <div className="space-y-0.5 max-h-40 overflow-y-auto">
@@ -448,7 +450,7 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
                     ))}
                   </div>
                 ) : (
-                  <p className="px-2 py-1 text-muted italic">No suggestions</p>
+                  <p className="px-2 py-1 text-muted italic">{t("spell_no_suggestions")}</p>
                 )}
 
                 <div className="border-t border-border pt-1 space-y-0.5">
@@ -457,7 +459,7 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
                     className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-surface-highlight hover:text-emerald font-medium transition-colors flex items-center gap-1.5"
                   >
                     <BookPlus className="w-3.5 h-3.5 text-emerald" />
-                    Add "{contextMenu.word}" to Dictionary
+                    {fill(t("spell_add_to_dict"), { word: contextMenu.word })}
                   </button>
 
                   <button
@@ -465,7 +467,7 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
                     className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-surface-highlight hover:text-muted font-medium transition-colors flex items-center gap-1.5"
                   >
                     <EyeOff className="w-3.5 h-3.5 text-muted" />
-                    Ignore "{contextMenu.word}"
+                    {fill(t("spell_ignore"), { word: contextMenu.word })}
                   </button>
                 </div>
               </div>

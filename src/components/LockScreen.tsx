@@ -36,7 +36,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
         setError(data.error || t("sec_error_incorrect"));
       }
     } catch (err: any) {
-      setError(err.message || "Connection failed");
+      setError(err.message || t("connection_failed"));
     } finally {
       setLoading(false);
     }
@@ -88,6 +88,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t("sec_password_placeholder")}
+              aria-label={t("sec_password_label")}
               disabled={loading}
               autoFocus
               className="w-full rounded-xl px-4 py-3 text-sm transition-all focus:outline-none"

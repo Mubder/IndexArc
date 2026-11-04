@@ -18,7 +18,7 @@ export function HealthBanners({ compact, health, integrityDismissed, integrityWa
     <>
             {health?.overall === "attention" && compact && (() => {
               const bad = (health.checks ?? []).filter((c) => c.severity === "critical" && !c.ok);
-              const first = bad[0] ? `${bad[0].label}: ${bad[0].detail}` : health.error || health.vault?.error || "Vault data unavailable in this data folder.";
+              const first = bad[0] ? `${bad[0].label}: ${bad[0].detail}` : health.error || health.vault?.error || t("health_vault_unavailable");
               return (
                 <div className="mb-4 flex items-center gap-3 rounded-xl px-4 py-2 text-xs" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.35)", color: "var(--text)" }}>
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: "var(--danger)", boxShadow: "0 0 8px var(--danger)" }} />
@@ -48,7 +48,7 @@ export function HealthBanners({ compact, health, integrityDismissed, integrityWa
                       <li key={c.id} dir="auto">{c.label}: {c.detail}</li>
                     ))}
                     {(health.checks ?? []).filter((c) => c.severity === "critical" && !c.ok).length === 0 && (
-                      <li dir="auto">{health.error || health.vault?.error || "Vault data unavailable in this data folder."}</li>
+                      <li dir="auto">{health.error || health.vault?.error || t("health_vault_unavailable")}</li>
                     )}
                   </ul>
                 </div>

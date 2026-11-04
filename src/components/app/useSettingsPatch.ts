@@ -1,6 +1,7 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { Settings } from "../../types";
 import type { Dispatch, SetStateAction, RefObject } from "react";
+import type { TranslationDict } from "../../utils/i18n";
 
 export interface UseSettingsPatchArgs {
   patchTimerRef: RefObject<ReturnType<typeof setTimeout> | null>;
@@ -8,11 +9,15 @@ export interface UseSettingsPatchArgs {
   settings: Settings | null;
   settingsDirtyRef: RefObject<boolean>;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
+  t: (key: keyof TranslationDict) => string;
 }
 
 // Debounced settings patches (marks settings dirty so fetchAll does not clobber edits) and the language toggle.
 // Moved verbatim from App.tsx (R3.4); App wires the inputs.
-export function useSettingsPatch({ patchTimerRef, setSettings, settings, settingsDirtyRef, showToast }: UseSettingsPatchArgs) {
+export function useSettingsPatch({ patchTimerRef, setSettings, settings, settingsDirtyRef, showToast, t }: UseSettingsPatchArgs) {
+  // patchSettings is memoized once; read the current translator via a ref.
+  const tRef = useRef(t);
+  tRef.current = t;
   const patchSettings = useCallback((patch: Partial<Settings>) => {
     settingsDirtyRef.current = true;
     setSettings((prev) => {
@@ -69,7 +74,7 @@ export function useSettingsPatch({ patchTimerRef, setSettings, settings, setting
         })
         .catch(() => {
           settingsDirtyRef.current = false;
-          showToast("Settings change may not have saved / قد لا يكون الحفظ قد تم", "error");
+          showToast(tRef.current("toast_settings_patch_failed"), "error");
         });
     }, 300);
   }, []);

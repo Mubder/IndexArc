@@ -13,6 +13,7 @@ import { AdvancedAiSection } from "./settings/AdvancedAiSection";
 import { SecuritySection } from "./settings/SecuritySection";
 import { EmergencySection, type EmergencySnapshot } from "./settings/EmergencySection";
 import { LogsSection } from "./settings/LogsSection";
+import { fill } from "./home/DashboardCards";
 
 interface SettingsTabProps {
   settings: Settings;
@@ -70,7 +71,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         // A failed snapshot must never read as "nothing changed" — this UI
         // matters most during data-recovery scenarios.
         const err = await res.json().catch(() => null);
-        throw new Error(err?.error || `Snapshot failed (HTTP ${res.status})`);
+        throw new Error(err?.error || `${t("emergency_snapshot_failed")} (HTTP ${res.status})`);
       }
       const data = await res.json();
       setEmgMsg(
@@ -80,7 +81,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       );
       await loadSnapshots();
     } catch (err: any) {
-      setEmgMsg(err.message || "Failed");
+      setEmgMsg(err.message || t("failed_generic"));
     } finally {
       setEmgBusy(false);
     }
@@ -98,23 +99,23 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       const data = await res.json();
       if (data.ok) {
         const parts: string[] = [];
-        if (typeof data.vault_total === "number") parts.push(`${data.vault_total} entries`);
-        if (typeof data.scratchpad_tabs === "number") parts.push(`${data.scratchpad_tabs} notes`);
+        if (typeof data.vault_total === "number") parts.push(`${data.vault_total} ${t("health_entries_unit")}`);
+        if (typeof data.scratchpad_tabs === "number") parts.push(`${data.scratchpad_tabs} ${t("health_notes_unit")}`);
         setEmgMsg(
           parts.length
-            ? `Restored (${parts.join(" · ")}). Reloading...`
+            ? fill(t("emergency_restored_counts"), { parts: parts.join(" · ") })
             : data.locked
-              ? "Restored (encrypted — unlock to load). Reloading..."
+              ? t("emergency_restored_locked")
               : t("emergency_restored")
         );
         onRefreshVaultStatus();
         await loadSnapshots();
         setTimeout(() => window.location.reload(), 1200);
       } else {
-        setEmgMsg(data.error || "Restore failed");
+        setEmgMsg(data.error || t("emergency_restore_failed"));
       }
     } catch (err: any) {
-      setEmgMsg(err.message || "Failed");
+      setEmgMsg(err.message || t("failed_generic"));
     } finally {
       setEmgBusy(false);
       setConfirmRestore(null);
@@ -148,10 +149,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         setSecPassword("");
         onRefreshVaultStatus();
       } else {
-        setSecError(data.error || "Failed to setup password");
+        setSecError(data.error || t("sec_setup_failed"));
       }
     } catch (err: any) {
-      setSecError(err.message || "Request failed");
+      setSecError(err.message || t("request_failed"));
     }
   };
 
@@ -172,7 +173,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         setSecError(data.error || t("sec_error_incorrect"));
       }
     } catch (err: any) {
-      setSecError(err.message || "Request failed");
+      setSecError(err.message || t("request_failed"));
     }
   };
 
@@ -190,11 +191,11 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
       <GeminiPanel onPatchSettings={onPatchSettings} settings={settings} t={t} />
 
-      <CloudKeyPanels onPatchSettings={onPatchSettings} settings={settings} />
+      <CloudKeyPanels onPatchSettings={onPatchSettings} settings={settings} t={t} />
 
-      <LocalOpenAiPanel onPatchSettings={onPatchSettings} settings={settings} />
+      <LocalOpenAiPanel onPatchSettings={onPatchSettings} settings={settings} t={t} />
 
-      <AdvancedAiSection onPatchSettings={onPatchSettings} settings={settings} />
+      <AdvancedAiSection onPatchSettings={onPatchSettings} settings={settings} t={t} />
 
       <SecuritySection handleRemovePassword={handleRemovePassword} handleSetupPassword={handleSetupPassword} secError={secError} secPassword={secPassword} setSecPassword={setSecPassword} t={t} vaultStatus={vaultStatus} />
 

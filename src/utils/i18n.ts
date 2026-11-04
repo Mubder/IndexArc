@@ -484,6 +484,202 @@ export interface TranslationDict {
   health_vault_label: string;
   health_go_emergency: string;
   health_banner_action: string;
+
+  // R4: UI strings moved out of components (dialogs, toasts, settings panels).
+  close_btn: string;
+  fs_drives_home: string;
+  palette_dialog_label: string;
+  palette_search_placeholder: string;
+  palette_quick_nav: string;
+  palette_vault_results: string;
+  palette_no_matches: string;
+  palette_hint_use: string;
+  palette_hint_toggle: string;
+  palette_hint_navigate: string;
+  palette_hint_select: string;
+  palette_footer_brand: string;
+  health_check_failed: string;
+  health_check_unreachable: string;
+  health_entries_unit: string;
+  health_locked: string;
+  health_encrypted: string;
+  health_notes_label: string;
+  health_active_unit: string;
+  health_backups_label: string;
+  health_snapshots_label: string;
+  health_no_results: string;
+  health_alternates_title: string;
+  health_encrypted_vault: string;
+  health_notes_unit: string;
+  health_alternates_hint: string;
+  copied_bang: string;
+  note_untitled: string;
+  note_save_failed_retry: string;
+  note_title_label: string;
+  note_body_label: string;
+  note_words: string;
+  note_min_read: string;
+  note_restore_size: string;
+  note_maximize: string;
+  note_reopen_scratchpad: string;
+  note_copy_text: string;
+  note_copy_html: string;
+  note_saving: string;
+  note_save_changes: string;
+  note_edit: string;
+  note_characters: string;
+  note_created: string;
+  archive_preview_untitled: string;
+  archive_reference_only: string;
+  archive_archived_on: string;
+  copied_to_clipboard: string;
+  archive_empty_note: string;
+  archive_delete_permanently: string;
+  archive_restore_to_active: string;
+  compare_swap_sides: string;
+  compare_left_note: string;
+  compare_right_note: string;
+  rescue_search_placeholder: string;
+  rescue_scanning: string;
+  rescue_snapshot_one: string;
+  rescue_snapshot_many: string;
+  history_version_one: string;
+  history_version_many: string;
+  history_saved_suffix: string;
+  history_latest_snapshot: string;
+  history_version_label: string;
+  chars_unit: string;
+  history_preview_label: string;
+  history_empty: string;
+  history_select_version: string;
+  history_footer_hint: string;
+  protect_show: string;
+  scratchpad_paragraphs_restored: string;
+  scratchpad_content_restored: string;
+  scratchpad_retry_now: string;
+  scratchpad_cleared_detected: string;
+  connection_failed: string;
+  update_toast_available: string;
+  ask_failed: string;
+  loading_scratchpad: string;
+  folder_remove_failed: string;
+  toast_copied_name: string;
+  copy_failed: string;
+  save_failed: string;
+  more_count: string;
+  toast_name_required: string;
+  toast_network_error: string;
+  confirm_delete_entry_title: string;
+  confirm_delete_entry_msg: string;
+  delete_failed: string;
+  delete_btn: string;
+  confirm_delete_entries_title: string;
+  confirm_delete_entries_one: string;
+  confirm_delete_entries_many: string;
+  dup_confirm_title: string;
+  dup_confirm_msg: string;
+  dup_save_anyway: string;
+  dup_deselected: string;
+  fs_cannot_list: string;
+  fs_list_failed: string;
+  scan_apply_failed: string;
+  scan_applied_summary: string;
+  confirm_discard_scan_title: string;
+  confirm_discard_scan_msg: string;
+  discard_btn: string;
+  toast_settings_saved: string;
+  toast_settings_save_failed: string;
+  toast_loading_llm: string;
+  toast_warm_failed: string;
+  toast_models_loaded: string;
+  toast_llm_load_failed: string;
+  toast_settings_patch_failed: string;
+  protect_confirm_failed: string;
+  request_failed: string;
+  spell_added_to_dict: string;
+  spell_ignored: string;
+  scratchpad_already_in_vault: string;
+  confirm_archive_note: string;
+  confirm_delete_archived_note: string;
+  untitled: string;
+  confirm_delete_note: string;
+  confirm_clear_note: string;
+  predictions_enabled_title: string;
+  predictions_disabled_title: string;
+  predictions_label: string;
+  state_on: string;
+  state_off: string;
+  format_paragraphs_title: string;
+  format_paragraphs: string;
+  slash_commands_hint: string;
+  slash_heading_1: string;
+  slash_heading_2: string;
+  slash_bullet_list: string;
+  slash_quote: string;
+  loading_editor: string;
+  prediction_label: string;
+  prediction_accept: string;
+  spell_label: string;
+  spell_finding: string;
+  spell_no_suggestions: string;
+  spell_add_to_dict: string;
+  spell_ignore: string;
+  archive_cold_storage: string;
+  archive_loading: string;
+  archive_none: string;
+  archive_click_preview: string;
+  archive_view_note: string;
+  archive_view: string;
+  scratchpad_close_tab: string;
+  ask_synthesizing: string;
+  copy_to_clipboard: string;
+  rewrite_show_original: string;
+  rewrite_copy_result: string;
+  rewrite_again: string;
+  entry_hide_value: string;
+  entry_reveal_value: string;
+  entry_open_full_note: string;
+  entry_click_to_reveal: string;
+  candidate_discard_title: string;
+  candidate_discard_label: string;
+  via_provider: string;
+  health_vault_unavailable: string;
+  key_saved_type_to_replace: string;
+  key_saved_badge: string;
+  provider_api_key_label: string;
+  provider_model_label: string;
+  local_openai_title: string;
+  local_openai_base_url: string;
+  local_openai_api_key: string;
+  local_openai_model: string;
+  local_openai_embed_model: string;
+  local_openai_embed_default: string;
+  adv_ai_title: string;
+  adv_ai_desc: string;
+  adv_ai_llm_override: string;
+  adv_ai_embed_override: string;
+  adv_ai_default_auto: string;
+  adv_ai_tip: string;
+  provider_auto: string;
+  provider_local_ollama: string;
+  provider_cloud_gemini: string;
+  provider_custom_local_openai: string;
+  provider_custom_openai_lmstudio: string;
+  provider_heuristic: string;
+  sec_encryption_status: string;
+  sec_remove_desc: string;
+  sec_set_password_placeholder: string;
+  sec_setup_failed: string;
+  emergency_empty_snapshot_title: string;
+  emergency_empty_badge: string;
+  emergency_empty_snapshot: string;
+  emergency_snapshot_failed: string;
+  emergency_restored_counts: string;
+  emergency_restored_locked: string;
+  emergency_restore_failed: string;
+  failed_generic: string;
+  logs_empty: string;
+  update_download_failed: string;
 }
 
 export const translations: Record<UiLanguage, TranslationDict> = {
@@ -969,6 +1165,202 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     health_vault_label: "Vault data",
     health_go_emergency: "Open Emergency Plan (Settings)",
     health_banner_action: "Check health",
+
+    // R4: UI strings moved out of components (dialogs, toasts, settings panels).
+    close_btn: "Close",
+    fs_drives_home: "(drives & home)",
+    palette_dialog_label: "Search everything",
+    palette_search_placeholder: "Search notes, secrets, commands, or tabs... (Esc to close)",
+    palette_quick_nav: "Quick Navigation",
+    palette_vault_results: "Vault Results",
+    palette_no_matches: "No matching notes, secrets, or commands found.",
+    palette_hint_use: "Use",
+    palette_hint_toggle: "anytime to toggle",
+    palette_hint_navigate: "navigate",
+    palette_hint_select: "select",
+    palette_footer_brand: "IndexArc Search",
+    health_check_failed: "Health check failed",
+    health_check_unreachable: "Health check failed — is the vault server running?",
+    health_entries_unit: "entries",
+    health_locked: "locked",
+    health_encrypted: "encrypted",
+    health_notes_label: "Notes",
+    health_active_unit: "active",
+    health_backups_label: "Backups",
+    health_snapshots_label: "Snapshots",
+    health_no_results: "No check results.",
+    health_alternates_title: "Other data folders on this machine",
+    health_encrypted_vault: "encrypted vault",
+    health_notes_unit: "notes",
+    health_alternates_hint: "If this folder looks empty, your data is probably in one of these. Relaunch that build/folder — or restore a snapshot below.",
+    copied_bang: "Copied!",
+    note_untitled: "Untitled Note",
+    note_save_failed_retry: "Save failed — your edits are still here, retry when the vault is reachable.",
+    note_title_label: "Note title",
+    note_body_label: "Note content",
+    note_words: "words",
+    note_min_read: "min read",
+    note_restore_size: "Restore Size",
+    note_maximize: "Maximize View",
+    note_reopen_scratchpad: "Reopen in Scratchpad",
+    note_copy_text: "Copy Text",
+    note_copy_html: "Copy HTML",
+    note_saving: "Saving...",
+    note_save_changes: "Save Changes",
+    note_edit: "Edit Note",
+    note_characters: "characters",
+    note_created: "Created",
+    archive_preview_untitled: "Archived Note",
+    archive_reference_only: "Reference Only",
+    archive_archived_on: "Archived on",
+    copied_to_clipboard: "Copied to clipboard",
+    archive_empty_note: "Empty note",
+    archive_delete_permanently: "Delete Permanently",
+    archive_restore_to_active: "Restore to Active Notes",
+    compare_swap_sides: "Swap sides",
+    compare_left_note: "Left note",
+    compare_right_note: "Right note",
+    rescue_search_placeholder: "Search snapshots…",
+    rescue_scanning: "Scanning snapshots…",
+    rescue_snapshot_one: "snapshot",
+    rescue_snapshot_many: "snapshots",
+    history_version_one: "version",
+    history_version_many: "versions",
+    history_saved_suffix: "saved",
+    history_latest_snapshot: "Latest Snapshot",
+    history_version_label: "Version",
+    chars_unit: "chars",
+    history_preview_label: "Preview",
+    history_empty: "Empty",
+    history_select_version: "Select a version to preview",
+    history_footer_hint: "Auto-saved snapshots protect your work from accidental undos or wipes.",
+    protect_show: "Show",
+    scratchpad_paragraphs_restored: "Restored multiline paragraph formatting!",
+    scratchpad_content_restored: "Note content restored!",
+    scratchpad_retry_now: "Retry now",
+    scratchpad_cleared_detected: "Accidental Ctrl+Z or clear detected.",
+    connection_failed: "Connection failed",
+    update_toast_available: "IndexArc {v} is available — Settings → Updates",
+    ask_failed: "Ask failed",
+    loading_scratchpad: "Loading scratchpad…",
+    folder_remove_failed: "Failed to remove watched folder",
+    toast_copied_name: "Copied {name}",
+    copy_failed: "Copy failed",
+    save_failed: "Save failed",
+    more_count: "+{n} more",
+    toast_name_required: "Name is required",
+    toast_network_error: "Network error",
+    confirm_delete_entry_title: "Delete Entry",
+    confirm_delete_entry_msg: "Delete this entry permanently?",
+    delete_failed: "Delete failed",
+    delete_btn: "Delete",
+    confirm_delete_entries_title: "Delete Entries",
+    confirm_delete_entries_one: "Delete {n} selected entry permanently?",
+    confirm_delete_entries_many: "Delete {n} selected entries permanently?",
+    dup_confirm_title: "Possible duplicates",
+    dup_confirm_msg: "{n} of {total} already exist in the vault ({names}). Save anyway?",
+    dup_save_anyway: "Save anyway",
+    dup_deselected: "Duplicates deselected — save again for the {n} new one(s)",
+    fs_cannot_list: "Cannot list folder",
+    fs_list_failed: "Failed to list directory",
+    scan_apply_failed: "Apply failed",
+    scan_applied_summary: "Saved {saved} · Unidentified {parked} · Discarded {discarded}",
+    confirm_discard_scan_title: "Discard Scan",
+    confirm_discard_scan_msg: "Discard this entire scan review? Nothing will be saved.",
+    discard_btn: "Discard",
+    toast_settings_saved: "Settings saved",
+    toast_settings_save_failed: "Settings save failed",
+    toast_loading_llm: "Loading LLM into memory...",
+    toast_warm_failed: "Warm failed",
+    toast_models_loaded: "Models loaded",
+    toast_llm_load_failed: "Could not load Ollama LLM",
+    toast_settings_patch_failed: "Settings change may not have saved",
+    protect_confirm_failed: "Confirmation failed",
+    request_failed: "Request failed",
+    spell_added_to_dict: "Added \"{word}\" to dictionary",
+    spell_ignored: "Ignored \"{word}\"",
+    scratchpad_already_in_vault: "Already in vault: {names} — click Save again to save anyway",
+    confirm_archive_note: "Are you sure you want to archive note \"{title}\"?",
+    confirm_delete_archived_note: "Are you sure you want to permanently delete \"{title}\"?",
+    untitled: "Untitled",
+    confirm_delete_note: "Are you sure you want to delete \"{title}\"?",
+    confirm_clear_note: "Are you sure you want to clear this note's content?",
+    predictions_enabled_title: "AI Predictions Enabled (Click to Disable)",
+    predictions_disabled_title: "AI Predictions Disabled (Click to Enable)",
+    predictions_label: "Predictions",
+    state_on: "ON",
+    state_off: "OFF",
+    format_paragraphs_title: "Restore multi-line paragraphs & auto-format structure",
+    format_paragraphs: "Format Paragraphs",
+    slash_commands_hint: "Slash commands — type \"/\"",
+    slash_heading_1: "Heading 1",
+    slash_heading_2: "Heading 2",
+    slash_bullet_list: "Bullet list",
+    slash_quote: "Quote",
+    loading_editor: "Loading editor…",
+    prediction_label: "Prediction",
+    prediction_accept: "Accept",
+    spell_label: "Spelling",
+    spell_finding: "Finding suggestions...",
+    spell_no_suggestions: "No suggestions",
+    spell_add_to_dict: "Add \"{word}\" to Dictionary",
+    spell_ignore: "Ignore \"{word}\"",
+    archive_cold_storage: "Cold Storage",
+    archive_loading: "Loading archive...",
+    archive_none: "No archived notes",
+    archive_click_preview: "Click to preview (read-only)",
+    archive_view_note: "View note",
+    archive_view: "View",
+    scratchpad_close_tab: "Close tab",
+    ask_synthesizing: "Synthesizing answer...",
+    copy_to_clipboard: "Copy to clipboard",
+    rewrite_show_original: "Show original",
+    rewrite_copy_result: "Copy Result",
+    rewrite_again: "Rewrite Again",
+    entry_hide_value: "Hide Value",
+    entry_reveal_value: "Reveal Value",
+    entry_open_full_note: "Open Full Note",
+    entry_click_to_reveal: "Click to reveal",
+    candidate_discard_title: "Discard — remove this candidate",
+    candidate_discard_label: "Discard candidate",
+    via_provider: "via",
+    health_vault_unavailable: "Vault data unavailable in this data folder.",
+    key_saved_type_to_replace: "saved — type to replace",
+    key_saved_badge: "saved",
+    provider_api_key_label: "{p} API key",
+    provider_model_label: "{p} model (classify / extract)",
+    local_openai_title: "Custom OpenAI Endpoint",
+    local_openai_base_url: "Base URL",
+    local_openai_api_key: "API Key (optional)",
+    local_openai_model: "Model name",
+    local_openai_embed_model: "Embed Model name (optional)",
+    local_openai_embed_default: "defaults to LLM model",
+    adv_ai_title: "Advanced AI Settings",
+    adv_ai_desc: "Override which provider is used for LLM generation and embeddings. Useful for using LM Studio for LLMs while keeping Ollama for embeddings.",
+    adv_ai_llm_override: "LLM Provider Override",
+    adv_ai_embed_override: "Embed Provider Override",
+    adv_ai_default_auto: "Default (auto)",
+    adv_ai_tip: "Tip: Use LM Studio (local_openai) for LLM and Ollama (local) for embeddings for mixed local models.",
+    provider_auto: "Auto",
+    provider_local_ollama: "Local Ollama",
+    provider_cloud_gemini: "Cloud Gemini",
+    provider_custom_local_openai: "Custom Local OpenAI",
+    provider_custom_openai_lmstudio: "Custom OpenAI (LM Studio)",
+    provider_heuristic: "Heuristic (no AI)",
+    sec_encryption_status: "Vault Encryption Status",
+    sec_remove_desc: "Your vault is fully encrypted with AES-256-GCM. To remove encryption and convert data back to plain text, enter your current master password:",
+    sec_set_password_placeholder: "Set master password...",
+    sec_setup_failed: "Failed to setup password",
+    emergency_empty_snapshot_title: "This snapshot contains no vault entries and no notes — restoring it changes nothing. Pick an older, larger snapshot.",
+    emergency_empty_badge: "empty",
+    emergency_empty_snapshot: "Empty snapshot — restores nothing.",
+    emergency_snapshot_failed: "Snapshot failed",
+    emergency_restored_counts: "Restored ({parts}). Reloading...",
+    emergency_restored_locked: "Restored (encrypted — unlock to load). Reloading...",
+    emergency_restore_failed: "Restore failed",
+    failed_generic: "Failed",
+    logs_empty: "No logs yet",
+    update_download_failed: "download failed",
   },
   ar: {
     tab_home: "الرئيسية",
@@ -1452,6 +1844,202 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     health_vault_label: "بيانات الخزنة",
     health_go_emergency: "فتح خطة الطوارئ (الإعدادات)",
     health_banner_action: "فحص الصحة",
+
+    // R4: UI strings moved out of components (dialogs, toasts, settings panels).
+    close_btn: "إغلاق",
+    fs_drives_home: "(الأقراص والمجلد الرئيسي)",
+    palette_dialog_label: "البحث في كل شيء",
+    palette_search_placeholder: "ابحث في الملاحظات والأسرار والأوامر والتبويبات... (Esc للإغلاق)",
+    palette_quick_nav: "تنقل سريع",
+    palette_vault_results: "نتائج الخزنة",
+    palette_no_matches: "لم يتم العثور على ملاحظات أو أسرار أو أوامر مطابقة.",
+    palette_hint_use: "استخدم",
+    palette_hint_toggle: "في أي وقت للفتح والإغلاق",
+    palette_hint_navigate: "للتنقل",
+    palette_hint_select: "للاختيار",
+    palette_footer_brand: "بحث IndexArc",
+    health_check_failed: "فشل فحص الصحة",
+    health_check_unreachable: "فشل فحص الصحة — هل خادم الخزنة يعمل؟",
+    health_entries_unit: "عنصر",
+    health_locked: "مقفلة",
+    health_encrypted: "مشفّرة",
+    health_notes_label: "الملاحظات",
+    health_active_unit: "نشطة",
+    health_backups_label: "النسخ الاحتياطية",
+    health_snapshots_label: "اللقطات",
+    health_no_results: "لا توجد نتائج فحص.",
+    health_alternates_title: "مجلدات بيانات أخرى على هذا الجهاز",
+    health_encrypted_vault: "خزنة مشفّرة",
+    health_notes_unit: "ملاحظة",
+    health_alternates_hint: "إذا بدا هذا المجلد فارغاً، فبياناتك على الأرجح في أحد هذه المجلدات. أعد تشغيل تلك النسخة أو ذلك المجلد — أو استعد لقطة من الأسفل.",
+    copied_bang: "تم النسخ!",
+    note_untitled: "ملاحظة بدون عنوان",
+    note_save_failed_retry: "فشل الحفظ — تعديلاتك ما زالت هنا، أعد المحاولة عندما تصبح الخزنة متاحة.",
+    note_title_label: "عنوان الملاحظة",
+    note_body_label: "محتوى الملاحظة",
+    note_words: "كلمة",
+    note_min_read: "دقيقة قراءة",
+    note_restore_size: "استعادة الحجم",
+    note_maximize: "تكبير العرض",
+    note_reopen_scratchpad: "إعادة الفتح في المسودة",
+    note_copy_text: "نسخ النص",
+    note_copy_html: "نسخ HTML",
+    note_saving: "جاري الحفظ...",
+    note_save_changes: "حفظ التغييرات",
+    note_edit: "تعديل الملاحظة",
+    note_characters: "حرف",
+    note_created: "أُنشئت",
+    archive_preview_untitled: "ملاحظة مؤرشفة",
+    archive_reference_only: "للاطلاع فقط",
+    archive_archived_on: "أُرشفت في",
+    copied_to_clipboard: "تم النسخ إلى الحافظة",
+    archive_empty_note: "ملاحظة فارغة",
+    archive_delete_permanently: "حذف نهائي",
+    archive_restore_to_active: "استعادة إلى الملاحظات النشطة",
+    compare_swap_sides: "تبديل الجانبين",
+    compare_left_note: "الملاحظة اليسرى",
+    compare_right_note: "الملاحظة اليمنى",
+    rescue_search_placeholder: "ابحث في اللقطات…",
+    rescue_scanning: "جاري فحص اللقطات…",
+    rescue_snapshot_one: "لقطة",
+    rescue_snapshot_many: "لقطات",
+    history_version_one: "نسخة",
+    history_version_many: "نسخ",
+    history_saved_suffix: "محفوظة",
+    history_latest_snapshot: "أحدث لقطة",
+    history_version_label: "النسخة",
+    chars_unit: "حرف",
+    history_preview_label: "معاينة",
+    history_empty: "فارغة",
+    history_select_version: "اختر نسخة لمعاينتها",
+    history_footer_hint: "اللقطات المحفوظة تلقائياً تحمي عملك من التراجع أو المسح غير المقصود.",
+    protect_show: "إظهار",
+    scratchpad_paragraphs_restored: "تمت استعادة تنسيق الفقرات متعددة الأسطر!",
+    scratchpad_content_restored: "تمت استعادة محتوى الملاحظة!",
+    scratchpad_retry_now: "أعد المحاولة الآن",
+    scratchpad_cleared_detected: "تم رصد ضغط Ctrl+Z أو مسح غير مقصود.",
+    connection_failed: "فشل الاتصال",
+    update_toast_available: "يتوفر IndexArc {v} — الإعدادات ← التحديثات",
+    ask_failed: "فشل البحث",
+    loading_scratchpad: "جاري تحميل المسودة…",
+    folder_remove_failed: "فشل إزالة المجلد المراقَب",
+    toast_copied_name: "تم نسخ {name}",
+    copy_failed: "فشل النسخ",
+    save_failed: "فشل الحفظ",
+    more_count: "+{n} أخرى",
+    toast_name_required: "الاسم مطلوب",
+    toast_network_error: "خطأ في الاتصال",
+    confirm_delete_entry_title: "حذف العنصر",
+    confirm_delete_entry_msg: "هل تريد حذف هذا العنصر نهائياً؟",
+    delete_failed: "فشل الحذف",
+    delete_btn: "حذف",
+    confirm_delete_entries_title: "حذف العناصر",
+    confirm_delete_entries_one: "هل تريد حذف العنصر المحدد نهائياً؟",
+    confirm_delete_entries_many: "هل تريد حذف العناصر المحددة ({n}) نهائياً؟",
+    dup_confirm_title: "تكرارات محتملة",
+    dup_confirm_msg: "{n} من {total} موجودة مسبقاً في الخزنة ({names}). هل تريد الحفظ على أي حال؟",
+    dup_save_anyway: "احفظ على أي حال",
+    dup_deselected: "أُلغي تحديد العناصر المكررة — احفظ مرة أخرى لحفظ العناصر الجديدة ({n})",
+    fs_cannot_list: "تعذّر عرض محتويات المجلد",
+    fs_list_failed: "فشل عرض محتويات المجلد",
+    scan_apply_failed: "فشل التطبيق",
+    scan_applied_summary: "حُفظ {saved} · غير محدد {parked} · مُستبعد {discarded}",
+    confirm_discard_scan_title: "تجاهل الفحص",
+    confirm_discard_scan_msg: "هل تريد تجاهل مراجعة الفحص بالكامل؟ لن يُحفظ أي شيء.",
+    discard_btn: "تجاهل",
+    toast_settings_saved: "تم حفظ الإعدادات",
+    toast_settings_save_failed: "فشل حفظ الإعدادات",
+    toast_loading_llm: "جارٍ تحميل نموذج اللغة في الذاكرة...",
+    toast_warm_failed: "فشل تحميل النموذج",
+    toast_models_loaded: "تم تحميل النماذج",
+    toast_llm_load_failed: "تعذّر تحميل نموذج Ollama",
+    toast_settings_patch_failed: "قد لا يكون تغيير الإعدادات قد حُفظ",
+    protect_confirm_failed: "فشل التأكيد",
+    request_failed: "فشل الطلب",
+    spell_added_to_dict: "تمت إضافة \"{word}\" إلى القاموس",
+    spell_ignored: "تم تجاهل \"{word}\"",
+    scratchpad_already_in_vault: "موجود مسبقاً في الخزنة: {names} — انقر حفظ مرة أخرى للحفظ على أي حال",
+    confirm_archive_note: "هل أنت متأكد أنك تريد أرشفة الملاحظة \"{title}\"؟",
+    confirm_delete_archived_note: "هل أنت متأكد أنك تريد حذف \"{title}\" نهائياً؟",
+    untitled: "بدون عنوان",
+    confirm_delete_note: "هل أنت متأكد أنك تريد حذف \"{title}\"؟",
+    confirm_clear_note: "هل أنت متأكد أنك تريد مسح محتوى هذه الملاحظة؟",
+    predictions_enabled_title: "توقعات الذكاء الاصطناعي مفعّلة (انقر للتعطيل)",
+    predictions_disabled_title: "توقعات الذكاء الاصطناعي معطّلة (انقر للتفعيل)",
+    predictions_label: "التوقعات",
+    state_on: "تشغيل",
+    state_off: "إيقاف",
+    format_paragraphs_title: "استعادة الفقرات متعددة الأسطر وتنسيق البنية تلقائياً",
+    format_paragraphs: "تنسيق الفقرات",
+    slash_commands_hint: "أوامر الشرطة المائلة — اكتب \"/\"",
+    slash_heading_1: "عنوان 1",
+    slash_heading_2: "عنوان 2",
+    slash_bullet_list: "قائمة نقطية",
+    slash_quote: "اقتباس",
+    loading_editor: "جاري تحميل المحرر…",
+    prediction_label: "التوقع",
+    prediction_accept: "قبول",
+    spell_label: "الإملاء",
+    spell_finding: "جاري البحث عن اقتراحات...",
+    spell_no_suggestions: "لا توجد اقتراحات",
+    spell_add_to_dict: "إضافة \"{word}\" إلى القاموس",
+    spell_ignore: "تجاهل \"{word}\"",
+    archive_cold_storage: "تخزين بارد",
+    archive_loading: "جاري تحميل الأرشيف...",
+    archive_none: "لا توجد ملاحظات مؤرشفة",
+    archive_click_preview: "انقر للمعاينة (للقراءة فقط)",
+    archive_view_note: "عرض الملاحظة",
+    archive_view: "عرض",
+    scratchpad_close_tab: "إغلاق التبويب",
+    ask_synthesizing: "جاري صياغة الإجابة...",
+    copy_to_clipboard: "نسخ إلى الحافظة",
+    rewrite_show_original: "عرض النص الأصلي",
+    rewrite_copy_result: "نسخ النتيجة",
+    rewrite_again: "إعادة الصياغة مجدداً",
+    entry_hide_value: "إخفاء القيمة",
+    entry_reveal_value: "إظهار القيمة",
+    entry_open_full_note: "فتح الملاحظة كاملة",
+    entry_click_to_reveal: "انقر للإظهار",
+    candidate_discard_title: "تجاهل — إزالة هذا العنصر المرشّح",
+    candidate_discard_label: "تجاهل العنصر المرشّح",
+    via_provider: "عبر",
+    health_vault_unavailable: "بيانات الخزنة غير متاحة في مجلد البيانات هذا.",
+    key_saved_type_to_replace: "محفوظ — اكتب للاستبدال",
+    key_saved_badge: "محفوظ",
+    provider_api_key_label: "مفتاح {p} API",
+    provider_model_label: "نموذج {p} (التصنيف / الاستخراج)",
+    local_openai_title: "نقطة اتصال OpenAI مخصصة",
+    local_openai_base_url: "عنوان URL الأساسي",
+    local_openai_api_key: "مفتاح API (اختياري)",
+    local_openai_model: "اسم النموذج",
+    local_openai_embed_model: "اسم نموذج التضمين (اختياري)",
+    local_openai_embed_default: "الافتراضي هو نموذج LLM",
+    adv_ai_title: "إعدادات الذكاء الاصطناعي المتقدمة",
+    adv_ai_desc: "تجاوز المزوّد المستخدم لتوليد النصوص (LLM) وللتضمينات. مفيد لاستخدام LM Studio لنماذج اللغة مع الإبقاء على Ollama للتضمينات.",
+    adv_ai_llm_override: "تجاوز مزوّد نموذج اللغة",
+    adv_ai_embed_override: "تجاوز مزوّد التضمين",
+    adv_ai_default_auto: "افتراضي (تلقائي)",
+    adv_ai_tip: "نصيحة: استخدم LM Studio (local_openai) لنموذج اللغة وOllama (local) للتضمينات لمزج النماذج المحلية.",
+    provider_auto: "تلقائي",
+    provider_local_ollama: "Ollama محلي",
+    provider_cloud_gemini: "Gemini سحابي",
+    provider_custom_local_openai: "OpenAI محلي مخصص",
+    provider_custom_openai_lmstudio: "OpenAI مخصص (LM Studio)",
+    provider_heuristic: "قواعد تلقائية (بدون ذكاء اصطناعي)",
+    sec_encryption_status: "حالة تشفير الخزنة",
+    sec_remove_desc: "خزنتك مشفّرة بالكامل باستخدام AES-256-GCM. لإزالة التشفير وإعادة البيانات إلى نص عادي، أدخل كلمة المرور الرئيسية الحالية:",
+    sec_set_password_placeholder: "عيّن كلمة المرور الرئيسية...",
+    sec_setup_failed: "فشل إعداد كلمة المرور",
+    emergency_empty_snapshot_title: "لا تحتوي هذه اللقطة على أي عناصر في الخزنة ولا ملاحظات — استعادتها لن تغيّر شيئاً. اختر لقطة أقدم وأكبر.",
+    emergency_empty_badge: "فارغة",
+    emergency_empty_snapshot: "لقطة فارغة — لن تستعيد شيئاً.",
+    emergency_snapshot_failed: "فشل إنشاء اللقطة",
+    emergency_restored_counts: "تمت الاستعادة ({parts}). جاري إعادة التحميل...",
+    emergency_restored_locked: "تمت الاستعادة (مشفّرة — افتح القفل للتحميل). جاري إعادة التحميل...",
+    emergency_restore_failed: "فشلت الاستعادة",
+    failed_generic: "فشل",
+    logs_empty: "لا توجد سجلات بعد",
+    update_download_failed: "فشل التنزيل",
   },
 };
 

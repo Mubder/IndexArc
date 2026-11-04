@@ -138,7 +138,7 @@ export const AskTab: React.FC<AskTabProps> = ({
               <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 animate-spin" style={{ color: "var(--accent-bright)" }} />
-                  <span className="text-xs font-semibold" style={{ color: "var(--accent-bright)" }}>Synthesizing answer...</span>
+                  <span className="text-xs font-semibold" style={{ color: "var(--accent-bright)" }}>{t("ask_synthesizing")}</span>
                 </div>
                 <div className="skeleton h-4 w-5/6 rounded" />
                 <div className="skeleton h-4 w-3/4 rounded" />
@@ -256,7 +256,7 @@ export const AskTab: React.FC<AskTabProps> = ({
                     onClick={copyRewrite}
                     className="p-2 rounded-lg transition-all"
                     style={{ background: copied ? "var(--emerald-bg)" : "var(--bg-hover)", color: copied ? "var(--emerald)" : "var(--text-dim)" }}
-                    title="Copy to clipboard"
+                    title={t("copy_to_clipboard")}
                   >
                     {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                   </button>
@@ -264,7 +264,7 @@ export const AskTab: React.FC<AskTabProps> = ({
                     onClick={() => { setRewriteText(rewriteOriginal); setRewriteResult(null); }}
                     className="p-2 rounded-lg transition-all"
                     style={{ background: "var(--bg-hover)", color: "var(--text-dim)" }}
-                    title="Show original"
+                    title={t("rewrite_show_original")}
                   >
                     <RotateCcw className="w-4 h-4" />
                   </button>
@@ -283,14 +283,14 @@ export const AskTab: React.FC<AskTabProps> = ({
                   className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all border"
                   style={{ borderColor: "var(--border)", color: "var(--text-dim)", background: "transparent" }}
                 >
-                  Copy Result
+                  {t("rewrite_copy_result")}
                 </button>
                 <button
                   onClick={handleRewrite}
                   className="flex-1 py-2 rounded-lg text-xs font-semibold text-white transition-all"
                   style={{ background: "var(--accent)" }}
                 >
-                  Rewrite Again
+                  {t("rewrite_again")}
                 </button>
               </div>
             </div>

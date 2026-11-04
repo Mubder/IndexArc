@@ -1,6 +1,7 @@
 import { Settings } from "../../types";
 import { readJson } from "../../utils";
 import type { Dispatch, SetStateAction, RefObject } from "react";
+import type { TranslationDict } from "../../utils/i18n";
 
 export interface UseSettingsActionsArgs {
   fetchAll: () => Promise<void>;
@@ -8,11 +9,12 @@ export interface UseSettingsActionsArgs {
   settings: Settings | null;
   settingsDirtyRef: RefObject<boolean>;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
+  t: (key: keyof TranslationDict) => string;
 }
 
 // Save settings and warm the local Ollama models.
 // Moved verbatim from App.tsx (R3.4); App wires the inputs.
-export function useSettingsActions({ fetchAll, setSettings, settings, settingsDirtyRef, showToast }: UseSettingsActionsArgs) {
+export function useSettingsActions({ fetchAll, setSettings, settings, settingsDirtyRef, showToast, t }: UseSettingsActionsArgs) {
   const saveSettings = async () => {
     if (!settings) return;
     try {
@@ -34,7 +36,7 @@ export function useSettingsActions({ fetchAll, setSettings, settings, settingsDi
       }
       // The save has landed: confirm now. Model prep below can take minutes
       // (it may pull a model), and used to hold this toast back the whole time.
-      showToast("Settings saved · تم الحفظ", "success");
+      showToast(t("toast_settings_saved"), "success");
       fetchAll();
       // When using local/auto, ensure models exist and warm the LLM into
       // memory in the background, then refresh the AI status.
@@ -46,22 +48,22 @@ export function useSettingsActions({ fetchAll, setSettings, settings, settingsDi
           });
       }
     } catch (e: any) {
-      showToast(e?.message || "Settings save failed / فشل حفظ الإعدادات", "error");
+      showToast(e?.message || t("toast_settings_save_failed"), "error");
     }
   };
 
   const warmOllama = async () => {
     try {
-      showToast("Loading LLM into memory... · جارٍ التحميل", "info");
+      showToast(t("toast_loading_llm"), "info");
       const res = await fetch("/api/ollama/warm", { method: "POST" });
       const data = await readJson(res);
-      if (!res.ok) throw new Error(data.error || "Warm failed");
+      if (!res.ok) throw new Error(data.error || t("toast_warm_failed"));
       const parts = [`classify: ${data.model}`];
       if (data.embed_model) parts.push(`embed: ${data.embed_model}`);
-      showToast(`Models loaded · ${parts.join(" · ")}`, "success");
+      showToast(`${t("toast_models_loaded")} · ${parts.join(" · ")}`, "success");
       fetchAll();
     } catch (e: any) {
-      showToast(e.message || "Could not load Ollama LLM", "error");
+      showToast(e.message || t("toast_llm_load_failed"), "error");
     }
   };
 

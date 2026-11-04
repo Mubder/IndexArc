@@ -1,13 +1,16 @@
 import { Sparkles } from "lucide-react";
 import { SavedBadge, KeyInput } from "./fields";
 import type { Settings } from "../../types";
+import type { TranslationDict } from "../../utils/i18n";
+import { fill } from "../home/DashboardCards";
 
 export interface CloudKeyPanelsProps {
   onPatchSettings: (patch: Partial<Settings>) => void;
   settings: Settings;
+  t: (key: keyof TranslationDict) => string;
 }
 
-export function CloudKeyPanels({ onPatchSettings, settings }: CloudKeyPanelsProps) {
+export function CloudKeyPanels({ onPatchSettings, settings, t }: CloudKeyPanelsProps) {
   return (
     <>
       {settings.ai_provider === "openai" && (
@@ -17,17 +20,18 @@ export function CloudKeyPanels({ onPatchSettings, settings }: CloudKeyPanelsProp
           </h3>
           <label className="block text-xs space-y-1">
             <span className="flex items-center gap-1.5" style={{ color: "var(--text-dim)" }}>
-              OpenAI API key <SavedBadge ok={settings.openai_api_key_configured} />
+              {fill(t("provider_api_key_label"), { p: "OpenAI" })} <SavedBadge ok={settings.openai_api_key_configured} t={t} />
             </span>
             <KeyInput
               field="openai_api_key"
               configured={settings.openai_api_key_configured}
               placeholder="sk-..."
               onCommit={onPatchSettings}
+              t={t}
             />
           </label>
           <label className="block text-xs space-y-1">
-            <span style={{ color: "var(--text-dim)" }}>OpenAI model (classify / extract)</span>
+            <span style={{ color: "var(--text-dim)" }}>{fill(t("provider_model_label"), { p: "OpenAI" })}</span>
             <input
               type="text"
               value={settings.openai_llm_model || ""}
@@ -47,17 +51,18 @@ export function CloudKeyPanels({ onPatchSettings, settings }: CloudKeyPanelsProp
           </h3>
           <label className="block text-xs space-y-1">
             <span className="flex items-center gap-1.5" style={{ color: "var(--text-dim)" }}>
-              Groq API key <SavedBadge ok={settings.groq_api_key_configured} />
+              {fill(t("provider_api_key_label"), { p: "Groq" })} <SavedBadge ok={settings.groq_api_key_configured} t={t} />
             </span>
             <KeyInput
               field="groq_api_key"
               configured={settings.groq_api_key_configured}
               placeholder="gsk_..."
               onCommit={onPatchSettings}
+              t={t}
             />
           </label>
           <label className="block text-xs space-y-1">
-            <span style={{ color: "var(--text-dim)" }}>Groq model (classify / extract)</span>
+            <span style={{ color: "var(--text-dim)" }}>{fill(t("provider_model_label"), { p: "Groq" })}</span>
             <input
               type="text"
               value={settings.groq_llm_model || ""}
@@ -77,17 +82,18 @@ export function CloudKeyPanels({ onPatchSettings, settings }: CloudKeyPanelsProp
           </h3>
           <label className="block text-xs space-y-1">
             <span className="flex items-center gap-1.5" style={{ color: "var(--text-dim)" }}>
-              OpenRouter API key <SavedBadge ok={settings.openrouter_api_key_configured} />
+              {fill(t("provider_api_key_label"), { p: "OpenRouter" })} <SavedBadge ok={settings.openrouter_api_key_configured} t={t} />
             </span>
             <KeyInput
               field="openrouter_api_key"
               configured={settings.openrouter_api_key_configured}
               placeholder="sk-or-v1-..."
               onCommit={onPatchSettings}
+              t={t}
             />
           </label>
           <label className="block text-xs space-y-1">
-            <span style={{ color: "var(--text-dim)" }}>OpenRouter model (classify / extract)</span>
+            <span style={{ color: "var(--text-dim)" }}>{fill(t("provider_model_label"), { p: "OpenRouter" })}</span>
             <input
               type="text"
               value={settings.openrouter_llm_model || ""}
@@ -107,17 +113,18 @@ export function CloudKeyPanels({ onPatchSettings, settings }: CloudKeyPanelsProp
           </h3>
           <label className="block text-xs space-y-1">
             <span className="flex items-center gap-1.5" style={{ color: "var(--text-dim)" }}>
-              Anthropic API key <SavedBadge ok={settings.anthropic_api_key_configured} />
+              {fill(t("provider_api_key_label"), { p: "Anthropic" })} <SavedBadge ok={settings.anthropic_api_key_configured} t={t} />
             </span>
             <KeyInput
               field="anthropic_api_key"
               configured={settings.anthropic_api_key_configured}
               placeholder="sk-ant-..."
               onCommit={onPatchSettings}
+              t={t}
             />
           </label>
           <label className="block text-xs space-y-1">
-            <span style={{ color: "var(--text-dim)" }}>Anthropic model (classify / extract)</span>
+            <span style={{ color: "var(--text-dim)" }}>{fill(t("provider_model_label"), { p: "Anthropic" })}</span>
             <input
               type="text"
               value={settings.anthropic_llm_model || ""}

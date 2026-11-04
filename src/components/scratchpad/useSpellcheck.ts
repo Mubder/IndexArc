@@ -5,6 +5,8 @@ import { TextSelection } from "@tiptap/pm/state";
 import type { RefObject } from "react";
 import type { ScratchTab, Settings } from "../../types";
 import type { Editor } from "@tiptap/react";
+import { getTranslation } from "../../utils/i18n";
+import { fill } from "../home/DashboardCards";
 
 export interface UseSpellcheckArgs {
   active: ScratchTab;
@@ -254,7 +256,7 @@ export function useSpellcheck({ active, editorRef, recomputeSpellRectsRef, setSt
       return next;
     });
     setContextMenu(null);
-    setStatus(`Added "${clean}" to dictionary`);
+    setStatus(fill(getTranslation(settings, "spell_added_to_dict"), { word: clean }));
     requestAnimationFrame(recomputeSpellRects);
 
     if (typeof window !== "undefined" && (window as any).electronAPI?.addCustomWord) {
@@ -283,7 +285,7 @@ export function useSpellcheck({ active, editorRef, recomputeSpellRectsRef, setSt
       return next;
     });
     setContextMenu(null);
-    setStatus(`Ignored "${clean}"`);
+    setStatus(fill(getTranslation(settings, "spell_ignored"), { word: clean }));
     requestAnimationFrame(recomputeSpellRects);
 
     if (typeof window !== "undefined" && (window as any).electronAPI?.addCustomWord) {

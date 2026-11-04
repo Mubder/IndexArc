@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useId } from "react";
 import { Folder } from "lucide-react";
 import { Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
+import { useDialogA11y } from "../hooks/useDialogA11y";
 
 interface FsBrowserModalProps {
   isOpen: boolean;
@@ -32,6 +33,8 @@ export const FsBrowserModal: React.FC<FsBrowserModalProps> = ({
   scanning,
   settings,
 }) => {
+  const dialogRef = useDialogA11y(isOpen, onClose);
+  const titleId = useId();
   if (!isOpen) return null;
 
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
@@ -39,12 +42,16 @@ export const FsBrowserModal: React.FC<FsBrowserModalProps> = ({
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}>
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className="w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh]"
         style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "1rem" }}
       >
         <div className="px-5 py-4 flex items-center justify-between gap-2" style={{ borderBottom: "1px solid var(--border)" }}>
           <div>
-            <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("fs_modal_title")}</h3>
+            <h3 id={titleId} className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("fs_modal_title")}</h3>
             <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>
               {t("fs_modal_subtitle")}
             </p>
@@ -78,7 +85,7 @@ export const FsBrowserModal: React.FC<FsBrowserModalProps> = ({
             {t("fs_roots_btn")}
           </button>
           <div className="flex-1 text-[11px] truncate" style={{ fontFamily: "var(--font-mono)", color: "var(--text-muted)" }} title={fsPath}>
-            {fsPath || "(drives & home)"}
+            {fsPath || t("fs_drives_home")}
           </div>
         </div>
 

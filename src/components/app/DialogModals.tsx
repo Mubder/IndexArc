@@ -54,6 +54,7 @@ export function DialogModals({ clarify, clarifyFamily, clarifyName, clarifyType,
           title={confirmState.title}
           message={confirmState.message}
           confirmText={confirmState.confirmText}
+          settings={settings}
         />
       )}
     </>

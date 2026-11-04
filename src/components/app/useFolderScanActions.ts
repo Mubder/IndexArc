@@ -2,6 +2,8 @@ import type { FolderScanSession } from "../../types";
 import { readJson } from "../../utils";
 import { ScanCandidate } from "../../types";
 import type { Dispatch, SetStateAction } from "react";
+import type { TranslationDict } from "../../utils/i18n";
+import { fill } from "../home/DashboardCards";
 import type { Tab } from "../../types";
 
 export interface UseFolderScanActionsArgs {
@@ -23,11 +25,12 @@ export interface UseFolderScanActionsArgs {
   setTab: Dispatch<SetStateAction<Tab>>;
   showConfirm: (title: string, message: string, onConfirm: () => void, confirmText?: string | undefined) => Promise<void>;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
+  t: (key: keyof TranslationDict) => string;
 }
 
 // Folder scan: the server folder browser, starting a scan, reviewing and applying the session.
 // Moved verbatim from App.tsx (R3.4); App wires the inputs.
-export function useFolderScanActions({ fetchAll, folderPath, folderUseAi, folderWatch, scanSession, setApplyingScan, setFolderPath, setFsBrowserOpen, setFsEntries, setFsError, setFsLoading, setFsParent, setFsPath, setScanSession, setScanning, setTab, showConfirm, showToast }: UseFolderScanActionsArgs) {
+export function useFolderScanActions({ fetchAll, folderPath, folderUseAi, folderWatch, scanSession, setApplyingScan, setFolderPath, setFsBrowserOpen, setFsEntries, setFsError, setFsLoading, setFsParent, setFsPath, setScanSession, setScanning, setTab, showConfirm, showToast, t }: UseFolderScanActionsArgs) {
   const loadFsDir = async (dirPath: string) => {
     setFsLoading(true);
     setFsError("");
@@ -35,12 +38,12 @@ export function useFolderScanActions({ fetchAll, folderPath, folderUseAi, folder
       const q = dirPath ? `?path=${encodeURIComponent(dirPath)}` : "";
       const res = await fetch(`/api/fs/list${q}`);
       const data = await readJson(res);
-      if (!res.ok) throw new Error(data.error || "Cannot list folder");
+      if (!res.ok) throw new Error(data.error || t("fs_cannot_list"));
       setFsPath(data.path || dirPath || "");
       setFsParent(data.parent ?? null);
       setFsEntries(data.entries || []);
     } catch (e: any) {
-      setFsError(e.message || "Failed to list directory");
+      setFsError(e.message || t("fs_list_failed"));
       setFsEntries([]);
     } finally {
       setFsLoading(false);
@@ -147,9 +150,9 @@ export function useFolderScanActions({ fetchAll, folderPath, folderUseAi, folder
         method: "POST",
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Apply failed");
+      if (!res.ok) throw new Error(data.error || t("scan_apply_failed"));
       showToast(
-        `Saved ${data.saved_count} · Unidentified ${data.parked_count} · Discarded ${data.discarded_count}`, "success"
+        fill(t("scan_applied_summary"), { saved: data.saved_count, parked: data.parked_count, discarded: data.discarded_count }), "success"
       );
       setScanSession(null);
       fetchAll();
@@ -163,11 +166,11 @@ export function useFolderScanActions({ fetchAll, folderPath, folderUseAi, folder
 
   const discardScanSession = async () => {
     if (!scanSession) return;
-    showConfirm("Discard Scan", "Discard this entire scan review? Nothing will be saved.", async () => {
+    showConfirm(t("confirm_discard_scan_title"), t("confirm_discard_scan_msg"), async () => {
       await fetch(`/api/folders/sessions/${scanSession.id}/discard`, { method: "POST" });
       setScanSession(null);
       fetchAll();
-    }, "Discard").catch((e) => console.error("discard failed:", e?.message || e));
+    }, t("discard_btn")).catch((e) => console.error("discard failed:", e?.message || e));
   };
 
   return { applyScanSession, discardScanSession, handleFolderScan, loadFsDir, patchScanCandidate, pickFolder, setAllDecisions };

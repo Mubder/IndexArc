@@ -1,4 +1,6 @@
 import { VaultEntry } from "../../types";
+import type { TranslationDict } from "../../utils/i18n";
+import { fill } from "../home/DashboardCards";
 import { useCallback } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
@@ -8,11 +10,12 @@ export interface UseEntryActionsArgs {
   setEntries: Dispatch<SetStateAction<VaultEntry[]>>;
   showConfirm: (title: string, message: string, onConfirm: () => void, confirmText?: string | undefined) => Promise<void>;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
+  t: (key: keyof TranslationDict) => string;
 }
 
 // Library entry edits and (bulk) deletes.
 // Moved verbatim from App.tsx (R3.4); App wires the inputs.
-export function useEntryActions({ fetchAll, setAttention, setEntries, showConfirm, showToast }: UseEntryActionsArgs) {
+export function useEntryActions({ fetchAll, setAttention, setEntries, showConfirm, showToast, t }: UseEntryActionsArgs) {
   /** PATCH an entry (NoteDetailModal edit path). Returns success. */
   const saveEntryUpdate = async (id: string, updates: Partial<VaultEntry>): Promise<boolean> => {
     try {
@@ -26,10 +29,10 @@ export function useEntryActions({ fetchAll, setAttention, setEntries, showConfir
         return true;
       }
       const err = await res.json().catch(() => null);
-      showToast(err?.error || "Save failed / فشل الحفظ", "error");
+      showToast(err?.error || t("save_failed"), "error");
       return false;
     } catch {
-      showToast("Network error / خطأ في الاتصال", "error");
+      showToast(t("toast_network_error"), "error");
       return false;
     }
   };
@@ -41,22 +44,22 @@ export function useEntryActions({ fetchAll, setAttention, setEntries, showConfir
   }, []);
 
   const deleteEntry = async (id: string) => {
-    showConfirm("Delete Entry", "Delete this entry permanently?", async () => {
+    showConfirm(t("confirm_delete_entry_title"), t("confirm_delete_entry_msg"), async () => {
       const res = await fetch(`/api/entries/${id}`, { method: "DELETE" });
       if (!res.ok && res.status !== 404) {
         const err = await res.json().catch(() => null);
-        throw new Error(err?.error || `Delete failed (HTTP ${res.status})`);
+        throw new Error(err?.error || `${t("delete_failed")} (HTTP ${res.status})`);
       }
       removeEntriesLocally([id]);
       await fetchAll();
-    }, "Delete").catch((e) => showToast(e?.message || "Delete failed", "error"));
+    }, t("delete_btn")).catch((e) => showToast(e?.message || t("delete_failed"), "error"));
   };
 
   const bulkDeleteEntries = async (ids: string[]) => {
     if (ids.length === 0) return;
     return showConfirm(
-      "Delete Entries",
-      `Delete ${ids.length} selected entr${ids.length === 1 ? "y" : "ies"} permanently?`,
+      t("confirm_delete_entries_title"),
+      fill(t(ids.length === 1 ? "confirm_delete_entries_one" : "confirm_delete_entries_many"), { n: ids.length }),
       async () => {
         // Optimistic update first so the UI reflects the deletion immediately.
         removeEntriesLocally(ids);
@@ -67,7 +70,7 @@ export function useEntryActions({ fetchAll, setAttention, setEntries, showConfir
         });
         await fetchAll();
       },
-      "Delete"
+      t("delete_btn")
     );
   };
 

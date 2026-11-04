@@ -21,7 +21,7 @@ export function SecuritySection({ handleRemovePassword, handleSetupPassword, sec
         </h3>
 
         <div className="flex items-center justify-between text-xs">
-          <span style={{ color: "var(--text-dim)" }}>Vault Encryption Status:</span>
+          <span style={{ color: "var(--text-dim)" }}>{t("sec_encryption_status")}:</span>
           <span
             className="px-2 py-0.5 rounded text-[10px] font-semibold"
             style={vaultStatus?.encryption_enabled
@@ -36,7 +36,7 @@ export function SecuritySection({ handleRemovePassword, handleSetupPassword, sec
         {vaultStatus?.encryption_enabled ? (
           <div className="space-y-3 pt-1">
             <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-dim)" }}>
-              Your vault is fully encrypted with AES-256-GCM. To remove encryption and convert data back to plain text, enter your current master password:
+              {t("sec_remove_desc")}
             </p>
             <div className="flex gap-2">
               <input
@@ -68,7 +68,7 @@ export function SecuritySection({ handleRemovePassword, handleSetupPassword, sec
                 type="password"
                 value={secPassword}
                 onChange={(e) => setSecPassword(e.target.value)}
-                placeholder="Set master password..."
+                placeholder={t("sec_set_password_placeholder")}
                 className="flex-1 rounded-lg px-3 py-1.5 text-xs"
                 style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
               />

@@ -87,9 +87,9 @@ export function EmergencySection({ confirmRestore, emgBusy, emgMsg, fmtDate, han
                     <span
                       className="text-[9px] px-1.5 py-0.5 rounded font-semibold shrink-0"
                       style={{ color: "var(--amber)", background: "var(--amber-bg)", border: "1px solid rgba(251, 191, 36, 0.3)" }}
-                      title="This snapshot contains no vault entries and no notes — restoring it changes nothing. Pick an older, larger snapshot."
+                      title={t("emergency_empty_snapshot_title")}
                     >
-                      empty
+                      {t("emergency_empty_badge")}
                     </span>
                   )}
                 </div>
@@ -101,7 +101,7 @@ export function EmergencySection({ confirmRestore, emgBusy, emgMsg, fmtDate, han
                 <div className="flex flex-col gap-1.5 shrink-0 items-end">
                   {s.has_vault === false && s.has_notes === false && (
                     <span className="text-[10px] text-right" style={{ color: "var(--amber)" }}>
-                      Empty snapshot — restores nothing.
+                      {t("emergency_empty_snapshot")}
                     </span>
                   )}
                   <div className="flex gap-1.5 shrink-0">

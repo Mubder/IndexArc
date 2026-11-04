@@ -98,7 +98,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           <span className="text-xs" style={{ color: "var(--text-muted)" }}>{t("quick_capture_hint")}</span>
           </div>
           {providerUsed && (
-            <span className="text-[11px] font-mono" style={{ color: "var(--text-muted)" }}>via {providerUsed}</span>
+            <span className="text-[11px] font-mono" style={{ color: "var(--text-muted)" }}>{t("via_provider")} {providerUsed}</span>
           )}
         </div>
         <textarea

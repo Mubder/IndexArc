@@ -46,7 +46,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ settings, onSetupSucce
         setError(data.error || t("sec_error_length"));
       }
     } catch (err: any) {
-      setError(err.message || "Connection failed");
+      setError(err.message || t("connection_failed"));
     } finally {
       setLoading(false);
     }
@@ -92,6 +92,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ settings, onSetupSucce
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              aria-label={t("sec_password_label")}
               disabled={loading}
               autoFocus
               className="w-full rounded-xl px-4 py-3 text-sm transition-all focus:outline-none"
@@ -112,6 +113,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ settings, onSetupSucce
               type="password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
+              aria-label={t("sec_confirm_label")}
               disabled={loading}
               className="w-full rounded-xl px-4 py-3 text-sm transition-all focus:outline-none"
               style={{

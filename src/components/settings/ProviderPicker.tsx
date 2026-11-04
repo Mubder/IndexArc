@@ -35,15 +35,15 @@ export function ProviderPicker({ onPatchSettings, settings, status, t }: Provide
               border: `1px solid ${settings.ai_provider === m ? "var(--accent)" : "var(--border)"}`,
             }}
           >
-            {m === "auto" && "Auto"}
+            {m === "auto" && t("provider_auto")}
             {m === "local" && (
               <span className="flex items-center gap-1">
-                <Server className="w-3.5 h-3.5" /> Local Ollama
+                <Server className="w-3.5 h-3.5" /> {t("provider_local_ollama")}
               </span>
             )}
             {m === "api" && (
               <span className="flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5" /> Cloud Gemini
+                <Sparkles className="w-3.5 h-3.5" /> {t("provider_cloud_gemini")}
               </span>
             )}
             {m === "openai" && (
@@ -68,7 +68,7 @@ export function ProviderPicker({ onPatchSettings, settings, status, t }: Provide
             )}
             {m === "local_openai" && (
               <span className="flex items-center gap-1">
-                <Server className="w-3.5 h-3.5" /> Custom Local OpenAI
+                <Server className="w-3.5 h-3.5" /> {t("provider_custom_local_openai")}
               </span>
             )}
           </button>

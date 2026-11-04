@@ -33,7 +33,7 @@ export function LogsSection({ logs, t }: LogsSectionProps) {
         </div>
         <div className="rounded-xl p-4 font-mono text-[11px] h-[60vh] min-h-[320px] overflow-y-auto" style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}>
           {!logs.length && (
-            <p className="text-center py-6" style={{ color: "var(--text-muted)" }}>No logs yet</p>
+            <p className="text-center py-6" style={{ color: "var(--text-muted)" }}>{t("logs_empty")}</p>
           )}
           {logs.slice().reverse().map((l, i) => (
             <div key={i} className="flex gap-3 py-1 border-b items-start" style={{ borderColor: "var(--border)" }}>

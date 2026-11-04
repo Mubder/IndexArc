@@ -5,6 +5,7 @@ import { uid } from "./noteTabs";
 import type { Dispatch, SetStateAction, RefObject } from "react";
 import type { Detection } from "../../types";
 import type { TranslationDict } from "../../utils/i18n";
+import { fill } from "../home/DashboardCards";
 
 export interface UseTabActionsArgs {
   activeId: string;
@@ -60,7 +61,7 @@ export function useTabActions({ activeId, setActiveId, setDetections, setRephras
 
   const closeTab = async (id: string, skipConfirm: boolean = false) => {
     const target = tabs.find((x) => x.id === id);
-    if (!skipConfirm && !window.confirm(`Are you sure you want to delete "${target?.title || "Scratch"}"?`)) return;
+    if (!skipConfirm && !window.confirm(fill(t("confirm_delete_note"), { title: target?.title || "Scratch" }))) return;
 
     // SERVER FIRST: only remove the note locally once the server confirms the
     // delete. A protected note (423) stays exactly where it is.

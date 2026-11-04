@@ -7,6 +7,7 @@ import { copyTextToClipboard } from "../../lib/clipboard";
 import type { Dispatch, SetStateAction, RefObject } from "react";
 import type { ScratchTab, Detection, Busy, RewriteStyle } from "../../types";
 import type { TranslationDict } from "../../utils/i18n";
+import { fill } from "../home/DashboardCards";
 
 export interface UseNoteActionsArgs {
   active: ScratchTab;
@@ -97,7 +98,7 @@ export function useNoteActions({ active, activeId, detection, protectedIdsRef, r
       .slice(0, 3)
       .join(", ");
     const more = hits.length > 3 ? ` +${hits.length - 3}` : "";
-    setStatus(`Already in vault: ${names}${more} — click Save again to save anyway / موجود مسبقاً في الخزنة`);
+    setStatus(fill(t("scratchpad_already_in_vault"), { names: `${names}${more}` }));
     return false;
   };
 

@@ -114,7 +114,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
             </div>
             {isNote && (
               <div className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>
-                {wordCount} words • {charCount} chars
+                {wordCount} {t("note_words")} • {charCount} {t("chars_unit")}
               </div>
             )}
           </div>
@@ -131,7 +131,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
               onClick={() => setRevealed(!revealed)}
               className="p-1.5 rounded-lg transition-all"
               style={{ color: revealed ? "var(--amber)" : "var(--text-muted)", background: "var(--bg-input)" }}
-              title={revealed ? "Hide Value" : "Reveal Value"}
+              title={revealed ? t("entry_hide_value") : t("entry_reveal_value")}
             >
               {revealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
             </button>
@@ -143,7 +143,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
               onClick={() => onOpenDetail(entry)}
               className="p-1.5 rounded-lg transition-all hover:scale-105"
               style={{ color: "var(--accent-bright)", background: "var(--accent-bg)" }}
-              title="Open Full Note"
+              title={t("entry_open_full_note")}
             >
               <Maximize2 className="w-3.5 h-3.5" />
             </button>
@@ -154,7 +154,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
             onClick={handleCopy}
             className="p-1.5 rounded-lg transition-all"
             style={{ color: copied ? "var(--emerald)" : "var(--text-muted)", background: "var(--bg-input)" }}
-            title={copied ? "Copied!" : t("copy")}
+            title={copied ? t("copied_bang") : t("copy")}
           >
             {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
@@ -203,7 +203,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
             className="text-[11px] font-mono tracking-widest cursor-pointer select-none py-0.5"
             onClick={(e) => { e.stopPropagation(); setRevealed(true); }}
             style={{ color: "var(--text-muted)" }}
-            title="Click to reveal"
+            title={t("entry_click_to_reveal")}
           >
             ••••••••••••••••••••••••
           </div>

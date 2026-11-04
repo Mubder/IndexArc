@@ -130,8 +130,8 @@ className="scratchpad-tab group cursor-pointer"
                 type="button"
                 onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
                 className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity flex-shrink-0"
-                aria-label="Close tab"
-                title="Close tab"
+                aria-label={t("scratchpad_close_tab")}
+                title={t("scratchpad_close_tab")}
               >
                 <X className="w-3 h-3" />
               </button>

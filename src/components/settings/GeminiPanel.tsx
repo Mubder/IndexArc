@@ -24,13 +24,14 @@ export function GeminiPanel({ onPatchSettings, settings, t }: GeminiPanelProps) 
           )}
           <label className="block text-xs space-y-1">
             <span className="flex items-center gap-1.5" style={{ color: "var(--text-dim)" }}>
-              {t("gemini_api_key_label")} <SavedBadge ok={settings.gemini_api_key_configured} />
+              {t("gemini_api_key_label")} <SavedBadge ok={settings.gemini_api_key_configured} t={t} />
             </span>
             <KeyInput
               field="gemini_api_key"
               configured={settings.gemini_api_key_configured}
               placeholder="AIza…"
               onCommit={onPatchSettings}
+              t={t}
             />
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

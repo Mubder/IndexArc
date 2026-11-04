@@ -41,7 +41,7 @@ export const AnalyzeTab: React.FC<AnalyzeTabProps> = ({
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t("tab_paste")}</h2>
           {providerUsed && (
-            <span className="text-[11px] font-mono" style={{ color: "var(--text-muted)" }}>via {providerUsed}</span>
+            <span className="text-[11px] font-mono" style={{ color: "var(--text-muted)" }}>{t("via_provider")} {providerUsed}</span>
           )}
         </div>
         <textarea

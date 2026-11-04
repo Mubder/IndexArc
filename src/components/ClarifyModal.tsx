@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useId, useState } from "react";
 import { VaultEntry, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
+import { useDialogA11y } from "../hooks/useDialogA11y";
 
 interface ClarifyModalProps {
   isOpen: boolean;
@@ -38,6 +39,8 @@ export const ClarifyModal: React.FC<ClarifyModalProps> = ({
   // with "Rendered more hooks than during the previous render".
   const [revealed, setRevealed] = useState(false);
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
+  const dialogRef = useDialogA11y(isOpen, onClose);
+  const titleId = useId();
 
   if (!isOpen) return null;
 
@@ -47,6 +50,10 @@ export const ClarifyModal: React.FC<ClarifyModalProps> = ({
       style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className="p-6 w-full max-w-md space-y-4 shadow-2xl"
         style={{
           background: "var(--bg-surface)",
@@ -56,7 +63,7 @@ export const ClarifyModal: React.FC<ClarifyModalProps> = ({
         }}
         dir="auto"
       >
-        <h3 className="text-lg font-semibold" style={{ color: "var(--text)" }}>{t("identify_modal_title")}</h3>
+        <h3 id={titleId} className="text-lg font-semibold" style={{ color: "var(--text)" }}>{t("identify_modal_title")}</h3>
         <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t("identify_modal_desc")}</p>
 
         <label className="block text-xs space-y-1">
@@ -87,7 +94,7 @@ export const ClarifyModal: React.FC<ClarifyModalProps> = ({
             className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none"
             style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)" }}
             placeholder={t("identify_placeholder_name")}
-            autoFocus
+            data-autofocus
           />
         </label>
 

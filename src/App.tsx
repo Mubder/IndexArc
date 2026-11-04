@@ -56,6 +56,7 @@ import { useToasts } from "./components/app/useToasts";
 import { useSettingsPatch } from "./components/app/useSettingsPatch";
 import { useVault, vaultStore } from "./state/vaultStore";
 import { startupUpdateCheck } from "./components/settings/UpdatesSection";
+import { fill } from "./components/home/DashboardCards";
 
 export default function App() {
   // All valid Tab values (write and read sides must be symmetric — "analyze"
@@ -251,7 +252,7 @@ export default function App() {
       console.error(e);
     }
   };
-  const { patchSettings, toggleLanguage } = useSettingsPatch({ patchTimerRef, setSettings, settings, settingsDirtyRef, showToast });
+  const { patchSettings, toggleLanguage } = useSettingsPatch({ patchTimerRef, setSettings, settings, settingsDirtyRef, showToast, t });
 
   useEffect(() => {
     scanSessionIdRef.current = scanSession?.id ?? null;
@@ -389,7 +390,7 @@ export default function App() {
   useEffect(() => {
     if (!settings?.update_check_on_start) return;
     void startupUpdateCheck(settings).then((v) => {
-      if (v) showToast(`IndexArc ${v} is available — Settings → Updates`, "info");
+      if (v) showToast(fill(t("update_toast_available"), { v }), "info");
     });
   }, [settings?.update_check_on_start]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -404,7 +405,7 @@ export default function App() {
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
-  const { discardCandidate, handleAnalyze, handleSaveSelected, updateCandidate } = usePasteActions({ candidates, fetchAll, paste, pasteId, selected, setAnalyzing, setCandidates, setPaste, setPasteId, setProviderUsed, setSelected, setTab, showConfirm, showToast });
+  const { discardCandidate, handleAnalyze, handleSaveSelected, updateCandidate } = usePasteActions({ candidates, fetchAll, paste, pasteId, selected, setAnalyzing, setCandidates, setPaste, setPasteId, setProviderUsed, setSelected, setTab, showConfirm, showToast, t });
 
   const handleAsk = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -421,7 +422,7 @@ export default function App() {
       const data = await res.json().catch(() => null);
       if (!res.ok || data?.error) {
         // Server/network failures must not masquerade as "no results".
-        throw new Error(data?.error || "Ask failed");
+        throw new Error(data?.error || t("ask_failed"));
       }
       setAskResults(data.results || []);
       setAskAnswer(data.answer || null);
@@ -431,16 +432,16 @@ export default function App() {
       setAskResults([]);
       setAskAnswer(null);
       setAskAnswerProvider("");
-      showToast(e?.message || "Ask failed / فشل البحث", "error");
+      showToast(e?.message || t("ask_failed"), "error");
     } finally {
       setAsking(false);
       fetchAll();
     }
   };
-  const { clarify, clarifyFamily, clarifyName, clarifyType, clarifyValue, openClarify, setClarify, setClarifyFamily, setClarifyName, setClarifyType, setClarifyValue, submitClarify } = useClarify({ fetchAll, showToast });
-  const { bulkDeleteEntries, deleteEntry, saveEntryUpdate } = useEntryActions({ fetchAll, setAttention, setEntries, showConfirm, showToast });
-  const { saveSettings, warmOllama } = useSettingsActions({ fetchAll, setSettings, settings, settingsDirtyRef, showToast });
-  const { applyScanSession, discardScanSession, handleFolderScan, loadFsDir, patchScanCandidate, pickFolder, setAllDecisions } = useFolderScanActions({ fetchAll, folderPath, folderUseAi, folderWatch, scanSession, setApplyingScan, setFolderPath, setFsBrowserOpen, setFsEntries, setFsError, setFsLoading, setFsParent, setFsPath, setScanSession, setScanning, setTab, showConfirm, showToast });
+  const { clarify, clarifyFamily, clarifyName, clarifyType, clarifyValue, openClarify, setClarify, setClarifyFamily, setClarifyName, setClarifyType, setClarifyValue, submitClarify } = useClarify({ fetchAll, showToast, t });
+  const { bulkDeleteEntries, deleteEntry, saveEntryUpdate } = useEntryActions({ fetchAll, setAttention, setEntries, showConfirm, showToast, t });
+  const { saveSettings, warmOllama } = useSettingsActions({ fetchAll, setSettings, settings, settingsDirtyRef, showToast, t });
+  const { applyScanSession, discardScanSession, handleFolderScan, loadFsDir, patchScanCandidate, pickFolder, setAllDecisions } = useFolderScanActions({ fetchAll, folderPath, folderUseAi, folderWatch, scanSession, setApplyingScan, setFolderPath, setFsBrowserOpen, setFsEntries, setFsError, setFsLoading, setFsParent, setFsPath, setScanSession, setScanning, setTab, showConfirm, showToast, t });
 
   const nav: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = useMemo(
     () => [
@@ -582,7 +583,7 @@ return (
             )}
 
             {tab === "scratchpad" && (
-              <React.Suspense fallback={<div className="p-6 text-sm" style={{color:"var(--text-muted)"}}>Loading scratchpad…</div>}>
+              <React.Suspense fallback={<div className="p-6 text-sm" style={{color:"var(--text-muted)"}}>{t("loading_scratchpad")}</div>}>
                 <ScratchpadTab settings={settings} />
               </React.Suspense>
             )}
@@ -605,7 +606,7 @@ return (
                     const res = await fetch(`/api/folders/${id}`, { method: "DELETE" });
                     if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);
                   } catch {
-                    showToast("Failed to remove watched folder / فشل إزالة المجلد", "error");
+                    showToast(t("folder_remove_failed"), "error");
                   }
                   fetchAll();
                 }}
@@ -714,7 +715,7 @@ return (
           } else {
             void (async () => {
               const ok = await copyTextToClipboard(entry.value, { sensitive: true });
-              showToast(ok ? `Copied ${entry.name}` : "Copy failed", ok ? "success" : "error");
+              showToast(ok ? fill(t("toast_copied_name"), { name: entry.name }) : t("copy_failed"), ok ? "success" : "error");
             })();
           }
         }}

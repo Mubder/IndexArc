@@ -1,8 +1,9 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useId, type Dispatch, type SetStateAction } from "react";
 import type { TranslationDict } from "../../utils/i18n";
 import { createPortal } from "react-dom";
 import { LifeBuoy, X, Loader2 } from "lucide-react";
 import { htmlToPlainText } from "../../lib/noteHtml";
+import { useDialogA11y } from "../../hooks/useDialogA11y";
 
 export interface RescueModalProps {
   rescueList: any[];
@@ -16,6 +17,8 @@ export interface RescueModalProps {
 }
 
 export function RescueModal({ rescueList, rescueLoading, rescueOpen, rescueQuery, restoreOrphan, setRescueOpen, setRescueQuery, t }: RescueModalProps) {
+  const dialogRef = useDialogA11y(rescueOpen, () => setRescueOpen(false));
+  const titleId = useId();
   return (
     <>
       {/* Rescue unsaved notes from orphaned revision snapshots. */}
@@ -27,6 +30,10 @@ export function RescueModal({ rescueList, rescueLoading, rescueOpen, rescueQuery
             onClick={() => setRescueOpen(false)}
           >
             <div
+              ref={dialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={titleId}
               className="w-full max-w-3xl max-h-[85vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl"
               style={{ background: "#121214", border: "1px solid rgba(255,255,255,0.12)" }}
               onClick={(e) => e.stopPropagation()}
@@ -41,13 +48,14 @@ export function RescueModal({ rescueList, rescueLoading, rescueOpen, rescueQuery
                     <LifeBuoy className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-white">{t("scratchpad_rescue_title")}</h3>
+                    <h3 id={titleId} className="text-sm font-bold text-white">{t("scratchpad_rescue_title")}</h3>
                     <p className="text-xs text-neutral-400 max-w-lg">{t("scratchpad_rescue_desc")}</p>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setRescueOpen(false)}
+                  aria-label={t("close_btn")}
                   className="p-1.5 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -60,14 +68,15 @@ export function RescueModal({ rescueList, rescueLoading, rescueOpen, rescueQuery
                   type="text"
                   value={rescueQuery}
                   onChange={(e) => setRescueQuery(e.target.value)}
-                  placeholder="Search snapshots…"
+                  placeholder={t("rescue_search_placeholder")}
+                  aria-label={t("rescue_search_placeholder")}
                   className="px-3 py-2 rounded-lg text-xs"
                   style={{ background: "#1e1e22", border: "1px solid rgba(255,255,255,0.12)", color: "var(--text)" }}
                 />
                 {rescueLoading ? (
                   <div className="flex items-center justify-center gap-2 py-10 text-xs text-neutral-500">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Scanning snapshots…</span>
+                    <span>{t("rescue_scanning")}</span>
                   </div>
                 ) : rescueList.length === 0 ? (
                   <div className="py-10 text-center text-xs text-neutral-500">{t("scratchpad_rescue_empty")}</div>
@@ -96,12 +105,12 @@ export function RescueModal({ rescueList, rescueLoading, rescueOpen, rescueQuery
                           style={{ background: "#17171a", border: "1px solid rgba(255,255,255,0.08)" }}
                         >
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-bold text-white truncate max-w-[280px]">{o.title || "Note"}</span>
+                            <span className="text-xs font-bold text-white truncate max-w-[280px]">{o.title || t("family_note")}</span>
                             <span className="text-[10px] px-1.5 py-0.5 rounded-md font-mono" style={{ background: "rgba(255,255,255,0.07)", color: "#a1a1aa" }}>
                               {dayStr} {timeStr}
                             </span>
                             <span className="text-[10px] px-1.5 py-0.5 rounded-md font-mono" style={{ background: "rgba(99,102,241,0.15)", color: "#a5b4fc" }}>
-                              {o.revisionCount} snapshot{o.revisionCount === 1 ? "" : "s"}
+                              {o.revisionCount} {o.revisionCount === 1 ? t("rescue_snapshot_one") : t("rescue_snapshot_many")}
                             </span>
                             <div className="flex-1" />
                             <button

@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useId } from "react";
 import { Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
+import { useDialogA11y } from "../hooks/useDialogA11y";
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -25,12 +26,18 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   variant = "danger",
   settings = null,
 }) => {
+  const dialogRef = useDialogA11y(isOpen, onClose);
+  const titleId = useId();
   if (!isOpen) return null;
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}>
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className="p-6 w-full max-w-md space-y-4 shadow-2xl"
         style={{
           background: "var(--bg-surface)",
@@ -40,7 +47,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
         }}
         dir="auto"
       >
-        <h3 className="text-lg font-semibold" style={{ color: "var(--text)" }}>{title}</h3>
+        <h3 id={titleId} className="text-lg font-semibold" style={{ color: "var(--text)" }}>{title}</h3>
         <p className="text-sm" style={{ color: "var(--text-dim)" }}>{message}</p>
         <div className="flex justify-end gap-2 pt-2">
           <button
