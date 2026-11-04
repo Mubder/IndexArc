@@ -3,6 +3,13 @@ import { addLog } from "../logs.js";
 import { sendSSE } from "./sse.js";
 import { throttle, recordFailure, recordSuccess } from "./throttle.js";
 import type { RouteContext } from "./types.js";
+import { checkPassword, passwordProblemMessage } from "../../shared/password-policy.js";
+
+/** 400 body for a new master password that fails the policy, or null if it passes. */
+function rejectPassword(pw: unknown) {
+  const c = checkPassword(String(pw ?? ""));
+  return c.ok ? null : { error: passwordProblemMessage(c.problem!), code: `password_${c.problem}` };
+}
 
 export function vaultRoutes(ctx: RouteContext) {
   const r = Router();
@@ -73,9 +80,8 @@ export function vaultRoutes(ctx: RouteContext) {
     if (!gate) return;
 
     const { password, confirm_word } = req.body;
-    if (!password || String(password).length < 8) {
-      return res.status(400).json({ error: "Password must be at least 8 characters long" });
-    }
+    const bad = rejectPassword(password);
+    if (bad) return res.status(400).json(bad);
     if (String(confirm_word ?? "").trim().toUpperCase() !== "ENCRYPT") {
       recordFailure(req);
       return res.status(403).json({ error: "Confirmation failed — type ENCRYPT to encrypt the vault" });
@@ -125,9 +131,8 @@ export function vaultRoutes(ctx: RouteContext) {
     if (!gate) return;
     const { current_password, new_password } = req.body || {};
     if (!current_password) return res.status(400).json({ error: "Current password is required" });
-    if (!new_password || String(new_password).length < 8) {
-      return res.status(400).json({ error: "Password must be at least 8 characters long" });
-    }
+    const bad = rejectPassword(new_password);
+    if (bad) return res.status(400).json(bad);
     try {
       const ok = await store.changePassword(String(current_password), String(new_password));
       if (!ok) {
@@ -187,9 +192,8 @@ export function vaultRoutes(ctx: RouteContext) {
     if (!gate) return;
     const { recovery_code, new_password } = req.body || {};
     if (!recovery_code) return res.status(400).json({ error: "Recovery code is required" });
-    if (!new_password || String(new_password).length < 8) {
-      return res.status(400).json({ error: "Password must be at least 8 characters long" });
-    }
+    const bad = rejectPassword(new_password);
+    if (bad) return res.status(400).json(bad);
     try {
       await store.recoverWithCode(String(recovery_code), String(new_password));
       recordSuccess(req);

@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { Lock, Unlock, ShieldAlert, LifeBuoy } from "lucide-react";
 import { Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
+import { PasswordField } from "./common/PasswordField";
+import { PasswordStrength, usePasswordCheck } from "./common/PasswordStrength";
 
 interface LockScreenProps {
   settings: Settings | null;
@@ -47,10 +49,12 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
     }
   };
 
+  const newCheck = usePasswordCheck(newPw);
+
   const handleRecover = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    if (newPw.length < 8) return setError(t("pw_too_short"));
+    if (!newCheck?.ok) return setError(newCheck?.problem === "too_short" || !newCheck ? t("pw_too_short") : newCheck.problem === "common" ? t("pw_problem_common") : t("pw_problem_weak"));
     if (newPw !== newPw2) return setError(t("pw_mismatch"));
     setLoading(true);
     try {
@@ -136,8 +140,9 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
                 style={fieldStyle}
               />
             </label>
-            <input type="password" autoComplete="new-password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder={t("pw_new")} aria-label={t("pw_new")} disabled={loading} className="w-full rounded-xl px-4 py-3 text-sm focus:outline-none" style={fieldStyle} />
-            <input type="password" autoComplete="new-password" value={newPw2} onChange={(e) => setNewPw2(e.target.value)} placeholder={t("pw_confirm")} aria-label={t("pw_confirm")} disabled={loading} className="w-full rounded-xl px-4 py-3 text-sm focus:outline-none" style={fieldStyle} />
+            <PasswordField showLabel={t("pw_show")} hideLabel={t("pw_hide")} autoComplete="new-password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder={t("pw_new")} aria-label={t("pw_new")} disabled={loading} className="w-full rounded-xl px-4 py-3 text-sm focus:outline-none" style={fieldStyle} />
+            <PasswordStrength check={newCheck} t={t} />
+            <PasswordField showLabel={t("pw_show")} hideLabel={t("pw_hide")} autoComplete="new-password" value={newPw2} onChange={(e) => setNewPw2(e.target.value)} placeholder={t("pw_confirm")} aria-label={t("pw_confirm")} disabled={loading} className="w-full rounded-xl px-4 py-3 text-sm focus:outline-none" style={fieldStyle} />
             {error && (
               <div role="alert" className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs" style={{ color: "var(--danger)", background: "var(--danger-bg)", border: "1px solid rgba(248, 113, 113, 0.2)" }}>
                 <ShieldAlert className="w-4 h-4 shrink-0" />
@@ -162,8 +167,10 @@ export const LockScreen: React.FC<LockScreenProps> = ({ settings, onUnlockSucces
             <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-dim)" }}>
               {t("sec_password_label")}
             </label>
-            <input
-              type="password"
+            <PasswordField
+              showLabel={t("pw_show")}
+              hideLabel={t("pw_hide")}
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t("sec_password_placeholder")}

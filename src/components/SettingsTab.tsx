@@ -133,7 +133,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   };
 
   const handleSetupPassword = async () => {
-    if (!secPassword || secPassword.length < 8) {
+    // Length only; the server applies the full policy and explains a refusal.
+    if (!secPassword || [...secPassword].length < 12) {
       setSecError(t("sec_error_length"));
       return;
     }

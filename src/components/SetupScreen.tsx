@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { ShieldCheck, ShieldAlert, KeyRound } from "lucide-react";
 import { Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
+import { PasswordField } from "./common/PasswordField";
+import { PasswordStrength, usePasswordCheck } from "./common/PasswordStrength";
 
 interface SetupScreenProps {
   settings: Settings | null;
@@ -21,9 +23,9 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ settings, onSetupSucce
 
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
 
+  const check = usePasswordCheck(password);
   const mismatch = confirm.length > 0 && password !== confirm;
-  const tooShort = password.length > 0 && password.length < 8;
-  const canSubmit = password.length >= 8 && password === confirm && !loading;
+  const canSubmit = !!check?.ok && password === confirm && !loading;
 
   const handleSetup = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -88,8 +90,10 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ settings, onSetupSucce
             <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-dim)" }}>
               {t("sec_password_label")}
             </label>
-            <input
-              type="password"
+            <PasswordField
+              showLabel={t("pw_show")}
+              hideLabel={t("pw_hide")}
+              autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               aria-label={t("sec_password_label")}
@@ -105,12 +109,16 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ settings, onSetupSucce
             />
           </div>
 
+          <PasswordStrength check={check} t={t} />
+
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-dim)" }}>
               {t("sec_confirm_label")}
             </label>
-            <input
-              type="password"
+            <PasswordField
+              showLabel={t("pw_show")}
+              hideLabel={t("pw_hide")}
+              autoComplete="new-password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               aria-label={t("sec_confirm_label")}
@@ -125,13 +133,13 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ settings, onSetupSucce
             />
           </div>
 
-          {(mismatch || tooShort || error) && (
+          {(mismatch || error) && (
             <div
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs"
               style={{ color: "var(--danger)", background: "var(--danger-bg)", border: "1px solid rgba(248, 113, 113, 0.2)" }}
             >
               <ShieldAlert className="w-4 h-4 shrink-0" />
-              <span>{error || (mismatch ? t("sec_error_mismatch") : t("sec_error_length"))}</span>
+              <span>{error || t("sec_error_mismatch")}</span>
             </div>
           )}
 

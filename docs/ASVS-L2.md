@@ -78,18 +78,18 @@ no OTP, no federated login.
 
 | # | Requirement (short) | Status | Evidence / notes |
 |---|---|---|---|
-| 2.1.1 | Passwords at least 12 characters | **Gap** | Minimum is 8 (`setup-password` in [server/routes/vault.ts](../server/routes/vault.ts); [src/components/SetupScreen.tsx](../src/components/SetupScreen.tsx)). Raise to 12. |
+| 2.1.1 | Passwords at least 12 characters | Met | 12 characters (counted as code points) for every new master password: setup, change and recovery. Enforced by the server ([server/routes/vault.ts](../server/routes/vault.ts) `rejectPassword`, [shared/password-policy.ts](../shared/password-policy.ts)); the UI applies the same module. Existing shorter passwords still unlock. Tests: [shared/password-policy.test.ts](../shared/password-policy.test.ts), [server/vault-setup.test.ts](../server/vault-setup.test.ts). |
 | 2.1.2 | Passwords of 64+ characters allowed | Met | No upper limit besides the 2 MB JSON body cap. (ASVS also asks to deny > 128; not enforced, harmless for a local KDF.) |
 | 2.1.3 | No truncation | Met | The full string is fed to Argon2id (`deriveKeyAsync` in [server/crypto.ts](../server/crypto.ts)). |
 | 2.1.4 | Any printable Unicode allowed | Met | No character filtering on the password. |
 | 2.1.5 | User can change the password | Met | `POST /api/vault/change-password` verifies the current password and re-keys every file and record under a new salt with no plaintext window: files are staged and committed as one set, rows follow, and the old key is kept sealed under the new one (`prev_key`) until they do ([server/store.ts](../server/store.ts) `changePassword`/`rekeyTo`, [server/routes/vault.ts](../server/routes/vault.ts)). Tests: [server/recovery.test.ts](../server/recovery.test.ts), including a crash between the header commit and the row rewrite. UI: Settings → Security. |
 | 2.1.6 | Change requires current password | Met | `remove-password` verifies the master password, throttled ([server/routes/vault.ts](../server/routes/vault.ts)). Test: [server/fail-closed.test.ts](../server/fail-closed.test.ts). |
-| 2.1.7 | Breached/common password check | **Gap** | No check. An offline top-N list could ship with the app. |
-| 2.1.8 | Password strength meter | **Gap** | Setup shows length/mismatch errors only ([src/components/SetupScreen.tsx](../src/components/SetupScreen.tsx)). |
-| 2.1.9 | No composition rules | Met | Only a length rule. |
+| 2.1.7 | Breached/common password check | Met | Offline: zxcvbn-ts's bundled common-password list (`@zxcvbn-ts/language-common`), including l33t, reversed and near-common forms ("iloveyou2024!"). Nothing is sent over the network, so no k-anonymity breach API is used. [shared/password-policy.ts](../shared/password-policy.ts). |
+| 2.1.8 | Password strength meter | Met | Four-step meter with a label and the refusal reason on every new-password field ([src/components/common/PasswordStrength.tsx](../src/components/common/PasswordStrength.tsx)); scores under 2 of 4 are refused. |
+| 2.1.9 | No composition rules | Met | Only length, the common-password check and a minimum guessability score; no character-class rules. |
 | 2.1.10 | No forced periodic rotation | Met | None. |
 | 2.1.11 | Paste and password managers allowed | Met | Standard `type="password"` inputs, no paste blocking ([src/components/LockScreen.tsx](../src/components/LockScreen.tsx)). |
-| 2.1.12 | Show/hide password option | **Gap** | Lock screen has no reveal toggle ([src/components/LockScreen.tsx](../src/components/LockScreen.tsx)). |
+| 2.1.12 | Show/hide password option | Met | Every password field has a reveal toggle that also turns spellcheck off ([src/components/common/PasswordField.tsx](../src/components/common/PasswordField.tsx)). |
 | 2.2.1 | Anti-automation on authentication | Met | 10 attempts/min, escalating delay to 5 s that survives the window until a verified success ([server/routes/throttle.ts](../server/routes/throttle.ts)); memory-hard KDF per guess. Test: [server/auth-activity.test.ts](../server/auth-activity.test.ts) "escalating delay persists until a verified success". |
 | 2.2.2 | Weak authenticators (SMS/e-mail) | N/A | None used. |
 | 2.2.3 | Notify user after credential changes | N/A | No out-of-band channel. Password changes are written to the audit log ([server/audit.ts](../server/audit.ts)). |
@@ -351,7 +351,7 @@ Priority gaps for the roadmap:
 2. **Unsigned releases (10.3.1, 10.3.2).** The signed-update path exists but no build is signed, so updates cannot self-install and the package has no publisher identity. Needs the certificate decision (R2.1).
 3. **Row rollback / deletion not detected (V6).** Add a keyed `rev` or Merkle root to the sealed header ([adr/0001](adr/0001-storage-engine.md)).
 4. **AAD missing on JSON envelopes (V6, Partial).** Header, scratchpad, archive, revisions and scan sessions should bind AAD (file role + vault id), matching the roadmap's "AAD everywhere".
-5. **Password policy (2.1.1, 2.1.7, 2.1.8, 2.1.12).** Raise the minimum to 12, ship an offline common-password list, add a strength meter and a reveal toggle.
+5. ~~Password policy (2.1.1, 2.1.7, 2.1.8, 2.1.12)~~ landed 2026-11-04: 12-character minimum, offline common-password check, strength meter, reveal toggle.
 6. ~~Change password (2.1.5)~~ landed 2026-11-04.
 7. **Recovery (2.5.6) follow-ups.** Landed 2026-11-04. Still to do: say in the UI that a password change does not revoke the code, and bind the seal's AAD to a vault id.
 8. **13.2.2 Runtime schema validation** of request bodies.

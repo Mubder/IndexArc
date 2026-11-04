@@ -689,6 +689,17 @@ export interface TranslationDict {
   pw_change_btn: string;
   pw_mismatch: string;
   pw_too_short: string;
+  pw_show: string;
+  pw_hide: string;
+  pw_strength_label: string;
+  pw_strength_0: string;
+  pw_strength_1: string;
+  pw_strength_2: string;
+  pw_strength_3: string;
+  pw_strength_4: string;
+  pw_problem_common: string;
+  pw_problem_weak: string;
+  pw_hint_phrase: string;
   pw_changed: string;
   rk_title: string;
   rk_desc: string;
@@ -1013,7 +1024,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     sec_remove_btn: "Disable Encryption",
     sec_first_setup_title: "Create Your Master Password",
     sec_first_setup_subtitle: "IndexArc encrypts everything at rest by default. This password is the only key to your vault — it never leaves this device and cannot be recovered if lost.",
-    sec_first_setup_hint: "Minimum 8 characters; a passphrase of four or more words is ideal.",
+    sec_first_setup_hint: "Minimum 12 characters; a passphrase of four or more unrelated words is ideal.",
     sec_confirm_label: "Confirm Password",
     sec_first_setup_btn: "Create Encrypted Vault",
     sec_error_mismatch: "Passwords do not match",
@@ -1042,7 +1053,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     egress_lt_desc: "OFF by default. When ON, note words are sent to languagetool.org for proofreading when the local engine is unavailable.",
     loading_settings: "Loading settings…",
     sec_error_incorrect: "Incorrect master password",
-    sec_error_length: "Password must be at least 8 characters",
+    sec_error_length: "Password must be at least 12 characters",
     sec_status_enabled: "Encrypted (AES-256-GCM)",
     sec_status_disabled: "Unencrypted (Plain JSON)",
     find_duplicates_btn: "Find Duplicates",
@@ -1446,11 +1457,22 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     pw_change_title: "Change master password",
     pw_change_desc: "Re-encrypts every file and record under the new password.",
     pw_current: "Current password",
-    pw_new: "New password (8+ characters)",
+    pw_new: "New password (12+ characters)",
     pw_confirm: "Repeat new password",
     pw_change_btn: "Change password",
     pw_mismatch: "The new passwords do not match",
-    pw_too_short: "Password must be at least 8 characters",
+    pw_too_short: "Password must be at least 12 characters",
+    pw_show: "Show password",
+    pw_hide: "Hide password",
+    pw_strength_label: "Strength",
+    pw_strength_0: "Very weak",
+    pw_strength_1: "Weak",
+    pw_strength_2: "Fair",
+    pw_strength_3: "Strong",
+    pw_strength_4: "Very strong",
+    pw_problem_common: "This is a commonly used password. Choose another.",
+    pw_problem_weak: "Too easy to guess. Try a longer phrase of unrelated words.",
+    pw_hint_phrase: "Tip: a phrase of four or more unrelated words is strong and easy to remember.",
     pw_changed: "Master password changed",
     rk_title: "Recovery key",
     rk_desc: "A one-time code that resets a forgotten master password. Anyone with this code and your vault files can open the vault, so keep it offline, like the password itself.",
@@ -1773,7 +1795,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     sec_remove_btn: "إلغاء التشفير",
     sec_first_setup_title: "أنشئ كلمة المرور الرئيسية",
     sec_first_setup_subtitle: "يقوم IndexArc بتشفير كل شيء افتراضيًا. كلمة المرور هذه هي المفتاح الوحيد لخزنتك — لا تخرج من هذا الجهاز ولا يمكن استعادتها إذا فُقدت.",
-    sec_first_setup_hint: "8 أحرف على الأقل؛ وعبارة من أربع كلمات أو أكثر هي الخيار الأفضل.",
+    sec_first_setup_hint: "12 حرفًا على الأقل؛ وعبارة من أربع كلمات غير مترابطة أو أكثر هي الخيار الأفضل.",
     sec_confirm_label: "تأكيد كلمة المرور",
     sec_first_setup_btn: "إنشاء خزنة مشفرة",
     sec_error_mismatch: "كلمتا المرور غير متطابقتين",
@@ -1802,7 +1824,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     egress_lt_desc: "معطّل افتراضيًا. عند التفعيل، تُرسل كلمات الملاحظات إلى languagetool.org للتدقيق اللغوي عند عدم توفر المحرك المحلي.",
     loading_settings: "جارٍ تحميل الإعدادات…",
     sec_error_incorrect: "كلمة المرور الرئيسية غير صحيحة",
-    sec_error_length: "يجب أن تكون كلمة المرور 8 أحرف على الأقل",
+    sec_error_length: "يجب أن تكون كلمة المرور 12 حرفًا على الأقل",
     sec_status_enabled: "مشفرة (AES-256-GCM)",
     sec_status_disabled: "غير مشفرة (JSON عادي)",
     find_duplicates_btn: "البحث عن المكررات",
@@ -2206,11 +2228,22 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     pw_change_title: "تغيير كلمة المرور الرئيسية",
     pw_change_desc: "يعيد تشفير كل ملف وسجل بكلمة المرور الجديدة.",
     pw_current: "كلمة المرور الحالية",
-    pw_new: "كلمة المرور الجديدة (8 أحرف على الأقل)",
+    pw_new: "كلمة المرور الجديدة (12 حرفًا على الأقل)",
     pw_confirm: "أعد كتابة كلمة المرور الجديدة",
     pw_change_btn: "تغيير كلمة المرور",
     pw_mismatch: "كلمتا المرور الجديدتان غير متطابقتين",
-    pw_too_short: "يجب أن تتكون كلمة المرور من 8 أحرف على الأقل",
+    pw_too_short: "يجب أن تتكون كلمة المرور من 12 حرفًا على الأقل",
+    pw_show: "إظهار كلمة المرور",
+    pw_hide: "إخفاء كلمة المرور",
+    pw_strength_label: "القوة",
+    pw_strength_0: "ضعيفة جدًا",
+    pw_strength_1: "ضعيفة",
+    pw_strength_2: "مقبولة",
+    pw_strength_3: "قوية",
+    pw_strength_4: "قوية جدًا",
+    pw_problem_common: "هذه كلمة مرور شائعة الاستخدام. اختر غيرها.",
+    pw_problem_weak: "سهلة التخمين. جرّب عبارة أطول من كلمات غير مترابطة.",
+    pw_hint_phrase: "نصيحة: عبارة من أربع كلمات غير مترابطة أو أكثر قوية وسهلة التذكر.",
     pw_changed: "تم تغيير كلمة المرور الرئيسية",
     rk_title: "مفتاح الاسترداد",
     rk_desc: "رمز يُستخدم لمرة واحدة لإعادة تعيين كلمة مرور منسية. من يملك هذا الرمز وملفات الخزنة يستطيع فتحها، لذا احفظه بعيدًا عن الإنترنت مثل كلمة المرور نفسها.",

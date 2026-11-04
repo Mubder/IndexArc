@@ -10,6 +10,7 @@ Commit messages follow the convention in
 ## [Unreleased]
 
 ### Added
+- Master password strength meter and a show/hide button on every password field.
 - IndexArc is now open source under the GNU GPL v3 (`LICENSE`). The README states the code-signing
   policy and what the app sends over the network (only what the user turns on).
 - Windows release builds can be signed through Azure Trusted Signing (publisher: your verified name;
@@ -41,6 +42,8 @@ Commit messages follow the convention in
 - A dev or test launch could repoint the installed app's data folder.
 
 ### Security
+- New master passwords must be at least 12 characters, not a common password (checked offline)
+  and not trivially guessable. Existing shorter passwords still unlock.
 - Every API response is marked `Cache-Control: no-store`.
 - Decryption requires the full 16-byte GCM tag.
 

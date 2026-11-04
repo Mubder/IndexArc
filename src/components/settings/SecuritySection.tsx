@@ -2,6 +2,8 @@ import { Shield } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import type { TranslationDict } from "../../utils/i18n";
 import { ChangePasswordCard, RecoveryKeyCard } from "./KeyManagement";
+import { PasswordField } from "../common/PasswordField";
+import { PasswordStrength, usePasswordCheck } from "../common/PasswordStrength";
 
 export interface SecuritySectionProps {
   handleRemovePassword: () => Promise<void>;
@@ -14,6 +16,8 @@ export interface SecuritySectionProps {
 }
 
 export function SecuritySection({ handleRemovePassword, handleSetupPassword, secError, secPassword, setSecPassword, t, vaultStatus }: SecuritySectionProps) {
+  // The meter only applies when this field sets a new password.
+  const setupCheck = usePasswordCheck(vaultStatus?.encryption_enabled ? "" : secPassword);
   return (
     <>
       <div id="security-section" className="space-y-4 rounded-xl p-5 mt-4 scroll-mt-4" style={{ background: "var(--bg-surface)", border: vaultStatus?.encryption_enabled ? "1px solid var(--border)" : "1px solid rgba(251, 191, 36, 0.35)" }}>
@@ -46,12 +50,14 @@ export function SecuritySection({ handleRemovePassword, handleSetupPassword, sec
               {t("sec_remove_desc")}
             </p>
             <div className="flex gap-2">
-              <input
-                type="password"
+              <PasswordField
+                showLabel={t("pw_show")}
+                hideLabel={t("pw_hide")}
                 value={secPassword}
                 onChange={(e) => setSecPassword(e.target.value)}
+                autoComplete="current-password"
                 placeholder={t("sec_password_placeholder")}
-                className="flex-1 rounded-lg px-3 py-1.5 text-xs"
+                className="w-full rounded-lg px-3 py-1.5 text-xs"
                 style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
               />
               <button
@@ -71,12 +77,14 @@ export function SecuritySection({ handleRemovePassword, handleSetupPassword, sec
               {t("sec_setup_subtitle")}
             </p>
             <div className="flex gap-2">
-              <input
-                type="password"
+              <PasswordField
+                showLabel={t("pw_show")}
+                hideLabel={t("pw_hide")}
                 value={secPassword}
                 onChange={(e) => setSecPassword(e.target.value)}
+                autoComplete="new-password"
                 placeholder={t("sec_set_password_placeholder")}
-                className="flex-1 rounded-lg px-3 py-1.5 text-xs"
+                className="w-full rounded-lg px-3 py-1.5 text-xs"
                 style={{ background: "var(--bg-input)", border: "1px solid var(--border-input)", color: "var(--text)", fontFamily: "var(--font-mono)" }}
               />
               <button
@@ -88,6 +96,7 @@ export function SecuritySection({ handleRemovePassword, handleSetupPassword, sec
                 {t("sec_setup_btn")}
               </button>
             </div>
+            <PasswordStrength check={setupCheck} t={t} />
             {secError && <p className="text-[10px] font-mono" style={{ color: "var(--danger)" }}>{secError}</p>}
           </div>
         )}

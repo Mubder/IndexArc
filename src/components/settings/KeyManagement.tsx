@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { KeyRound, LifeBuoy, Copy, Download, Check } from "lucide-react";
 import type { TranslationDict } from "../../utils/i18n";
 import { copyTextToClipboard } from "../../lib/clipboard";
+import { PasswordField } from "../common/PasswordField";
+import { PasswordStrength, usePasswordCheck } from "../common/PasswordStrength";
 
 type T = (key: keyof TranslationDict) => string;
 
@@ -25,12 +27,13 @@ export function ChangePasswordCard({ t, onToast }: { t: T; onToast?: (msg: strin
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const check = usePasswordCheck(next);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setDone(false);
-    if (next.length < 8) return setError(t("pw_too_short"));
+    if (!check?.ok) return setError(check?.problem === "common" ? t("pw_problem_common") : check?.problem === "weak" ? t("pw_problem_weak") : t("pw_too_short"));
     if (next !== repeat) return setError(t("pw_mismatch"));
     setBusy(true);
     try {
@@ -54,11 +57,12 @@ export function ChangePasswordCard({ t, onToast }: { t: T; onToast?: (msg: strin
         <KeyRound className="w-3.5 h-3.5" /> {t("pw_change_title")}
       </div>
       <p className="text-[11px]" style={{ color: "var(--text-dim)" }}>{t("pw_change_desc")}</p>
-      <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} placeholder={t("pw_current")} aria-label={t("pw_current")} className="w-full rounded-lg px-3 py-1.5 text-xs" style={inputStyle} />
+      <PasswordField showLabel={t("pw_show")} hideLabel={t("pw_hide")} autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} placeholder={t("pw_current")} aria-label={t("pw_current")} className="w-full rounded-lg px-3 py-1.5 text-xs" style={inputStyle} />
       <div className="flex gap-2">
-        <input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} placeholder={t("pw_new")} aria-label={t("pw_new")} className="flex-1 min-w-0 rounded-lg px-3 py-1.5 text-xs" style={inputStyle} />
-        <input type="password" autoComplete="new-password" value={repeat} onChange={(e) => setRepeat(e.target.value)} placeholder={t("pw_confirm")} aria-label={t("pw_confirm")} className="flex-1 min-w-0 rounded-lg px-3 py-1.5 text-xs" style={inputStyle} />
+        <div className="flex-1 min-w-0"><PasswordField showLabel={t("pw_show")} hideLabel={t("pw_hide")} autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} placeholder={t("pw_new")} aria-label={t("pw_new")} className="w-full rounded-lg px-3 py-1.5 text-xs" style={inputStyle} /></div>
+        <div className="flex-1 min-w-0"><PasswordField showLabel={t("pw_show")} hideLabel={t("pw_hide")} autoComplete="new-password" value={repeat} onChange={(e) => setRepeat(e.target.value)} placeholder={t("pw_confirm")} aria-label={t("pw_confirm")} className="w-full rounded-lg px-3 py-1.5 text-xs" style={inputStyle} /></div>
       </div>
+      <PasswordStrength check={check} t={t} />
       <div className="flex items-center gap-2">
         <button type="submit" disabled={busy || !current || !next || !repeat} className="px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40" style={{ background: "var(--accent)", color: "white" }}>
           {busy ? "…" : t("pw_change_btn")}

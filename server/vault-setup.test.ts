@@ -78,6 +78,35 @@ describe("setup-password ceremony (AUD-014)", () => {
     expect(await store.unlock("legit-password-123")).toBe(true);
   });
 
+  it.each([
+    ["short", "Sh0rt-pw!", "password_too_short"],
+    ["common", "Password1234", "password_common"],
+    ["l33t common", "P@ssw0rd1234", "password_common"],
+    ["guessable", "aaaaaaaaaaaa", "password_weak"],
+  ])("rejects a %s master password (ASVS 2.1.1/2.1.7) and encrypts nothing", async (_label, pw, code) => {
+    const res = await post({ password: pw, confirm_word: "ENCRYPT" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe(code);
+    expect(store.isEncryptionEnabled()).toBe(false);
+  });
+
+  it("applies the same policy to change-password, and still accepts an existing short password as current", async () => {
+    // A vault set up before the 12-character rule keeps unlocking with its
+    // old password; only the new one has to meet the policy.
+    await store.setupPassword("old-pw-8");
+    const change = (new_password: string) =>
+      fetch(`${baseUrl}/api/vault/change-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_password: "old-pw-8", new_password }),
+      });
+    expect((await change("password1234")).status).toBe(400);
+    expect(await store.unlock("old-pw-8")).toBe(true);
+    expect((await change("plum-harbor-violet-9")).status).toBe(200);
+    store.lock();
+    expect(await store.unlock("plum-harbor-violet-9")).toBe(true);
+  });
+
   it("unlock on an unencrypted vault reports skipped, not verified success", async () => {
     const res = await fetch(`${baseUrl}/api/vault/unlock`, {
       method: "POST",
