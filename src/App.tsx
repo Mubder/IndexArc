@@ -55,6 +55,7 @@ import { useConfirmDialog } from "./components/app/useConfirmDialog";
 import { useToasts } from "./components/app/useToasts";
 import { useSettingsPatch } from "./components/app/useSettingsPatch";
 import { useVault, vaultStore } from "./state/vaultStore";
+import { startupUpdateCheck } from "./components/settings/UpdatesSection";
 
 export default function App() {
   // All valid Tab values (write and read sides must be symmetric — "analyze"
@@ -384,6 +385,13 @@ export default function App() {
   // Lock-on-minimize: when the window is hidden and the setting is on, lock.
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  // Opt-in update check, once per session after settings arrive.
+  useEffect(() => {
+    if (!settings?.update_check_on_start) return;
+    void startupUpdateCheck(settings).then((v) => {
+      if (v) showToast(`IndexArc ${v} is available — Settings → Updates`, "info");
+    });
+  }, [settings?.update_check_on_start]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setSecretClipboardClearSeconds(settings?.clipboard_clear_seconds);
   }, [settings?.clipboard_clear_seconds]);

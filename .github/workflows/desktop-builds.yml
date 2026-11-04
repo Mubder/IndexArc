@@ -78,6 +78,8 @@ jobs:
           path: |
             dist-desktop/IndexArc-Portable-*.exe
             dist-desktop/IndexArc-Setup-*.exe
+            dist-desktop/IndexArc-Setup-*.exe.blockmap
+            dist-desktop/latest.yml
 
       - name: Locate and Upload macOS Artifacts
         if: matrix.os == 'macos-latest'
@@ -87,6 +89,7 @@ jobs:
           path: |
             dist-desktop/IndexArc-*-mac-*.dmg
             dist-desktop/IndexArc-*-mac-*.zip
+            dist-desktop/latest-mac.yml
 
       - name: Locate and Upload Linux Artifacts
         if: matrix.os == 'ubuntu-latest'
@@ -96,3 +99,29 @@ jobs:
           path: |
             dist-desktop/IndexArc-*-linux-*.AppImage
             dist-desktop/IndexArc-*-linux-*.tar.gz
+            dist-desktop/latest-linux.yml
+
+  # Attach every build, the update manifests (latest*.yml, read by the
+  # in-app updater) and the SBOM to the GitHub Release. Only this job gets
+  # write access, and only for release events.
+  publish-release:
+    name: Attach artifacts to the release
+    if: github.event_name == 'release'
+    needs: build-cross-platform
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          ls -la release-assets
+          gh release upload "$TAG" release-assets/* --clobber --repo "${{ github.repository }}"

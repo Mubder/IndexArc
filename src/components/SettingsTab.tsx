@@ -3,6 +3,7 @@ import { Settings, SystemStatus } from "../types";
 import { getTranslation } from "../utils/i18n";
 import { AppearanceSection } from "./settings/AppearanceSection";
 import { PrivacySection } from "./settings/PrivacySection";
+import { UpdatesSection } from "./settings/UpdatesSection";
 import { ProviderPicker } from "./settings/ProviderPicker";
 import { OllamaPanel } from "./settings/OllamaPanel";
 import { GeminiPanel } from "./settings/GeminiPanel";
@@ -180,6 +181,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       <AppearanceSection onPatchSettings={onPatchSettings} settings={settings} t={t} />
 
       <PrivacySection onPatchSettings={onPatchSettings} settings={settings} t={t} />
+
+      <UpdatesSection onPatchSettings={onPatchSettings} settings={settings} t={t} />
 
       <ProviderPicker onPatchSettings={onPatchSettings} settings={settings} status={status} t={t} />
 

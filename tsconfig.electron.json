@@ -1,9 +1,9 @@
 {
   // Type-checks the Electron main/preload processes (plain CommonJS .cjs).
   // Run by `npm run lint` alongside the main tsconfig. checkJs stays off:
-  // files opt in with a `// @ts-check` header (preload.cjs, shared/verify-dist.cjs).
-  // electron-main.cjs is parsed but not yet opted in — 73 strict-mode errors
-  // (mostly implicit any) remain to burn down; see docs/INDUSTRIAL_ROADMAP.md R2.2.
+  // files opt in with a `// @ts-check` header. All listed files
+  // (electron-main.cjs, preload.cjs, shared/verify-dist.cjs) are opted in and
+  // pass strict mode.
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022", "DOM"],
@@ -16,5 +16,5 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "files": ["electron-main.cjs", "preload.cjs", "shared/verify-dist.cjs"]
+  "files": ["electron-main.cjs", "preload.cjs", "shared/verify-dist.cjs", "shared/updater.cjs"]
 }

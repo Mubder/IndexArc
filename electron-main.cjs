@@ -1,3 +1,4 @@
+// @ts-check
 const { app, BrowserWindow, Menu, MenuItem, dialog, ipcMain, Tray, nativeImage, shell, clipboard } = require("electron");
 const { spawn } = require("child_process");
 const { childEnv } = require("./shared/child-env.cjs");
@@ -31,7 +32,9 @@ const {
   getLanguageTool,
 } = require("./shared/spellcheck.cjs");
 
+/** @type {ReturnType<typeof loadArabicEngine>} */
 let arSpell = null; // ArabicSpellEngine
+/** @type {ReturnType<typeof loadEnglishEngine>} */
 let enSpell = null; // EnglishSpellEngine (SymSpell)
 let ltService = null; // LanguageTool
 
@@ -59,7 +62,7 @@ function loadEnglishDict() {
     console.log("[spellcheck] en.spell: engine loaded but not ready, using LanguageTool fallback");
     return null;
   } catch (e) {
-    console.log(`[spellcheck] en dictionary load failed: ${e && e.message ? e.message : e}`);
+    console.log(`[spellcheck] en dictionary load failed: ${e instanceof Error && e.message ? e.message : e}`);
     console.log("[spellcheck] en.spell: falling back to LanguageTool for English spelling");
     return null;
   }
@@ -98,14 +101,20 @@ function loadSpellcheckers() {
   });
 }
 
+/** @param {string} word */
 function isArabicWord(word) {
   return isArabicToken(word);
 }
 
+/** @param {string} word */
 function isLatinWord(word) {
   return isLatinToken(word);
 }
 
+/**
+ * @param {string} tag
+ * @param {any} e anything that was thrown or rejected (not necessarily an Error)
+ */
 function logCrash(tag, e) {
   try {
     const f = path.join(os.tmpdir(), "indexarc-crash.log");
@@ -133,12 +142,19 @@ process.on("unhandledRejection", (e) => logCrash("unhandledRejection", e));
 // parsing and regex work can no longer freeze the window, and a crash there
 // does not take the shell down. Its secrets are handed over in the child's
 // env only — never this process's env, which Ollama/LanguageTool inherit.
+/** @type {import("electron").UtilityProcess | null} */
 let serverProcess = null;
 let backendPort = 0; // reported by the server once it is listening
 const apiToken = crypto.randomBytes(32).toString("hex");
+/** @type {string | null} */
 let settingsKey = null;
 let ollamaProcess = null;
+/** @typedef {import("electron").BrowserWindow} Win */
+// Callbacks registered on the window only run while it exists; they read
+// `mainWindow` as a non-null `Win` (a cast, no runtime check).
+/** @type {Win | null} */
 let mainWindow = null;
+/** @type {import("electron").Tray | null} */
 let tray = null;
 let isQuiting = false;
 const PORT = Number(process.env.PORT) || 3000;
@@ -183,6 +199,10 @@ function getMarkerPath() {
 
 // Find a candidate root that already contains a real vault (so we never
 // orphan user data when the exe moves to a new folder on update).
+/**
+ * @param {Array<string | null | undefined>} candidates
+ * @returns {string | null}
+ */
 function findExistingVaultRoot(candidates) {
   for (const c of candidates) {
     if (!c) continue;
@@ -199,6 +219,7 @@ function findExistingVaultRoot(candidates) {
   return null;
 }
 
+/** @param {string} root */
 function savePortableRoot(root) {
   try {
     // Persist to registry (preferred) and a marker file (fallback).
@@ -216,6 +237,11 @@ function savePortableRoot(root) {
   } catch {}
 }
 
+/**
+ * @param {string} key
+ * @param {string} value
+ * @returns {string}
+ */
 function regQuery(key, value) {
   try {
     return execFileSync("reg", ["query", key, "/v", value], {
@@ -249,6 +275,7 @@ function loadPortableRoot() {
   return null;
 }
 
+/** @param {string} dir */
 function isWritableDir(dir) {
   try {
     const probe = path.join(dir, ".indexarc-write-test");
@@ -414,8 +441,15 @@ function findOllamaPath() {
   return null;
 }
 
+/**
+ * @param {string} url
+ * @param {string} dest
+ * @param {number} [maxBytes]
+ * @returns {Promise<void>}
+ */
 function downloadFile(url, dest, maxBytes = 2 * 1024 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
+    /** @param {string} u */
     const request = (u) =>
       https
         .get(u, (res) => {
@@ -454,6 +488,11 @@ function downloadFile(url, dest, maxBytes = 2 * 1024 * 1024 * 1024) {
 // it: status must be Valid and the signer must be Ollama. Executing
 // unverifiable code downloaded over the network is the one path in this app
 // that turns a network attacker into code execution — it stays gated.
+/**
+ * @param {string} file
+ * @param {string} expectedOrg
+ * @returns {boolean}
+ */
 function verifyAuthenticode(file, expectedOrg) {
   const safePath = file.replace(/'/g, "''");
   // Report status + subject as JSON and decide here: the old
@@ -475,15 +514,22 @@ function verifyAuthenticode(file, expectedOrg) {
   }
 }
 
-/** CN and O of an X.500 subject must both be exactly `org` (an optional Inc./LLC suffix allowed). */
+/**
+ * CN and O of an X.500 subject must both be exactly `org` (an optional Inc./LLC suffix allowed).
+ * @param {unknown} subject
+ * @param {string} org
+ * @returns {boolean}
+ */
 function signerMatches(subject, org) {
   if (typeof subject !== "string") return false;
+  /** @type {Record<string, string>} */
   const rdn = {};
   for (const part of subject.match(/(?:[^,"]|"[^"]*")+/g) || []) {
     const i = part.indexOf("=");
     if (i < 0) continue;
     rdn[part.slice(0, i).trim().toUpperCase()] = part.slice(i + 1).trim().replace(/^"|"$/g, "");
   }
+  /** @param {unknown} v */
   const ok = (v) => typeof v === "string" && new RegExp(`^${org}(,? (Inc[.]?|LLC))?$`, "i").test(v);
   return ok(rdn.CN) && ok(rdn.O);
 }
@@ -508,7 +554,7 @@ async function installOllama() {
     const p = findOllamaPath();
     return { ok: !!p, path: p };
   } catch (e) {
-    return { ok: false, error: e?.message || String(e) };
+    return { ok: false, error: (e instanceof Error && e.message) || String(e) };
   } finally {
     try {
       fs.unlinkSync(tmp);
@@ -519,6 +565,7 @@ async function installOllama() {
 // Every IPC handler checks WHO is calling: only the main window's top frame,
 // showing our own local server, may reach the bridge (get-api-token hands out
 // the vault pairing token). A subframe or any other webContents is refused.
+/** @param {string} url */
 function isAppUrl(url) {
   try {
     const u = new URL(url);
@@ -532,6 +579,7 @@ function isAppUrl(url) {
   }
 }
 
+/** @param {import("electron").IpcMainInvokeEvent} e */
 function isTrustedSender(e) {
   try {
     if (!mainWindow || mainWindow.isDestroyed() || e.sender !== mainWindow.webContents) return false;
@@ -543,6 +591,10 @@ function isTrustedSender(e) {
   }
 }
 
+/**
+ * @param {string} channel
+ * @param {(e: import("electron").IpcMainInvokeEvent, ...args: unknown[]) => unknown} fn
+ */
 function handleTrusted(channel, fn) {
   ipcMain.handle(channel, (e, ...args) => {
     if (!isTrustedSender(e)) {
@@ -604,26 +656,43 @@ handleTrusted("get-api-token", () => apiToken);
 // Secrets (clearAfterMs > 0) are wiped from the OS clipboard after the delay
 // — but only if the clipboard still holds exactly what we put there, so a
 // newer copy by the user is never clobbered.
+/** @type {NodeJS.Timeout | null} */
 let clipboardClearTimer = null;
-handleTrusted("copy-text", (_e, text, clearAfterMs) => {
+handleTrusted("copy-text", async (_e, text, clearAfterMs) => {
   if (typeof text !== "string" || text.length === 0 || text.length > 1024 * 1024) return false;
   try {
-    clipboard.writeText(text);
+    // Electron 44: writeText/readText return Promises. Awaiting (via
+    // Promise.resolve, so a sync API also works) makes a failed write report
+    // false and lets the timed clear compare real text.
+    await Promise.resolve(clipboard.writeText(text));
     if (clipboardClearTimer) clearTimeout(clipboardClearTimer);
     clipboardClearTimer = null;
     const delay = Number(clearAfterMs);
     if (Number.isFinite(delay) && delay > 0) {
       clipboardClearTimer = setTimeout(() => {
         clipboardClearTimer = null;
-        try {
-          if (clipboard.readText() === text) clipboard.clear();
-        } catch {}
+        // Clear only if the clipboard still holds what we put there.
+        Promise.resolve(clipboard.readText())
+          .then((current) => {
+            if (current === text) clipboard.clear();
+          })
+          .catch(() => {});
       }, Math.min(delay, 10 * 60_000));
     }
     return true;
   } catch {
     return false;
   }
+});
+
+// Auto-update from GitHub Releases (R2.3): checks run only on request from
+// the renderer; install only on signed builds (see shared/updater.cjs).
+require("./shared/updater.cjs").registerUpdater({
+  app,
+  handleTrusted,
+  send: (channel, payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+  },
 });
 
 // Check a batch of words (English and/or Arabic, mixed-language notes are
@@ -731,6 +800,7 @@ function getAppIcon() {
 // exists in plaintext on disk — only safeStorage can unwrap it, so the
 // settings file is unreadable off this user profile. Absent support (or a
 // dev run), the server falls back to plaintext with a log warning.
+/** @param {string} root */
 function initSettingsSecretsKey(root) {
   try {
     if (!app.isPackaged) return; // dev sandbox: exercise the fallback path
@@ -830,13 +900,18 @@ function startBackendServer() {
   spawnBackend(PORT);
 }
 
+/** @type {{ serverPath: string, distDir: string, portableRoot: string } | null} */
 let backendLaunch = null;
 let backendStopping = false;
+/** @type {number[]} */
 const backendCrashes = [];
 
+/** @param {number} preferredPort */
 function spawnBackend(preferredPort) {
   const { utilityProcess } = require("electron");
-  const { serverPath, distDir, portableRoot } = backendLaunch;
+  // Always set by startBackendServer() before the first spawn.
+  const { serverPath, distDir, portableRoot } = /** @type {NonNullable<typeof backendLaunch>} */ (backendLaunch);
+  /** @type {NodeJS.ProcessEnv} */
   const env = {
     ...process.env,
     PORT: String(preferredPort),
@@ -863,7 +938,7 @@ function spawnBackend(preferredPort) {
       dialog.showErrorBox(
         "IndexArc — server failed to start",
         "The vault server could not start:\n\n" +
-          (err && err.message ? err.message : String(err)) +
+          (err instanceof Error && err.message ? err.message : String(err)) +
           "\n\nThe application will close. Your data on disk is untouched."
       );
     } catch {}
@@ -910,6 +985,10 @@ function spawnBackend(preferredPort) {
 
 // Graceful stop: the server flushes its pending emergency snapshot and stops
 // its folder watchers, then exits. Killed after `timeoutMs` regardless.
+/**
+ * @param {number} timeoutMs
+ * @returns {Promise<void>}
+ */
 function stopBackend(timeoutMs) {
   const child = serverProcess;
   if (!child) return Promise.resolve();
@@ -935,6 +1014,10 @@ function stopBackend(timeoutMs) {
 
 // The server reports its ACTUAL bound port — it walks off the preferred port
 // when something already squats it, so the shell must never assume 3000.
+/**
+ * @param {import("electron").BrowserWindow} window
+ * @param {number} [attempts]
+ */
 function waitForServerPort(window, attempts = 0) {
   if (backendPort) {
     pollServerAndLoad(`http://127.0.0.1:${backendPort}`, window);
@@ -952,6 +1035,11 @@ function expectedServerId() {
   return crypto.createHash("sha256").update(apiToken).digest("hex").slice(0, 16);
 }
 
+/**
+ * @param {string} url
+ * @param {import("electron").BrowserWindow} window
+ * @param {number} [attempts]
+ */
 function pollServerAndLoad(url, window, attempts = 0) {
   if (attempts > 120) {
     console.error("Server failed to start.");
@@ -1075,7 +1163,7 @@ function createWindow() {
       menu.append(
         new MenuItem({
           label: suggestion,
-          click: () => mainWindow.webContents.replaceMisspelling(suggestion),
+          click: () => /** @type {Win} */ (mainWindow).webContents.replaceMisspelling(suggestion),
         })
       );
     }
@@ -1092,7 +1180,7 @@ function createWindow() {
           label: `Add "${params.misspelledWord}" to dictionary`,
           click: () => {
             try {
-              mainWindow.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord);
+              /** @type {Win} */ (mainWindow).webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord);
               addCustomWord(params.misspelledWord, getUserDictPath(), arSpell, enSpell);
             } catch (_) {}
           },
@@ -1127,7 +1215,7 @@ function createWindow() {
             menu.append(
               new MenuItem({
                 label: s,
-                click: () => mainWindow.webContents.replace(s),
+                click: () => /** @type {Win} */ (mainWindow).webContents.replace(s),
               })
             );
           }
@@ -1141,7 +1229,7 @@ function createWindow() {
             click: () => {
               try {
                 addCustomWord(word, getUserDictPath(), arSpell, enSpell);
-                mainWindow.webContents.session.addWordToSpellCheckerDictionary(word);
+                /** @type {Win} */ (mainWindow).webContents.session.addWordToSpellCheckerDictionary(word);
               } catch (_) {}
             },
           })
@@ -1167,7 +1255,7 @@ function createWindow() {
     menu.append(new MenuItem({ type: "separator" }));
     menu.append(new MenuItem({ label: "Select All", role: "selectAll" }));
 
-    menu.popup({ window: mainWindow });
+    menu.popup({ window: /** @type {Win} */ (mainWindow) });
   });
 
   mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
@@ -1181,10 +1269,17 @@ function createWindow() {
   waitForServerPort(mainWindow);
 
   // Closing the window sends the app to the tray instead of quitting.
+  // Windows shutdown / logoff — shorter deadline, the OS is not patient.
+  // "session-end" is a window event (it was registered on `app`, where it
+  // never fires).
+  mainWindow.on("session-end", (e) => {
+    quitWithFlush(e, 1500);
+  });
+
   mainWindow.on("close", (e) => {
     if (!isQuiting) {
       e.preventDefault();
-      mainWindow.hide();
+      /** @type {Win} */ (mainWindow).hide();
       return;
     }
   });
@@ -1196,7 +1291,7 @@ function createWindow() {
 }
 
 handleTrusted("select-folder", async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = await dialog.showOpenDialog(/** @type {Win} */ (mainWindow), {
     properties: ["openDirectory"],
     title: "Select Folder",
   });
@@ -1228,6 +1323,10 @@ app.on("window-all-closed", () => {
 // window to push everything to the embedded server (each POST is written
 // straight to disk), then proceed with the quit.
 let flushBeforeExitDone = false;
+/**
+ * @param {number} timeoutMs
+ * @returns {Promise<void>}
+ */
 function requestRendererFlush(timeoutMs) {
   return new Promise((resolve) => {
     if (!mainWindow || mainWindow.isDestroyed()) {
@@ -1253,6 +1352,10 @@ function requestRendererFlush(timeoutMs) {
   });
 }
 
+/**
+ * @param {import("electron").Event | undefined} e
+ * @param {number} timeoutMs
+ */
 function quitWithFlush(e, timeoutMs) {
   if (flushBeforeExitDone) return; // second pass — let the quit proceed
   try {
@@ -1277,10 +1380,6 @@ app.on("before-quit", (e) => {
   quitWithFlush(e, 3000);
 });
 
-// Windows shutdown / logoff — shorter deadline, the OS is not patient.
-app.on("session-end", (e) => {
-  quitWithFlush(e, 1500);
-});
 
 app.on("activate", () => {
   if (mainWindow === null) createWindow();

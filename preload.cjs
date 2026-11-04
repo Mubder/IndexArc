@@ -21,6 +21,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
     });
   },
   flushComplete: () => ipcRenderer.send("flush-complete"),
+  // Auto-update (shared/updater.cjs). Nothing reaches the network until the
+  // renderer calls checkForUpdates.
+  checkForUpdates: () => ipcRenderer.invoke("update-check"),
+  downloadUpdate: () => ipcRenderer.invoke("update-download"),
+  installUpdate: () => ipcRenderer.invoke("update-install"),
+  onUpdateEvent: (/** @type {(name: string, payload: unknown) => void} */ cb) => {
+    for (const name of ["update-progress", "update-ready", "update-error"]) {
+      ipcRenderer.on(name, (_e, payload) => {
+        try { cb(name, payload); } catch {}
+      });
+    }
+  },
 });
 
 // On right-click inside a text field, select the word under the cursor when

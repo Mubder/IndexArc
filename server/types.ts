@@ -87,6 +87,8 @@ export interface AppSettings {
   lock_on_minimize?: boolean;
   /** Seconds before a copied secret is wiped from the clipboard (0 = never). */
   clipboard_clear_seconds?: number;
+  /** Desktop only: check GitHub Releases for a new version at startup (opt-in egress). */
+  update_check_on_start?: boolean;
   enable_ai_proofreader?: boolean;
   /**
    * EGRESS CONSENT (audit H2): cloud AI providers (Gemini/OpenAI/Groq/
@@ -131,6 +133,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   auto_lock_minutes: 5,
   lock_on_minimize: false,
   clipboard_clear_seconds: 45,
+  update_check_on_start: false,
   enable_ai_proofreader: true,
   ai_cloud_consent: false,
   languagetool_enabled: false,

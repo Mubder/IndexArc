@@ -12,6 +12,21 @@ interface ElectronAPI {
   addCustomWord: (word: string) => Promise<void>;
   onFlushRequest: (cb: () => void) => void;
   flushComplete: () => void;
+  checkForUpdates?: () => Promise<UpdateCheckResult>;
+  downloadUpdate?: () => Promise<{ ok: boolean; reason?: string }>;
+  installUpdate?: () => Promise<{ ok: boolean; reason?: string }>;
+  onUpdateEvent?: (cb: (name: "update-progress" | "update-ready" | "update-error", payload: any) => void) => void;
+}
+
+interface UpdateCheckResult {
+  status: "available" | "current" | "unsupported" | "error";
+  current: string;
+  latest?: string;
+  canInstall: boolean;
+  /** "", "unsigned", "portable", "platform" or "dev" */
+  reason: string;
+  message?: string;
+  releasesUrl: string;
 }
 
 declare global {

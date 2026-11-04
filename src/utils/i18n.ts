@@ -259,6 +259,21 @@ export interface TranslationDict {
   sec_encrypt_banner_text: string;
   sec_encrypt_banner_btn: string;
   egress_title: string;
+  update_title: string;
+  update_desc: string;
+  update_on_start: string;
+  update_check_now: string;
+  update_checking: string;
+  update_current: string;
+  update_available: string;
+  update_download: string;
+  update_downloading: string;
+  update_install: string;
+  update_unsigned: string;
+  update_portable: string;
+  update_unsupported: string;
+  update_error: string;
+  update_view_release: string;
   egress_cloud_label: string;
   egress_cloud_desc: string;
   egress_lt_label: string;
@@ -729,6 +744,21 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     sec_encrypt_banner_text: "Entries and notes are currently stored as plain JSON. Enable encryption in Settings → Security.",
     sec_encrypt_banner_btn: "Set Master Password",
     egress_title: "Data Egress Control",
+    update_title: "Updates",
+    update_desc: "Checks GitHub Releases for a newer version. Nothing is sent except a normal web request.",
+    update_on_start: "Check for updates when the app starts",
+    update_check_now: "Check now",
+    update_checking: "Checking…",
+    update_current: "You have the latest version ({v}).",
+    update_available: "Version {v} is available.",
+    update_download: "Download update",
+    update_downloading: "Downloading… {n}%",
+    update_install: "Restart and install",
+    update_unsigned: "This build is not code-signed, so it cannot verify and install updates itself. Download the new version from the release page.",
+    update_portable: "The portable version cannot update itself. Download the new version from the release page.",
+    update_unsupported: "Updates are only available in the installed desktop app.",
+    update_error: "Could not check for updates: {m}",
+    update_view_release: "Open release page",
     egress_cloud_label: "Allow cloud AI providers",
     egress_cloud_desc: "OFF by default. When ON, cloud providers (Gemini/OpenAI/Groq/OpenRouter/Anthropic) receive vault-derived text for search and answers — secret values are never included, only names/types/labels.",
     egress_lt_label: "Allow public LanguageTool API",
@@ -1197,6 +1227,21 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     sec_encrypt_banner_text: "المدخلات والملاحظات محفوظة حاليًا كملفات JSON نصية. فعّل التشفير من الإعدادات ← الأمان.",
     sec_encrypt_banner_btn: "عيّن كلمة المرور الرئيسية",
     egress_title: "التحكم في خروج البيانات",
+    update_title: "التحديثات",
+    update_desc: "يتحقق من إصدارات GitHub بحثًا عن نسخة أحدث. لا يُرسل شيء سوى طلب ويب عادي.",
+    update_on_start: "التحقق من التحديثات عند بدء التطبيق",
+    update_check_now: "تحقق الآن",
+    update_checking: "جارٍ التحقق…",
+    update_current: "لديك أحدث إصدار ({v}).",
+    update_available: "الإصدار {v} متاح.",
+    update_download: "تنزيل التحديث",
+    update_downloading: "جارٍ التنزيل… {n}%",
+    update_install: "إعادة التشغيل والتثبيت",
+    update_unsigned: "هذه النسخة غير موقّعة رقميًا، لذا لا يمكنها التحقق من التحديثات وتثبيتها بنفسها. نزّل الإصدار الجديد من صفحة الإصدارات.",
+    update_portable: "النسخة المحمولة لا تحدّث نفسها. نزّل الإصدار الجديد من صفحة الإصدارات.",
+    update_unsupported: "التحديثات متاحة فقط في تطبيق سطح المكتب المثبّت.",
+    update_error: "تعذّر التحقق من التحديثات: {m}",
+    update_view_release: "فتح صفحة الإصدارات",
     egress_cloud_label: "السماح بمزودي الذكاء الاصطناعي السحابيين",
     egress_cloud_desc: "معطّل افتراضيًا. عند التفعيل، تستقبل المزودات السحابية (Gemini/OpenAI/Groq/OpenRouter/Anthropic) نصوصًا مشتقة من الخزنة للبحث والإجابات — دون تضمين قيم الأسرار مطلقًا، فقط الأسماء والأنواع والوسوم.",
     egress_lt_label: "السماح بواجهة LanguageTool العامة",

@@ -66,6 +66,7 @@ export function settingsRoutes(ctx: RouteContext) {
       "auto_lock_minutes",
       "lock_on_minimize",
       "clipboard_clear_seconds",
+      "update_check_on_start",
       "ai_cloud_consent",
       "languagetool_enabled",
       "llm_provider_override",
@@ -92,7 +93,7 @@ export function settingsRoutes(ctx: RouteContext) {
       patch[k] = body[k];
     }
     // Egress flags are strictly boolean — never trust whatever shape arrives.
-    for (const k of ["ai_cloud_consent", "languagetool_enabled", "enable_live_spellcheck", "enable_ai_proofreader", "lock_on_minimize"] as const) {
+    for (const k of ["ai_cloud_consent", "languagetool_enabled", "enable_live_spellcheck", "enable_ai_proofreader", "lock_on_minimize", "update_check_on_start"] as const) {
       if (patch[k] !== undefined) patch[k] = Boolean(patch[k]);
     }
     if (patch.clipboard_clear_seconds !== undefined) {
