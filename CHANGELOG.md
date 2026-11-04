@@ -10,6 +10,8 @@ Commit messages follow the convention in
 ## [Unreleased]
 
 ### Added
+- CI checks performance at 10k entries on every push (`npm run bench`): p95 save under 50 ms and
+  p95 Ask under 300 ms, with the timings in the job summary.
 - Master password strength meter and a show/hide button on every password field.
 - IndexArc is now open source under the GNU GPL v3 (`LICENSE`). The README states the code-signing
   policy and what the app sends over the network (only what the user turns on).

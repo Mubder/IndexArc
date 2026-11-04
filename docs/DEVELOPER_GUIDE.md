@@ -107,6 +107,9 @@ npm install
 | `npm run build` | `vite build` (UI → `dist/`) then esbuild bundles `server.ts` → `dist/server.cjs`. |
 | `npm start` | Runs the built server (`node dist/server.cjs`). |
 | `npm run lint` | `tsc --noEmit` — type-check the whole project (there is no separate ESLint). |
+| `npm test` | Unit and integration tests (Vitest). `npm run test:coverage` adds the server coverage gate. |
+| `npm run test:e2e` | Electron end-to-end test (Playwright). Run `npm run build` first. |
+| `npm run bench` | Performance budgets at 10k entries ([server/perf.bench.ts](../server/perf.bench.ts)): unlock, list, p95 save/update/delete and p95 Ask. Fails when a budget is exceeded; CI runs it on every push. |
 | `npm run desktop` | Build, then launch the Electron shell (dev). Uses an isolated `.desktop-sandbox/` vault so your real data is untouched. |
 | `npm run desktop:win` | Build + electron-builder → portable `.exe` + NSIS installer. |
 | `npm run desktop:pack` | Unpacked Windows folder only (`dist-desktop/win-unpacked/`). |

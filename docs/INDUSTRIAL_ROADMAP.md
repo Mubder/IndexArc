@@ -49,7 +49,6 @@ Every engineering item in R1–R6 has landed with tests, except those listed und
   - AAD on the JSON envelopes and the `vault.json` header (SQLite rows already have it);
   - a single key-lifecycle document.
 - A self-contained CLI binary (Node SEA) and PATH registration by the installer.
-- The CI benchmark job (bar #5): the 10k benchmark exists in `server/storage-v2.test.ts` but is not timed against budgets in CI.
 
 ---
 
@@ -228,6 +227,7 @@ Every engineering item in R1–R6 has landed with tests, except those listed und
   - `vault.json` is now a header; rows live in `data/vault.db`. The migration snapshots first, then migrates one way at unlock, and falls back to JSON if it fails.
   - A re-key keeps the old key sealed under the new one (`prev_key`) until every row is rewritten, so a crash mid-re-key is recovered at the next unlock.
   - 10k-entry benchmark: unlock ~130 ms, list ~285 ms, create/update/delete/upsert 3–11 ms.
+  - Budgets enforced in CI since 2026-11-04 (`npm run bench`, job "Performance budgets"): p95 save < 50 ms, p95 Ask < 300 ms (local pipeline; the model call is excluded), unlock and list < 1.5 s. Local run: save p95 1.6 ms, Ask p95 126 ms, unlock 476 ms (includes Argon2id), list 264 ms. "UI never blocked > 100 ms" is not measured yet.
   - A real 3k-entry vault migrated from 78 MB of JSON to a 39 MB database. Fixing `/health` (snapshot header peek) took the Library from ~21 s to 1.9 s.
   - **Not done:** `sqlite-vec`/HNSW. Vector search is still a linear scan over decrypted rows, which is fast enough at 10k. Rollback of a single row is detected by a keyed row checksum (2026-11-04); rollback of the whole vault is not.
 
