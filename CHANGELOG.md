@@ -46,6 +46,8 @@ Commit messages follow the convention in
 - A dev or test launch could repoint the installed app's data folder.
 
 ### Security
+- New `docs/KEY-LIFECYCLE.md`: every key and secret, how it is created, stored, rotated and
+  destroyed.
 - Electron: no window can attach a `<webview>`, open a new window or leave the app, and the quit
   handshake now checks who sent it, like every other IPC message.
 - CodeQL static analysis runs in CI on every push, pull request and weekly.

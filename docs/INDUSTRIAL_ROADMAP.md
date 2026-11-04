@@ -34,20 +34,22 @@ Every engineering item in R1–R6 has landed with tests, except those listed und
 | R3 Architecture | Done | fd4dfcd · 08f6bcf · b105882 (SQLite) · 20b1f0b · ae8d226/0d9b042/7cba7f6 · 1385b32 · ed29a02 |
 | R4 Verification | Done | 9ed8696 · 32fca0a · 638c78f · 9423244 · 1c88816 · 2778101 |
 | R5 Assurance & keys | Done except pentest (owner) and Windows Hello / Touch ID | bc0180a |
-| R6 Product | CLI, import/export and hygiene done; hosted mode and sync are designed but not built (gated) | 99e078d · 34efe6f |
+| R6 Product | CLI (now a standalone binary on PATH), import/export and hygiene done; hosted mode and sync are designed but not built (gated) | 99e078d · 34efe6f · d26f8a4 |
+| Follow-ups (2026-11-04) | Done: password policy, AAD on every file, row rollback detection, request-body schemas, Electron guards, CodeQL, CI benchmark budgets, e2e flake fix, standalone CLI, key-lifecycle doc | 7449f3d · d545c9d · 7fe661a · 7dc4920 · 4875f39 · a85c524 · 3bdd61e · d26f8a4 |
 
 **Still open, needs the owner:**
 - Code signing (R2.1): set up Azure Trusted Signing (paid, preferred) or SignPath Foundation (free) and add its secrets/variables (`docs/CODE_SIGNING.md`); the workflow supports both. macOS notarization or dropping macOS targets.
-- Branch protection on `main` (R2.5).
+- Branch protection on `main` (R2.5). Once CI has run on `main`, require the checks "Lint + Test + Dependency audit", "Performance budgets (10k entries)", "Electron end-to-end (set password, save, lock, restart, unlock)", "Build + reinstall data-preservation proof" and "Analyze (javascript-typescript)" (CodeQL).
+- GitHub secret scanning and push protection (repository settings; ASVS 10.1.1).
 - Pentest vendor and timing (R5).
 - Un-deferring hosted mode and sync (R6.4/R6.5; see the ship gates in `docs/design/R6-hosted-and-sync.md`).
 
 **Still open, engineering follow-ups:**
 - Windows Hello / Touch ID unlock (needs a native module, which conflicts with the "no native crypto build" stance; decide with the owner).
-- ASVS L2 gaps (`docs/ASVS-L2.md`):
-  - password policy: 12-character minimum, breached-password check, strength meter, reveal toggle;
-  - AAD on the JSON envelopes and the `vault.json` header (SQLite rows already have it);
-  - a single key-lifecycle document.
+- Remaining ASVS L2 gaps (`docs/ASVS-L2.md` gap summary): unsigned releases (owner), recovery-key follow-ups (say in the UI that a password change does not revoke the code; bind the seal to a vault id), whole-vault rollback (out of scope; see `docs/KEY-LIFECYCLE.md`), and a custom protocol or named pipe instead of loopback HTTP (Electron item 18).
+- The common-password check is an offline dictionary; a breached-password (HIBP k-anonymity) check would be network egress and stays opt-in material for later.
+- macOS: the standalone CLI is built for the runner's architecture (the x64 build carries an arm64 CLI when built on arm64); a universal or per-arch CLI build.
+- "UI never blocked > 100 ms" (bar #5) is not measured yet; the CI benchmark covers save and Ask.
 
 ---
 

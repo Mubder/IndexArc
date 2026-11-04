@@ -54,7 +54,7 @@ Component map used in the evidence column:
 | 1.4.4 | Single access-control mechanism | Met | One mount list; the route-matrix test fails if any route lacks an explicit policy ([server/route-matrix.test.ts](../server/route-matrix.test.ts)). |
 | 1.5.2 | No untrusted serialization formats | Met | JSON only (`express.json`); no native object deserialization anywhere. |
 | 1.5.3 | Input validation at a trusted layer | Met | Server-side coercion ([server/validate.ts](../server/validate.ts)), settings allowlist ([server/routes/settings.ts](../server/routes/settings.ts)), snapshot-name regex ([server/routes/misc.ts](../server/routes/misc.ts)). |
-| 1.6.1 | Key management policy | Partial | Key handling is documented in [SECURITY.md](../SECURITY.md), the ADR and code comments. No single key-lifecycle document (generation, rotation, destruction, recovery). Write one alongside the recovery-key feature. |
+| 1.6.1 | Key management policy | Met | [KEY-LIFECYCLE.md](KEY-LIFECYCLE.md) lists every key and secret (origin, storage, lifetime, rotation, destruction) and the setup, unlock, lock, re-key, KDF-upgrade, recovery and export flows, with residual risks. |
 | 1.6.2 | Key material protected (vault/OS store) | Partial | Settings wrap key is sealed by the OS (`safeStorage`, `initSettingsSecretsKey` in [electron-main.cjs](../electron-main.cjs)). The vault key exists only in server memory and is never stored. The settings wrap key and the API token travel in the utilityProcess environment, readable by same-user processes. |
 | 1.6.3 | No hard-coded keys or passwords | Met | Keys are random (`crypto.randomBytes`) or password-derived. Repo audit in [SECURITY.md](../SECURITY.md). |
 | 1.6.4 | Symmetric keys not stored with low protection | Partial | The integrity-manifest HMAC key is stored in plaintext next to the data (`manifestKeyFile`, [server/store.ts](../server/store.ts)). This is documented as a recovery aid, not a security control. |
@@ -178,7 +178,7 @@ server-side unlocked state. No cookies are used anywhere.
 | 6.2.8 | Constant-time comparisons | Met | Token comparison via SHA-256 + `timingSafeEqual` ([server/auth.ts](../server/auth.ts) `tokenMatches`). |
 | 6.3.1 | CSPRNG for random values | Met | `crypto.randomBytes` for keys, salts, IVs, tokens. |
 | 6.3.2 | Random GUIDs | Met | Record ids are random UUIDs ([adr/0001](adr/0001-storage-engine.md)). |
-| 6.4.1 | Key management solution | Partial | No KMS (local app). Vault key is password-derived and memory-only; settings wrap key is OS-sealed; optional recovery-key escrow sealed to an X25519 public key ([server/recovery.ts](../server/recovery.ts)). |
+| 6.4.1 | Key management solution | Partial | No KMS (local app). Vault key is password-derived and memory-only; settings wrap key is OS-sealed; optional recovery-key escrow sealed to an X25519 public key ([server/recovery.ts](../server/recovery.ts)). Full inventory: [KEY-LIFECYCLE.md](KEY-LIFECYCLE.md). |
 | 6.4.2 | Key material not exposed | Partial | `lock()` zeroizes the vault key and purges caches; KDF-upgrade and reconcile paths zeroize temporary keys ([server/store.ts](../server/store.ts)). Still in memory while unlocked; strings (the password, decrypted JSON) cannot be zeroized in JS; settings key and token sit in the server env. |
 | — | AAD binds ciphertext to context | Met | SQLite rows use AAD `indexarc:v2:<table>:<id>` ([server/store.ts](../server/store.ts) `VaultStore.aad`). The `vault.json` header and every JSON envelope (vectors, scratchpad, archive, revisions, scan sessions) use AAD `indexarc:file:v1:<role>` (`fileAad`/`openEnvelope` in [server/crypto.ts](../server/crypto.ts)). Once the header is bound, an unbound or mis-bound companion is refused; vaults written before this are upgraded on unlock, header last. A vault id is not needed in the AAD: each vault has its own random salt, so another vault's files never decrypt. Tests: [server/storage-v2.test.ts](../server/storage-v2.test.ts) "detects a row body swapped between records", [server/file-aad.test.ts](../server/file-aad.test.ts). |
 | — | Rollback / deletion detection | Met | `vault.db` keeps a keyed checksum over its sealed rows: meta `rowsum` = XOR of HMAC(HKDF(vault key, `indexarc:rowsum:v1`), table, id, GCM tag) over every row, updated in the same transaction as each row change ([server/db/recordDb.ts](../server/db/recordDb.ts)). It is checked on unlock and with the integrity check; a row replaced by an older sealed copy, removed, or copied in from another copy of the vault raises an integrity warning and a SECURITY log entry. The encrypted header records that the checksum exists, so deleting it is reported too. Not covered: rolling back the whole vault (every file together) to an older copy, which is indistinguishable from restoring a backup. Tests: [server/row-rollback.test.ts](../server/row-rollback.test.ts). |
@@ -339,8 +339,8 @@ Counts for the ASVS tables above (Electron checklist counted separately).
 
 | Status | ASVS rows | Electron rows |
 |---|---|---|
-| Met | 123 | 16 |
-| Partial | 42 | 3 |
+| Met | 124 | 16 |
+| Partial | 41 | 3 |
 | N/A | 23 | 1 |
 | Gap | 4 | 0 |
 | **Total** | **192** | **20** |
