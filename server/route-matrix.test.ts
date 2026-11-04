@@ -35,6 +35,11 @@ const POLICY: Record<string, Policy> = {
   "POST /api/vault/recover": "token",
   "GET /api/diagnostics/export": "token",
   "POST /api/diagnostics/crash": "token",
+  "POST /api/porting/import/preview": "token+unlocked",
+  "POST /api/porting/export": "token+unlocked",
+  "GET /api/entries/hygiene": "token+unlocked",
+  "PATCH /api/entries/:id/hygiene": "token+unlocked",
+  "GET /api/entries/:id/usages": "token+unlocked",
 
   // --- analyze ---
   "POST /api/analyze": "token+unlocked",

@@ -28,6 +28,12 @@ export interface VaultEntry {
   notes?: string;
   /** Origin file when extracted from folder scan */
   source_file?: string;
+  /** Secret hygiene (R6.3): when the credential stops working (ISO date). */
+  expires_at?: string;
+  /** Rotation reminder interval in days. */
+  rotate_every_days?: number;
+  /** Last time the user marked it rotated (defaults to created_at). */
+  last_rotated_at?: string;
 }
 
 export interface VectorChunk {

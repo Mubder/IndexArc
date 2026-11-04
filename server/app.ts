@@ -7,6 +7,7 @@ import type { FolderWatcherManager } from "./services/folderWatcher.js";
 import { apiAuthMiddleware } from "./auth.js";
 import { vaultRoutes, checkVaultUnlocked } from "./routes/vault.js";
 import { entriesRoutes } from "./routes/entries.js";
+import { portingRoutes } from "./routes/porting.js";
 import { foldersRoutes, fsRoutes } from "./routes/folders.js";
 import { aiRoutes } from "./routes/ai.js";
 import { spellcheckRoutes, createSpellcheckEngines } from "./routes/spellcheck.js";
@@ -36,6 +37,8 @@ export const protectedPaths = [
   // Recovery-key status / create / remove. NOT /api/vault/recover (the
   // locked-state "forgot password" entry point, a different path).
   "/api/vault/recovery",
+  // Import preview + export (R6.2).
+  "/api/porting",
 ];
 
 export interface CreateAppDeps {
@@ -149,6 +152,7 @@ export function createApp({ paths, store, audit, watchers }: CreateAppDeps): { a
 
   // --- Entries (CRUD, save, park, check-duplicate) ---
   app.use("/api/entries", entriesRoutes(ctx));
+  app.use("/api/porting", portingRoutes(ctx));
 
   // --- Folder scan, watch, sessions, filesystem browser ---
   app.use("/api/folders", foldersRoutes(ctx));

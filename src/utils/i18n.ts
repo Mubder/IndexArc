@@ -714,6 +714,42 @@ export interface TranslationDict {
   health_download_hint: string;
   crash_reports_label: string;
   crash_reports_desc: string;
+  hyg_title: string;
+  hyg_expires: string;
+  hyg_rotate_days: string;
+  hyg_save: string;
+  hyg_saved: string;
+  hyg_mark_rotated: string;
+  hyg_marked_rotated: string;
+  hyg_where_used: string;
+  hyg_last_rotated: string;
+  hyg_no_folders: string;
+  hyg_not_found: string;
+  hyg_truncated: string;
+  hyg_state_expired: string;
+  hyg_state_rotation_due: string;
+  hyg_state_expiring: string;
+  hyg_card_title: string;
+  hyg_all_good: string;
+  hyg_none_tracked: string;
+  port_title: string;
+  port_import_title: string;
+  port_import_desc: string;
+  port_choose_file: string;
+  port_passphrase: string;
+  port_open: string;
+  port_found: string;
+  port_import_btn: string;
+  port_imported: string;
+  port_export_title: string;
+  port_fmt_encrypted: string;
+  port_fmt_env: string;
+  port_new_passphrase: string;
+  port_pass_short: string;
+  port_plain_warning: string;
+  port_plain_confirm: string;
+  port_export_btn: string;
+  port_exported: string;
 }
 
 export const translations: Record<UiLanguage, TranslationDict> = {
@@ -1429,6 +1465,42 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     health_download_hint: "Redacted diagnostics for a bug report: no secrets, e-mail addresses or your user name",
     crash_reports_label: "Keep a crash log for bug reports",
     crash_reports_desc: "Records error messages and stack traces only, redacted on this device. Nothing is sent anywhere; the log goes into Download report in App health.",
+    hyg_title: "Expiry and rotation",
+    hyg_expires: "Expires on",
+    hyg_rotate_days: "Rotate every (days)",
+    hyg_save: "Save",
+    hyg_saved: "Saved",
+    hyg_mark_rotated: "Mark rotated",
+    hyg_marked_rotated: "Marked as rotated today",
+    hyg_where_used: "Where used",
+    hyg_last_rotated: "Last rotated",
+    hyg_no_folders: "No folders to search. Add a watched folder in Settings.",
+    hyg_not_found: "Not found in {n} files.",
+    hyg_truncated: "The search stopped early; there may be more.",
+    hyg_state_expired: "Expired",
+    hyg_state_rotation_due: "Rotate now",
+    hyg_state_expiring: "Expires soon",
+    hyg_card_title: "Expiry and rotation",
+    hyg_all_good: "Nothing has expired or is due for rotation.",
+    hyg_none_tracked: "Set an expiry date or rotation period on a secret to track it here.",
+    port_title: "Import and export",
+    port_import_title: "Import",
+    port_import_desc: "From a .env file, Bitwarden JSON, 1Password or generic CSV, KeePass XML, or an IndexArc encrypted export. You review everything before it is saved.",
+    port_choose_file: "Choose file…",
+    port_passphrase: "Export passphrase",
+    port_open: "Open",
+    port_found: "Found {n} secrets ({format})",
+    port_import_btn: "Import {n} selected",
+    port_imported: "Imported {n} entries.",
+    port_export_title: "Export",
+    port_fmt_encrypted: "Encrypted (.iaexport)",
+    port_fmt_env: "Plain .env",
+    port_new_passphrase: "New passphrase (12+ characters)",
+    port_pass_short: "The passphrase must be at least 12 characters.",
+    port_plain_warning: "I understand a .env file is plain text: anyone who gets the file can read every secret in it.",
+    port_plain_confirm: "Confirm the plain-text warning first.",
+    port_export_btn: "Export",
+    port_exported: "Exported {n} entries.",
   },
   ar: {
     tab_home: "الرئيسية",
@@ -2142,6 +2214,42 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     health_download_hint: "تشخيص منقّح لإرفاقه ببلاغ خطأ: بلا أسرار أو عناوين بريد أو اسم المستخدم",
     crash_reports_label: "الاحتفاظ بسجل الأعطال لبلاغات الأخطاء",
     crash_reports_desc: "يسجّل رسائل الأخطاء وتتبّع المكدّس فقط، بعد تنقيحها على هذا الجهاز. لا يُرسل أي شيء؛ يُضاف السجل إلى «تنزيل التقرير» في صحة التطبيق.",
+    hyg_title: "انتهاء الصلاحية والتدوير",
+    hyg_expires: "ينتهي في",
+    hyg_rotate_days: "التدوير كل (أيام)",
+    hyg_save: "حفظ",
+    hyg_saved: "تم الحفظ",
+    hyg_mark_rotated: "تعليم كمُدوَّر",
+    hyg_marked_rotated: "عُلّم كمُدوَّر اليوم",
+    hyg_where_used: "أين يُستخدم",
+    hyg_last_rotated: "آخر تدوير",
+    hyg_no_folders: "لا توجد مجلدات للبحث. أضف مجلدًا مراقبًا في الإعدادات.",
+    hyg_not_found: "غير موجود في {n} ملف.",
+    hyg_truncated: "توقف البحث مبكرًا؛ قد توجد نتائج أخرى.",
+    hyg_state_expired: "منتهي",
+    hyg_state_rotation_due: "دوّره الآن",
+    hyg_state_expiring: "ينتهي قريبًا",
+    hyg_card_title: "انتهاء الصلاحية والتدوير",
+    hyg_all_good: "لا شيء منتهٍ أو مستحق للتدوير.",
+    hyg_none_tracked: "حدّد تاريخ انتهاء أو فترة تدوير لسرّ لتتبعه هنا.",
+    port_title: "الاستيراد والتصدير",
+    port_import_title: "استيراد",
+    port_import_desc: "من ملف ‎.env أو Bitwarden JSON أو 1Password أو CSV عام أو KeePass XML أو تصدير IndexArc مشفّر. تراجع كل شيء قبل الحفظ.",
+    port_choose_file: "اختر ملفًا…",
+    port_passphrase: "عبارة مرور التصدير",
+    port_open: "فتح",
+    port_found: "عُثر على {n} سرًّا ({format})",
+    port_import_btn: "استيراد {n} محدد",
+    port_imported: "تم استيراد {n} عنصرًا.",
+    port_export_title: "تصدير",
+    port_fmt_encrypted: "مشفّر (‎.iaexport)",
+    port_fmt_env: "‎.env نصّي",
+    port_new_passphrase: "عبارة مرور جديدة (12 حرفًا على الأقل)",
+    port_pass_short: "يجب أن تكون عبارة المرور 12 حرفًا على الأقل.",
+    port_plain_warning: "أفهم أن ملف ‎.env نص عادي: أي شخص يحصل على الملف يمكنه قراءة كل الأسرار فيه.",
+    port_plain_confirm: "أكّد تحذير النص العادي أولًا.",
+    port_export_btn: "تصدير",
+    port_exported: "تم تصدير {n} عنصرًا.",
   },
 };
 

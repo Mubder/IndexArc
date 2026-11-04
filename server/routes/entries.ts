@@ -4,6 +4,8 @@ import { saveCandidate, saveMany, clarifyEntry } from "../services/vault.js";
 import { sendSSE } from "./sse.js";
 import { wrapAsync } from "../asyncWrap.js";
 import type { RouteContext } from "./types.js";
+import path from "path";
+import { findUsages, hygienePatch, hygieneSummary } from "../hygiene.js";
 
 export function entriesRoutes(ctx: RouteContext) {
   const r = Router();
@@ -99,6 +101,37 @@ export function entriesRoutes(ctx: RouteContext) {
       return res.json(store.getNeedsAttention());
     }
     res.json(store.listEntries({ status: status as any, family }));
+  });
+
+  // Secret hygiene (R6.3). Registered before "/:id".
+  r.get("/hygiene", (_req, res) => {
+    res.json(hygieneSummary(store.listEntries()));
+  });
+
+  r.patch("/:id/hygiene", (req, res) => {
+    let patch;
+    try {
+      patch = hygienePatch(req.body);
+    } catch (e: any) {
+      return res.status(400).json({ error: e.message });
+    }
+    const updated = store.updateEntry(req.params.id, patch);
+    if (!updated) return res.status(404).json({ error: "Not found" });
+    sendSSE("entries-changed", { action: "hygiene" });
+    res.json(updated);
+  });
+
+  // "Where is this key used": search watched folders (and the entry's own
+  // source file's folder) for the value. Local only; paths are returned,
+  // never file contents.
+  r.get("/:id/usages", (req, res) => {
+    const e = store.getEntry(req.params.id);
+    if (!e) return res.status(404).json({ error: "Not found" });
+    if (!e.value || e.value.length < 6) return res.status(400).json({ error: "Value too short to search for reliably" });
+    const roots = store.listWatchedFolders().map((f) => f.path);
+    if (e.source_file) roots.push(path.dirname(e.source_file));
+    if (!roots.length) return res.json({ usages: [], scanned_files: 0, truncated: false, roots: 0 });
+    res.json({ ...findUsages(e.value, [...new Set(roots)]), roots: new Set(roots).size });
   });
 
   r.get("/:id", (req, res) => {

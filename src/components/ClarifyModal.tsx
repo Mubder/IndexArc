@@ -2,6 +2,7 @@ import React, { useId, useState } from "react";
 import { VaultEntry, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
 import { useDialogA11y } from "../hooks/useDialogA11y";
+import { HygienePanel } from "./HygienePanel";
 
 interface ClarifyModalProps {
   isOpen: boolean;
@@ -143,6 +144,8 @@ export const ClarifyModal: React.FC<ClarifyModalProps> = ({
             </p>
           )}
         </div>
+
+        {clarify.family === "secret" && clarify.id && <HygienePanel entry={clarify} t={t} />}
 
         <div className="flex justify-end gap-2 pt-2">
           <button

@@ -13,6 +13,9 @@ export interface VaultEntry {
   notes?: string;
   /** Origin marker, e.g. "scratchpad" when saved from the Scratchpad */
   source_file?: string;
+  expires_at?: string;
+  rotate_every_days?: number;
+  last_rotated_at?: string;
 }
 
 export interface AnalyzeCandidate {

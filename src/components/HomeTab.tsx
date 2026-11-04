@@ -3,6 +3,7 @@ import { Plus, Sparkles, Inbox, Save, SkipForward } from "lucide-react";
 import { VaultEntry, AnalyzeCandidate, Settings } from "../types";
 import type { SystemStatus, HealthReport, FolderScanSession, LibraryFilter } from "../types";
 import { KpiTiles, HealthCard, VaultMixCard, ServicesCard, RecentList } from "./home/DashboardCards";
+import { HygieneCard } from "./home/HygieneCard";
 import { EntryCard } from "./EntryCard";
 import { CandidateCard } from "./CandidateCard";
 import { getTranslation } from "../utils/i18n";
@@ -221,6 +222,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
 
       <aside className="space-y-5 min-w-0">
         <HealthCard health={health} t={t} onOpenDetails={onOpenHealth} />
+        <HygieneCard t={t} refreshKey={entries} />
         <VaultMixCard status={status} t={t} />
         <ServicesCard status={status} settings={settings} scanSession={scanSession} t={t} onOpenFolders={onOpenFolders} onOpenSettings={onOpenSettings} />
       </aside>

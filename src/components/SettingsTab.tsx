@@ -13,6 +13,7 @@ import { AdvancedAiSection } from "./settings/AdvancedAiSection";
 import { SecuritySection } from "./settings/SecuritySection";
 import { EmergencySection, type EmergencySnapshot } from "./settings/EmergencySection";
 import { LogsSection } from "./settings/LogsSection";
+import { PortingSection } from "./settings/PortingSection";
 import { fill } from "./home/DashboardCards";
 
 interface SettingsTabProps {
@@ -198,6 +199,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       <AdvancedAiSection onPatchSettings={onPatchSettings} settings={settings} t={t} />
 
       <SecuritySection handleRemovePassword={handleRemovePassword} handleSetupPassword={handleSetupPassword} secError={secError} secPassword={secPassword} setSecPassword={setSecPassword} t={t} vaultStatus={vaultStatus} />
+
+      <PortingSection t={t} encrypted={!!vaultStatus?.encryption_enabled} />
 
       <EmergencySection confirmRestore={confirmRestore} emgBusy={emgBusy} emgMsg={emgMsg} fmtDate={fmtDate} handleCreateSnapshot={handleCreateSnapshot} handleRestoreSnapshot={handleRestoreSnapshot} loadSnapshots={loadSnapshots} onOpenHealth={onOpenHealth} setConfirmRestore={setConfirmRestore} snapshots={snapshots} status={status} t={t} />
 
