@@ -14,14 +14,44 @@ const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "indexarc-e2e-"));
 const PASSWORD = `e2e-${crypto.randomBytes(9).toString("base64url")}`;
 const SECRET = `sk_test_e2e${crypto.randomBytes(10).toString("hex")}`;
 
+// Main-process output and renderer console, attached to the report when the
+// test fails (a stall otherwise leaves nothing to go on).
+const LOG: string[] = [];
+const started = Date.now();
+const log = (src: string, line: string) => LOG.push(`+${((Date.now() - started) / 1000).toFixed(1)}s [${src}] ${line.trimEnd()}`);
+const running = new Set<ElectronApplication>();
+
+/** The window showing the app (served from the local server), not DevTools. */
+async function appWindow(app: ElectronApplication, timeoutMs = 60_000): Promise<Page> {
+  const isApp = (p: Page) => /^http:\/\/(127\.0\.0\.1|localhost):\d+\//.test(p.url());
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = app.windows().find(isApp);
+    if (found) return found;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`No app window after ${timeoutMs} ms; windows: ${app.windows().map((w) => w.url()).join(", ")}`);
+}
+
 async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
+  log("test", "launch");
   const app = await electron.launch({
     args: [path.resolve("electron-main.cjs")],
     env: { ...process.env, INDEXARC_ROOT: ROOT, ELECTRON_ENABLE_LOGGING: "0" },
     timeout: 60_000,
   });
-  const page = await app.firstWindow();
+  running.add(app);
+  app.process().stdout?.on("data", (d) => log("main", String(d)));
+  app.process().stderr?.on("data", (d) => log("main:err", String(d)));
+  app.on("window", (w) => log("test", `window opened at ${w.url() || "(blank)"}`));
+  // Not app.firstWindow(): unpackaged runs also open a detached DevTools
+  // window, and whichever appears first would win (the old e2e flake: the
+  // test then waited 60 s for a password field inside DevTools).
+  const page = await appWindow(app);
+  page.on("console", (m) => log(`renderer:${m.type()}`, m.text()));
+  page.on("pageerror", (e) => log("renderer:pageerror", String(e)));
   await page.waitForLoadState("domcontentloaded");
+  log("test", `app window at ${page.url()}`);
   return { app, page };
 }
 
@@ -29,9 +59,25 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
 async function quit(app: ElectronApplication) {
   await app.evaluate(({ app }) => app.quit());
   await app.waitForEvent("close", { timeout: 30_000 }).catch(() => {});
+  running.delete(app);
 }
 
 test.describe.configure({ mode: "serial" });
+
+test.afterEach(async ({}, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus) {
+    await testInfo.attach("app-log.txt", { body: LOG.join("\n"), contentType: "text/plain" });
+  }
+  // Never leave an Electron process behind: it would hold the worker until
+  // the teardown timeout.
+  for (const app of running) {
+    await app.close().catch(() => {});
+    try {
+      app.process().kill();
+    } catch {}
+  }
+  running.clear();
+});
 
 test.afterAll(() => {
   fs.rmSync(ROOT, { recursive: true, force: true });
