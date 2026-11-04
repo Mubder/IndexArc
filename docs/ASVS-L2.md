@@ -180,7 +180,7 @@ server-side unlocked state. No cookies are used anywhere.
 | 6.3.2 | Random GUIDs | Met | Record ids are random UUIDs ([adr/0001](adr/0001-storage-engine.md)). |
 | 6.4.1 | Key management solution | Partial | No KMS (local app). Vault key is password-derived and memory-only; settings wrap key is OS-sealed; optional recovery-key escrow sealed to an X25519 public key ([server/recovery.ts](../server/recovery.ts)). |
 | 6.4.2 | Key material not exposed | Partial | `lock()` zeroizes the vault key and purges caches; KDF-upgrade and reconcile paths zeroize temporary keys ([server/store.ts](../server/store.ts)). Still in memory while unlocked; strings (the password, decrypted JSON) cannot be zeroized in JS; settings key and token sit in the server env. |
-| — | AAD binds ciphertext to context | Partial | SQLite rows use AAD `indexarc:v2:<table>:<id>` ([server/store.ts](../server/store.ts) `VaultStore.aad`). Test: [server/storage-v2.test.ts](../server/storage-v2.test.ts) "detects a row body swapped between records". The `vault.json` header and the JSON envelopes (scratchpad, archive, revisions, scan sessions) are sealed **without** AAD, so one envelope could be swapped for another of the same vault. |
+| — | AAD binds ciphertext to context | Met | SQLite rows use AAD `indexarc:v2:<table>:<id>` ([server/store.ts](../server/store.ts) `VaultStore.aad`). The `vault.json` header and every JSON envelope (vectors, scratchpad, archive, revisions, scan sessions) use AAD `indexarc:file:v1:<role>` (`fileAad`/`openEnvelope` in [server/crypto.ts](../server/crypto.ts)). Once the header is bound, an unbound or mis-bound companion is refused; vaults written before this are upgraded on unlock, header last. A vault id is not needed in the AAD: each vault has its own random salt, so another vault's files never decrypt. Tests: [server/storage-v2.test.ts](../server/storage-v2.test.ts) "detects a row body swapped between records", [server/file-aad.test.ts](../server/file-aad.test.ts). |
 | — | Rollback / deletion detection | **Gap** | Row deletion or replay of an older sealed row is not detected ([adr/0001](adr/0001-storage-engine.md) "Worse / accepted"). A signed `rev` or Merkle root in the header is the follow-up. |
 
 ## V7 Error handling and logging
@@ -350,7 +350,7 @@ Priority gaps for the roadmap:
 1. ~~8.2.1 Cache-Control on `/api`~~ fixed 2026-11-04.
 2. **Unsigned releases (10.3.1, 10.3.2).** The signed-update path exists but no build is signed, so updates cannot self-install and the package has no publisher identity. Needs the certificate decision (R2.1).
 3. **Row rollback / deletion not detected (V6).** Add a keyed `rev` or Merkle root to the sealed header ([adr/0001](adr/0001-storage-engine.md)).
-4. **AAD missing on JSON envelopes (V6, Partial).** Header, scratchpad, archive, revisions and scan sessions should bind AAD (file role + vault id), matching the roadmap's "AAD everywhere".
+4. ~~AAD missing on JSON envelopes (V6)~~ landed 2026-11-04: header and every JSON envelope bound to their file role.
 5. ~~Password policy (2.1.1, 2.1.7, 2.1.8, 2.1.12)~~ landed 2026-11-04: 12-character minimum, offline common-password check, strength meter, reveal toggle.
 6. ~~Change password (2.1.5)~~ landed 2026-11-04.
 7. **Recovery (2.5.6) follow-ups.** Landed 2026-11-04. Still to do: say in the UI that a password change does not revoke the code, and bind the seal's AAD to a vault id.

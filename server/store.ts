@@ -12,7 +12,7 @@ import type {
   WatchedFolder,
 } from "./types.js";
 import { DEFAULT_SETTINGS } from "./types.js";
-import { deriveKeyAsync, generateSalt, decryptString, encryptString, envelopePayload, kdfFromEnvelope, kdfNeedsUpgrade, currentKdf } from "./crypto.js";
+import { deriveKeyAsync, generateSalt, decryptString, encryptString, envelopePayload, kdfFromEnvelope, kdfNeedsUpgrade, currentKdf, openEnvelope } from "./crypto.js";
 import { RecordDb, RECORD_TABLES, type RecordRow, type RecordTable } from "./db/recordDb.js";
 import type { KdfParams } from "./crypto.js";
 import { addLog } from "./logs.js";
@@ -323,6 +323,8 @@ export class VaultStore {
   // The KDF that produced encryptionKey — written into every envelope so a
   // session still on a legacy (PBKDF2) key never labels its writes Argon2id.
   private encryptionKdf: KdfParams | null = null;
+  /** Cache for headerAadBound(): vault.json's mtime+size → bound? */
+  private _headerBoundCache: { stamp: string; bound: boolean } | null = null;
 
   private keyKdf(): KdfParams {
     return this.encryptionKdf ?? currentKdf();
@@ -537,7 +539,7 @@ export class VaultStore {
       if (!rec?.sealed) throw new Error("No recovery key was set up for this vault.");
       const key = openWithRecoveryCode(rec.sealed, code);
       try {
-        decryptString(header.ciphertext, key, header.iv, header.authTag);
+        openEnvelope(header, key, "vault");
       } catch {
         key.fill(0);
         throw new Error("This recovery key is out of date for this vault (it was replaced or the vault was restored from an older copy).");
@@ -560,7 +562,7 @@ export class VaultStore {
     if (!header?.encrypted) throw new Error("This vault has no master password.");
     const key = await deriveKeyAsync(password, header.salt, kdfFromEnvelope(header));
     try {
-      decryptString(header.ciphertext, key, header.iv, header.authTag);
+      openEnvelope(header, key, "vault");
       return { key, header };
     } catch {
       key.fill(0);
@@ -752,7 +754,7 @@ export class VaultStore {
     try {
       const kdf = kdfFromEnvelope(raw);
       const key = await deriveKeyAsync(password, raw.salt, kdf);
-      const decrypted = decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
+      const decrypted = openEnvelope(raw, key, "vault");
       JSON.parse(decrypted); // Verify valid JSON
       if (epoch !== this.lockEpoch) {
         // Locked (auto-lock, minimize) while the KDF ran: honour the lock.
@@ -792,6 +794,13 @@ export class VaultStore {
           // upgrade had to lock to stay consistent, report that honestly.
           if (!this.encryptionKey) return false;
         }
+      }
+      // Bind each vault file to its role (AAD). A KDF upgrade above already
+      // rewrote everything bound, which makes this a no-op.
+      try {
+        this.maybeBindFileAad();
+      } catch (e: any) {
+        addLog("DATA", `Binding vault files to their roles failed (${e?.message}) — files stay as they are. Retried on next unlock.`);
       }
       // Verified knowledge of the master password — end the encryption grace
       // period if its window has elapsed (staged plaintext copies are then
@@ -1182,14 +1191,14 @@ export class VaultStore {
       const raw = readJsonOrQuarantine<any>(this.paths.vaultFile, null, "vault.json");
       const kdf = kdfFromEnvelope(raw);
       key = await deriveKeyAsync(password, raw.salt, kdf);
-      const decryptedVault = decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
+      const decryptedVault = openEnvelope(raw, key, "vault");
       const vault = JSON.parse(decryptedVault) as VaultFile;
 
       let vectors: VectorsFile = { version: VECTOR_SCHEMA, chunks: [] };
       try {
         const rawVectors = readJsonOrQuarantine<any>(this.paths.vectorsFile, null, "vectors.json");
         if (rawVectors && rawVectors.encrypted) {
-          const decryptedVectors = decryptString(rawVectors.ciphertext, key, rawVectors.iv, rawVectors.authTag);
+          const decryptedVectors = openEnvelope(rawVectors, key, "vectors", raw.aad !== undefined);
           vectors = JSON.parse(decryptedVectors) as VectorsFile;
         } else if (rawVectors) {
           vectors = rawVectors;
@@ -1466,7 +1475,7 @@ export class VaultStore {
     if ((rawDisk && rawDisk.encrypted) || this.encryptionKey) {
       if (!this.encryptionKey) throw new Error("Vault is locked");
       const salt = this.encryptionSaltHex || rawDisk?.salt || generateSalt();
-      const env = envelopePayload(JSON.stringify(body), this.encryptionKey, salt, 2, this.keyKdf());
+      const env = envelopePayload(JSON.stringify(body), this.encryptionKey, salt, 2, this.keyKdf(), this.headerRole());
       this.persist(this.paths.vaultFile, JSON.stringify({ ...env, storage: STORAGE_V2 }, null, 2));
     } else {
       this.refusePlaintextWrite("vault.json");
@@ -1621,7 +1630,7 @@ export class VaultStore {
         throw new Error("Vault is locked");
       }
       try {
-        const decrypted = decryptString(raw.ciphertext, this.encryptionKey, raw.iv, raw.authTag);
+        const decrypted = openEnvelope(raw, this.encryptionKey, "vault");
         const vault = JSON.parse(decrypted) as VaultFile;
         this._entriesCache = vault.entries;
         return vault;
@@ -1657,7 +1666,7 @@ export class VaultStore {
       // The stored salt MUST be the one the key was derived from.
       const salt = this.encryptionSaltHex || rawDisk?.salt || generateSalt();
       const text = JSON.stringify(vault, null, 2);
-      this.persist(this.paths.vaultFile, JSON.stringify(envelopePayload(text, this.encryptionKey, salt, 1, this.keyKdf()), null, 2));
+      this.persist(this.paths.vaultFile, JSON.stringify(envelopePayload(text, this.encryptionKey, salt, 1, this.keyKdf(), this.headerRole()), null, 2));
     } else {
       this.refusePlaintextWrite("vault.json");
       this.persist(this.paths.vaultFile, JSON.stringify(vault, null, 2));
@@ -1842,7 +1851,7 @@ export class VaultStore {
         throw new Error("Vault is locked");
       }
       try {
-        const decrypted = decryptString(raw.ciphertext, this.encryptionKey, raw.iv, raw.authTag);
+        const decrypted = openEnvelope(raw, this.encryptionKey, "vectors", this.headerAadBound());
         return parse(JSON.parse(decrypted));
       } catch (e: any) {
         throw new Error("Failed to decrypt vectors");
@@ -1867,7 +1876,7 @@ export class VaultStore {
       }
       const salt = this.encryptionSaltHex || rawDisk?.salt || generateSalt();
       const text = JSON.stringify(v);
-      this.persist(this.paths.vectorsFile, JSON.stringify(envelopePayload(text, this.encryptionKey, salt, 1, this.keyKdf())));
+      this.persist(this.paths.vectorsFile, JSON.stringify(envelopePayload(text, this.encryptionKey, salt, 1, this.keyKdf(), "vectors")));
     } else {
       this.refusePlaintextWrite("vectors.json");
       this.persist(this.paths.vectorsFile, JSON.stringify(v));
@@ -1917,6 +1926,81 @@ export class VaultStore {
   // Same envelope as vault.json ({encrypted, salt, iv, authTag, ciphertext}).
   // Plaintext scratchpad files were the biggest at-rest leak: notes are where
   // users paste secrets, yet they sat outside the encrypted vault.
+  /**
+   * True once vault.json ON DISK is bound to its role (file AAD). From then on
+   * every encrypted companion file must be bound too: an unbound or mis-bound
+   * file is refused instead of silently accepted. Read from disk, not from a
+   * flag, so staged-but-uncommitted header writes do not count.
+   */
+  private headerAadBound(): boolean {
+    let st: fs.Stats;
+    try {
+      st = fs.statSync(this.paths.vaultFile);
+    } catch {
+      return false;
+    }
+    const stamp = `${st.mtimeMs}:${st.size}`;
+    if (this._headerBoundCache?.stamp === stamp) return this._headerBoundCache.bound;
+    const h = readJsonStrict<any>(this.paths.vaultFile, null);
+    const bound = !!h?.encrypted && h.aad !== undefined;
+    this._headerBoundCache = { stamp, bound };
+    return bound;
+  }
+
+  /**
+   * Role for the next vault.json write: "vault" (bound) only when every
+   * encrypted companion on disk is already bound, because a bound header
+   * makes the store refuse unbound companions. Until then the header is
+   * written unbound and maybeBindFileAad finishes the job at unlock.
+   */
+  private headerRole(): string | undefined {
+    if (this.headerAadBound()) return "vault";
+    const files = [this.paths.scratchpadFile, this.paths.scratchpadArchiveFile, this.paths.noteRevisionsFile, this.paths.scanSessionsFile];
+    if (!this.isV2()) files.push(this.paths.vectorsFile);
+    for (const f of files) {
+      // A staged (not yet committed) write counts as what will be on disk.
+      const staged = this.stagedWrites?.get(f);
+      let raw: any;
+      try {
+        raw = staged !== undefined ? JSON.parse(staged.toString()) : readJsonStrict<any>(f, null);
+      } catch {
+        return undefined;
+      }
+      if (raw?.encrypted && raw.aad === undefined) return undefined;
+    }
+    return "vault";
+  }
+
+  /** AAD role of a companion file: its name, e.g. "scratchpad". */
+  private static fileRole(file: string): string {
+    return path.basename(file, ".json");
+  }
+
+  /**
+   * One-time upgrade of a vault written before file AAD existed: re-encrypt
+   * each encrypted companion file bound to its role, then the header LAST.
+   * Until the header is rewritten, unbound files are still accepted, so a
+   * crash part-way leaves a vault that opens and finishes on the next unlock.
+   */
+  private maybeBindFileAad(): void {
+    if (!this.encryptionKey) return;
+    const header = readJsonStrict<any>(this.paths.vaultFile, null);
+    if (!header?.encrypted || header.aad !== undefined) return;
+    for (const f of [this.paths.scratchpadFile, this.paths.scratchpadArchiveFile, this.paths.noteRevisionsFile, this.paths.scanSessionsFile]) {
+      const raw = readJsonStrict<any>(f, null);
+      if (raw?.encrypted && raw.aad === undefined) this.writeProtectedJson(f, this.readProtectedJson<unknown>(f, null));
+    }
+    if (this.isV2(header)) {
+      this.writeHeaderV2();
+    } else {
+      const rv = readJsonStrict<any>(this.paths.vectorsFile, null);
+      if (rv?.encrypted && rv.aad === undefined) this.writeVectors(this.readVectors());
+      this.writeVault(this.readVaultV1());
+    }
+    this.clearCache();
+    addLog("SECURITY", "Vault files bound to their roles (AAD): a file copied over another is now refused.");
+  }
+
   private writeProtectedJson(file: string, obj: unknown): void {
     const rawDisk = readJsonStrict<any>(file, null);
     const isDiskEncrypted = !!(rawDisk && rawDisk.encrypted);
@@ -1930,7 +2014,7 @@ export class VaultStore {
         rawDisk?.salt ||
         readJsonStrict<any>(this.paths.vaultFile, null)?.salt ||
         generateSalt();
-      this.persist(file, JSON.stringify(envelopePayload(JSON.stringify(obj), this.encryptionKey, salt, 2, this.keyKdf()), null, 2));
+      this.persist(file, JSON.stringify(envelopePayload(JSON.stringify(obj), this.encryptionKey, salt, 2, this.keyKdf(), VaultStore.fileRole(file)), null, 2));
     } else {
       this.refusePlaintextWrite(path.basename(file));
       this.persist(file, JSON.stringify(obj, null, 2));
@@ -1945,7 +2029,7 @@ export class VaultStore {
     if (raw.encrypted) {
       if (!this.encryptionKey) return fallback; // locked → looks empty
       try {
-        return JSON.parse(decryptString(raw.ciphertext, this.encryptionKey, raw.iv, raw.authTag)) as T;
+        return JSON.parse(openEnvelope(raw, this.encryptionKey, VaultStore.fileRole(file), this.headerAadBound())) as T;
       } catch {
         // Wrong key for this file (e.g. a KDF upgrade interrupted halfway).
         // Returning the empty fallback used to let the next save overwrite
@@ -2238,7 +2322,7 @@ export class VaultStore {
     let key: Buffer | null = null;
     try {
       key = await deriveKeyAsync(password, raw.salt, kdfFromEnvelope(raw));
-      decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
+      openEnvelope(raw, key, "vault");
       return true;
     } catch {
       return false;

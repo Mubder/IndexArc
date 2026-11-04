@@ -42,6 +42,8 @@ Commit messages follow the convention in
 - A dev or test launch could repoint the installed app's data folder.
 
 ### Security
+- Every encrypted vault file (header, vectors, notes, archive, revisions, scan sessions) is bound to
+  its role, so one file copied over another is refused. Existing vaults are upgraded on unlock.
 - New master passwords must be at least 12 characters, not a common password (checked offline)
   and not trivially guessable. Existing shorter passwords still unlock.
 - Every API response is marked `Cache-Control: no-store`.

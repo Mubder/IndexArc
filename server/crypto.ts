@@ -187,15 +187,46 @@ export function envelopePayload(
   /** The KDF that actually produced `key`. Defaults to the current standard;
    *  callers holding a key derived with an older KDF MUST pass it, or the
    *  envelope would claim parameters its key was never derived from. */
-  kdf: KdfParams = currentKdf()
-): EncryptedPayload & { version: number; kdf: KdfParams } {
+  kdf: KdfParams = currentKdf(),
+  /** File role (see fileAad). Binds the ciphertext to that role, so one
+   *  vault file cannot be swapped in for another. */
+  role?: string
+): EncryptedPayload & { version: number; kdf: KdfParams; aad?: string } {
+  const aad = role === undefined ? undefined : fileAad(role);
   return {
     version,
     encrypted: true as const,
     kdf,
     salt: saltHex,
-    ...encryptString(text, key),
+    ...(aad ? { aad } : {}),
+    ...encryptString(text, key, aad),
   };
+}
+
+/**
+ * AAD label for a vault file's envelope. It is stored in the clear in the
+ * envelope (`aad`) so readers know what to check, but it is authenticated:
+ * editing or removing it makes decryption fail.
+ */
+export function fileAad(role: string): string {
+  return `indexarc:file:v1:${role}`;
+}
+
+/**
+ * Decrypt a file envelope written by envelopePayload.
+ * - Envelope bound to a role: it must be `role`, else it is refused (a file
+ *   copied over another one of the same vault).
+ * - Unbound (written before AAD existed): accepted only when `strict` is
+ *   false. The store sets strict once the vault header itself is bound, so
+ *   an old unbound copy cannot be slipped back in afterwards.
+ */
+export function openEnvelope(raw: { ciphertext: string; iv: string; authTag: string; aad?: unknown }, key: Buffer, role: string, strict = false): string {
+  if (raw.aad !== undefined) {
+    if (raw.aad !== fileAad(role)) throw new Error(`Envelope belongs to ${String(raw.aad)}, not ${role}`);
+    return decryptString(raw.ciphertext, key, raw.iv, raw.authTag, raw.aad);
+  }
+  if (strict) throw new Error(`Unbound ${role} envelope refused`);
+  return decryptString(raw.ciphertext, key, raw.iv, raw.authTag);
 }
 
 /** AES-GCM sizes. A shorter tag is a forgery shortcut, so it is rejected. */
