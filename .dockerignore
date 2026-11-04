@@ -21,5 +21,5 @@ dist-desktop2/
 dist-desktop-release/
 node_modules/
 cspell-dict-ar-1.1.7.tgz
-newlogo*.png
+assets/logo-source.png
 dictionaries/ar_trie/cspell-dict-ar-1.1.7.tgz
