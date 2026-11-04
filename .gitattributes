@@ -1,0 +1,3 @@
+# The CLI runs via its shebang on macOS/Linux: a CRLF there breaks it.
+bin/indexarc.mjs text eol=lf
+bin/indexarc.cmd text eol=crlf
