@@ -9,6 +9,36 @@ Commit messages follow the convention in
 
 ## [Unreleased]
 
+### Added
+- `indexarc` command-line tool: `get`, `env` and `run -- cmd` read secrets from the running,
+  unlocked app. Tokens are created in Settings → CLI access and can only read secrets.
+- Import from `.env`, Bitwarden JSON, 1Password or generic CSV, KeePass XML and IndexArc exports,
+  with a review step. Export to an encrypted `.iaexport` file or, after a warning, a plain `.env`.
+- Secret expiry dates, rotation reminders, "mark rotated", and "where used" (searches watched
+  folders); a Home card lists what is expired, expiring or due.
+- Change the master password. Optional recovery key: a one-time code that can reset a forgotten
+  password from the lock screen.
+- App health → "Download report": a redacted diagnostics file. Optional local crash log.
+- Check for updates from GitHub Releases (manual, or at startup if turned on). Only builds that can
+  verify the update signature install it; others link to the release page.
+
+### Changed
+- Storage: entries and search vectors move from JSON files into an SQLite database. Each row is
+  encrypted separately and bound to its table and id. Existing vaults migrate on unlock after an
+  automatic snapshot.
+- Large vaults: the Library list is virtualized, and App health no longer parses whole snapshot
+  files, so a 3,000-entry Library opens in about 2 s (was about 21 s).
+- Dialogs are keyboard- and screen-reader-accessible; about 255 remaining English-only strings are
+  translated.
+
+### Fixed
+- Clipboard auto-clear never ran (Electron's `readText()` is asynchronous).
+- A dev or test launch could repoint the installed app's data folder.
+
+### Security
+- Every API response is marked `Cache-Control: no-store`.
+- Decryption requires the full 16-byte GCM tag.
+
 ## [2.1.0] - 2026-11-04
 
 ### Added

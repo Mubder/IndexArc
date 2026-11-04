@@ -22,6 +22,41 @@ IndexArc is industrial grade when every statement below is true and checked by C
 
 ---
 
+## Where things stand — 2026-11-04 (branch `roadmap/r1-data-safety`)
+
+Every engineering item in R1–R6 has landed with tests, except those listed under "Still open". What remains needs the owner (money, a vendor, a repository setting) or is a known follow-up.
+
+| Phase | State | Key commits |
+|---|---|---|
+| R0 Fix-now | Done | bef5c62 |
+| R1 Data safety | Done | 611e208 · 30122ed · 8876d2a · 5051e08 · 206855b |
+| R2 Release trust | Done except signing and branch protection (owner) | 65f63bb · 99ef27f · d130a59 · 2f77c4e · fb78d23 |
+| R3 Architecture | Done | fd4dfcd · 08f6bcf · b105882 (SQLite) · 20b1f0b · ae8d226/0d9b042/7cba7f6 · 1385b32 · ed29a02 |
+| R4 Verification | Done | 9ed8696 · 32fca0a · 638c78f · 9423244 · 1c88816 · 2778101 |
+| R5 Assurance & keys | Done except pentest (owner) and Windows Hello / Touch ID | bc0180a |
+| R6 Product | CLI, import/export and hygiene done; hosted mode and sync are designed but not built (gated) | 99e078d · 34efe6f |
+
+**Still open, needs the owner:**
+- Code-signing certificate (R2.1); macOS notarization or dropping macOS targets.
+- Branch protection on `main` (R2.5).
+- Pentest vendor and timing (R5).
+- Un-deferring hosted mode and sync (R6.4/R6.5; see the ship gates in `docs/design/R6-hosted-and-sync.md`).
+
+**Still open, engineering follow-ups:**
+- Windows Hello / Touch ID unlock (needs a native module, which conflicts with the "no native crypto build" stance; decide with the owner).
+- ASVS L2 gaps (`docs/ASVS-L2.md`):
+  - password policy: 12-character minimum, breached-password check, strength meter, reveal toggle;
+  - AAD on the JSON envelopes and the `vault.json` header (SQLite rows already have it);
+  - runtime schema validation of request bodies;
+  - a single key-lifecycle document.
+- Row rollback detection: an old copy of a sealed row still decrypts under its AAD. A per-row version bound into the AAD, or a signed manifest, would close this.
+- CodeQL in CI.
+- Electron: a `will-attach-webview` guard and a sender check on the flush-complete IPC.
+- A self-contained CLI binary (Node SEA) and PATH registration by the installer.
+- The CI benchmark job (bar #5): the 10k benchmark exists in `server/storage-v2.test.ts` but is not timed against budgets in CI.
+
+---
+
 ## Ground rules (carried over, still binding)
 
 1. **One theme per PR.** Storage rewrites, security changes and component extraction never share a PR.
@@ -155,6 +190,7 @@ IndexArc is industrial grade when every statement below is true and checked by C
 
 ### R2.3 Signed auto-update *(needs an owner decision: GitHub Releases vs static host)*
 - `electron-updater` with `verifyUpdateCodeSignature`; staged rollout; the installer-preservation CI job stays the guard.
+- **Progress (2f77c4e):** done on GitHub Releases. `shared/updater.cjs` makes no network call until the user checks, or turns on the startup check (off by default). It downloads and installs only when the build can verify the update signature, so unsigned and portable builds link to the release page instead. A `publish-release` job attaches installers, `latest*.yml`, blockmaps and the SBOM. Signed installs need R2.1. Staged rollout is not configured. The same commit put `electron-main.cjs` under strict `@ts-check`; that pass found and fixed the clipboard auto-clear never running (Electron 44's `readText()` returns a Promise).
 
 ### R2.4 Package slimming
 - Move build-only packages to `devDependencies` (`vite`, `@vitejs/plugin-react`, `@tailwindcss/vite`, `tailwindcss` …); remove unused deps (`@typesafe-ai/sdk`, any others with zero imports).
@@ -167,7 +203,7 @@ IndexArc is industrial grade when every statement below is true and checked by C
 - Branch protection on `main`: required checks, no direct pushes.
 - Conventional commits + generated `CHANGELOG.md`; semver tags.
 - Remove hard-coded `C:/Users/balfa/...` paths from `scripts/find-vaults.mjs` and `scripts/check-live-data.mjs`; de-duplicate the four copies of the logo PNG.
-- **Progress:** done: workflow permissions, SHA-pinned actions, `npm ci` only, Dependabot, the CycloneDX SBOM artifact, `CHANGELOG.md` with the commit convention, and the hard-coded paths. **Open:** branch protection (a repository setting the owner must change), the logo de-duplication, attaching the SBOM to the GitHub Release automatically (it is a workflow artifact today), and a generated changelog (it is hand-maintained for now).
+- **Progress:** done: workflow permissions, SHA-pinned actions, `npm ci` only, Dependabot, the CycloneDX SBOM artifact, `CHANGELOG.md` with the commit convention, and the hard-coded paths. **Open:** branch protection (a repository setting the owner must change) and a generated changelog (it is hand-maintained for now). The logo de-duplication (fb78d23) and attaching the SBOM to releases (2f77c4e) are done.
 
 **Exit R2:** a tagged release produces signed, fused, SBOM-carrying artifacts from CI with no manual steps, and an installed build auto-updates to the next signed release.
 
@@ -191,6 +227,12 @@ IndexArc is industrial grade when every statement below is true and checked by C
 - Vector search via `sqlite-vec` (or an HNSW index) instead of a linear scan.
 - One-way migration with automatic pre-migration snapshot and a tested rollback path; JSON import/export kept as the portability and backup format.
 - *Accept:* benchmark suite (bar #5) passes at 10k entries; migration tested on real-shaped fixtures, including encrypted and grace-period vaults.
+- **Progress (b105882, ADR `docs/adr/0001-storage-engine.md`):** done with SQLite (`node:sqlite`, WAL) and per-record AES-256-GCM with AAD `indexarc:v2:<table>:<id>`.
+  - `vault.json` is now a header; rows live in `data/vault.db`. The migration snapshots first, then migrates one way at unlock, and falls back to JSON if it fails.
+  - A re-key keeps the old key sealed under the new one (`prev_key`) until every row is rewritten, so a crash mid-re-key is recovered at the next unlock.
+  - 10k-entry benchmark: unlock ~130 ms, list ~285 ms, create/update/delete/upsert 3–11 ms.
+  - A real 3k-entry vault migrated from 78 MB of JSON to a 39 MB database. Fixing `/health` (snapshot header peek) took the Library from ~21 s to 1.9 s.
+  - **Not done:** `sqlite-vec`/HNSW. Vector search is still a linear scan over decrypted rows, which is fast enough at 10k. Rollback of a single row to an older ciphertext is not detected (see "Where things stand").
 
 ### R3.3 AI provider interface
 - One `Provider` interface (`generate`, `embed`, `complete`, `isLocal`, `health`) with an adapter per provider; consent and egress checks live in one wrapper, not in six if/else chains (`providers.ts`, 1.3k lines).
@@ -204,7 +246,7 @@ IndexArc is industrial grade when every statement below is true and checked by C
 - **Progress (2026-11-04, `roadmap/r1-data-safety`):** step 1 of the split. `ScratchpadTab.tsx` 4,069 → ~2,160 lines. Pure helpers moved to `src/components/scratchpad/` (`revisions.ts`, `constants.ts`, `noteTabs.ts`, `domText.ts`, `CompareCell.tsx`). Nine render sections became components there (`NoteTabStrip`, `EditorPanel`, `FormattingToolbar`, `ArchiveSection`, `ArchivedNotePreview`, `RevisionHistoryModal`, `ProtectModal`, `RescueModal`, `CompareModal`). The moved JSX is verbatim, and props are exactly the component locals each block used, typed from the compiler. Checked in the built app: typing, tabs, bold, compare (with swap), revision history, rescue, protect, colour picker, archive → view → restore, rename, spelling menu; no console errors.
   - **Step 2 done:** the component's logic is moved verbatim into 11 hooks in `src/components/scratchpad/` (`useScratchEditor`, `useEditorCommands`, `useSpellcheck`, `usePredictions`, `useNoteProtection`, `useArchive`, `useNoteHistory`, `useTabActions`, `useNoteActions`, `useScratchpadSync`, `useScrollAffordances`). `ScratchpadTab.tsx` is 604 lines (was ~4k). Effect order is kept, except two independent listeners. Checked in the built app: typing, spellcheck and suggestions, compare, version history, new and close tab, pin, protect and unprotect, archive and restore, predictions toggle.
   - **Step 3 done:** `SettingsTab.tsx` 1,142 → 212 lines: 11 section components in `src/components/settings/` (plus `fields.tsx` for `KeyInput` and `SavedBadge`). `App.tsx` 1,706 → 735 lines: `TopBar`, `Sidebar`, `HealthBanners`, `EncryptMigrationBanner` and `DialogModals` in `src/components/app/`, plus 8 hooks there (`useToasts`, `useConfirmDialog`, `useSettingsPatch`, `usePasteActions`, `useClarify`, `useEntryActions`, `useSettingsActions`, `useFolderScanActions`). No file in `src/components` is over 800 lines now (largest: `LibraryTab.tsx` 597).
-  - **Next:** the state store; Library virtualization.
+  - **Done since:** the state store (1385b32: `src/state/vaultStore.ts`, lock purge is one `purgeSecrets()` call) and Library virtualization (ed29a02).
   - **Existing quirk seen (not changed):** a rename lives only in memory for the session; after a reload, the first edit re-derives the title from the content. Pinning a brand-new tab before its first save returns 404, and the second click works.
   - **Existing quirk seen (not changed):** after archiving a tab, the remaining tabs show their stored title (e.g. "Scratch 1") until the next edit re-derives the title from the content.
 
@@ -236,7 +278,8 @@ IndexArc is industrial grade when every statement below is true and checked by C
   3. `embed_provider_override` is ignored by `indexEntry` and `askVault`, because they pass the resolved LLM provider as the explicit override.
 - **Regex timing guard** (`server/ai/regex-safety.test.ts`): it parses all 68 regex literals in `heuristics.ts` and `folderScan.ts` with the TS compiler and runs each against 47 adversarial ~50k inputs in a worker with a watchdog. The budget is 100 ms per `test()`. **2 quadratic patterns found** in `heuristics.ts` and kept in `KNOWN_SLOW` with `it.fails`: `/\s*(?:&&|\|\||;)\s*/` (`isCommand` split, ~2.2 s at 50k spaces) and `/\s*[=\-_*]{3,}\s*/g` (`stripSectionRule`, ~1.9 s). This test is a stand-in for the `safe-regex` lint rule, which is still open.
 - **Policy notes from the matrix (for review, unchanged):** `POST /api/settings` is writable while the vault is locked. A token holder can flip `ai_cloud_consent` or repoint `ollama_base_url` and `local_openai_base_url` before the user unlocks. `POST /api/ollama/ensure` (multi-GB model pulls) and `/api/emergency/create` are also reachable while locked.
-- Still open: Electron e2e, fuzzing, crypto property tests, UI and a11y, the coverage gate, and CI wiring.
+- **Done since:** crypto property tests with fast-check, fuzz smoke, and a v8 coverage gate on `server/` (9423244). That commit also requires 16-byte GCM tags. Electron e2e lifecycle test in CI (1c88816). Accessible dialogs and the remaining UI strings in i18n (2778101). The three egress bugs and both quadratic regexes are fixed: `KNOWN_SLOW` is empty and no `it.fails` remain. The matrix now also checks that every `GET /api` route answers with `Cache-Control: no-store`.
+- **Still open:** the unlocked-state pass of the route matrix, an eslint `safe-regex` rule (the timing guard stands in for it), and CodeQL. One e2e run in five failed during the R6 work without a captured cause; it is a suspected flake, being watched.
 
 ---
 
@@ -255,6 +298,19 @@ IndexArc is industrial grade when every statement below is true and checked by C
 
 **Exit R5:** pentest report published internally with every high/critical closed; ASVS L2 mapping complete.
 
+**Progress (bc0180a):**
+- **Standards:** `docs/ASVS-L2.md` maps ASVS L2 and the Electron checklist with evidence links. Gaps are listed there and under "Where things stand".
+- **Threat model and disclosure:** `docs/THREAT-MODEL.md` is refreshed for the utilityProcess and SQLite. `SECURITY.md` gives the reporting channel and SLA, `public/.well-known/security.txt` is in place, and advisories go through GitHub Security Advisories.
+- **Key handling:** Argon2 output and temporary keys are zeroized; GCM tag length is enforced (9423244); rows carry AAD.
+- **Password change and recovery key:**
+  - Password change re-keys everything crash-safely.
+  - The optional recovery key is an X25519 key pair. The code, shown once, is the private key. `data/recovery.json` holds only the public key and the vault key sealed to it, and it is resealed after every key change.
+  - "Forgot password" on the lock screen recovers the vault and sets a new password.
+- **Diagnostics:**
+  - Health → "Download report" exports health, logs and settings, redacted by the heuristics' own detectors plus key/URL/email/home-path rules.
+  - Opt-in crash logging stays local (`logs/crashes.jsonl`).
+- **Open:** the pentest (owner), Windows Hello / Touch ID and WebAuthn (native module), and a printable emergency kit (today the recovery code is shown once to copy; there is no designed kit).
+
 ---
 
 ## R6 — Product: from vault app to developer secrets tool · later, scoped separately
@@ -266,6 +322,22 @@ These are what make people choose IndexArc over a generic password manager. Each
 3. **Secret hygiene:** expiry dates, rotation reminders, "where is this key used" (watched folders), gitleaks-compatible detection rules shared with the heuristics.
 4. **Hosted mode** (old EXECUTION_PLAN Phase 5, still deferred): HOSTED=1 session auth, feature gating, Docker volume guide.
 5. **Sync and sharing:** end-to-end encrypted multi-device sync, then team sharing — a new threat model, explicitly out of scope until R1–R5 exit.
+
+**Progress (2026-11-04):**
+- **R6.1 CLI (34efe6f, `docs/design/R6.1-cli.md`):**
+  - `indexarc get | env | run -- cmd | login | status` talks to the running, unlocked app.
+  - Tokens are created in Settings → CLI access after the master password, shown once, and revocable. They authenticate only the two read endpoints.
+  - Tokens are stored as HMAC digests keyed from the vault key, so a planted digest does not work, and a re-key revokes them.
+  - CLI reads are audited and do not extend auto-lock.
+  - The CLI ships in `resources/cli/` and runs on the user's Node 18 or later.
+- **R6.2 Import/export (99e078d):**
+  - Import from `.env`, Bitwarden JSON, 1Password/generic CSV, KeePass XML and IndexArc exports, with review and de-duplication before saving.
+  - Export to an encrypted `.iaexport` (Argon2id + AES-GCM, passphrase of 12+ characters) or a plain `.env` behind an explicit warning.
+  - Both need the master password and are throttled and audited.
+- **R6.3 Hygiene (99e078d):** per-secret expiry, rotation period and "mark rotated"; a Home card for expired, expiring and due secrets; "where used" is a bounded local search of watched folders. Not done: gitleaks-compatible rule export.
+- **R6.4/R6.5 Hosted mode and sync:** designed in `docs/design/R6-hosted-and-sync.md`.
+  - The design covers a key split, integrity at rest, single-user hosting behind TLS, and a relay that only stores encrypted blobs, with signed manifests.
+  - **Not built**, by design: the doc's ship gates (pentest, signing, password policy) come first, and it ships behind a build flag.
 
 ---
 
@@ -290,9 +362,10 @@ These are what make people choose IndexArc over a generic password manager. Each
 | Decision | Blocks | Recommendation |
 |---|---|---|
 | Code-signing certificate: OV or EV, and budget | R2.1, R2.3 | OV to start (cheaper, CI-friendly); EV later for instant SmartScreen reputation |
-| Update hosting | R2.3 | GitHub Releases |
+| Update hosting | R2.3 | **Decided:** GitHub Releases (built) |
 | Keep macOS/Linux targets before signing is funded | R2.1 | Ship Windows only until macOS notarization is set up |
-| Storage engine ADR | R3.2 | SQLite + per-record AES-GCM with AAD |
+| Storage engine ADR | R3.2 | **Decided:** SQLite + per-record AES-GCM with AAD (built, ADR 0001) |
+| Windows Hello / Touch ID (needs a native module) | R5 | Decide whether a signed native module is acceptable; it only makes sense after R2.1 |
 | Pentest vendor and timing | R5 | After R3 lands, so the test covers the final architecture |
 | Un-defer hosted mode | R6.4 | Not before R5 exit |
 
@@ -309,4 +382,4 @@ R4 runs alongside everything; R4 route matrix should land before R3.2
 
 **Rough total to "industrial grade" (R1–R5):** about 13–18 engineer-weeks, plus certificate procurement and pentest vendor lead time.
 
-**Start next:** commit R0 on its own branch, then R1.1 (fail-closed storage) and R2.5 (CI hygiene) in parallel — different files, no overlap.
+**Start next (2026-11-04):** the owner items (certificate, branch protection, pentest booking). In parallel, the password-policy ASVS gaps (small, self-contained) and AAD on the JSON envelopes.
