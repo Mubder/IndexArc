@@ -547,7 +547,7 @@ async function installOllama() {
       };
     }
     await new Promise((resolve, reject) => {
-      const inst = spawn(tmp, ["/S"], { stdio: "ignore", env: childEnv() });
+      const inst = spawn(tmp, ["/S"], { stdio: "ignore", windowsHide: true, env: childEnv() });
       inst.on("exit", (code) => resolve(code));
       inst.on("error", reject);
     });
@@ -621,7 +621,10 @@ handleTrusted("start-ollama", async () => {
   const p = findOllamaPath();
   if (!p) return false;
   try {
-    spawn(p, ["serve"], { detached: true, stdio: "ignore", env: childEnv() }).unref();
+    // windowsHide: a detached console program gets its own console window on
+    // Windows; without this one flashes up (and `serve` exits at once when
+    // Ollama is already running, so it is only a flash).
+    spawn(p, ["serve"], { detached: true, stdio: "ignore", windowsHide: true, env: childEnv() }).unref();
     return true;
   } catch {
     return false;
@@ -762,6 +765,7 @@ async function startOllamaIfNeeded() {
   ollamaProcess = spawn(ollamaPath, ["serve"], {
     detached: true,
     stdio: "ignore",
+    windowsHide: true, // no console window (see start-ollama)
     env: childEnv(),
   });
   ollamaProcess.unref();

@@ -159,6 +159,7 @@ class LanguageToolService {
         ], {
           detached: false,
           stdio: ["ignore", "ignore", "ignore"],
+          windowsHide: true, // java.exe would otherwise open a console window
           env: childEnv(),
         });
 
