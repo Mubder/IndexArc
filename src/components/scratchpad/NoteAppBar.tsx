@@ -74,14 +74,14 @@ export function NoteFilter({ show, setShow, apps, t }: { show: string; setShow: 
         onClick={m.open}
         aria-haspopup="menu"
         aria-expanded={!!m.at}
-        className="h-8 px-3 inline-flex items-center gap-1.5 rounded-full text-xs font-semibold whitespace-nowrap shrink-0"
+        className="note-app-select h-8 px-3 inline-flex items-center gap-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
         style={{ background: show === SHOW_ALL ? "var(--bg-input)" : "var(--accent-bg)", color: show === SHOW_ALL ? "var(--text-dim)" : "var(--accent-bright)", border: show === SHOW_ALL ? "1px solid var(--border)" : "1px solid var(--border-glow)" }}
         title={t("notes_show")}
         aria-label={`${t("notes_show")}: ${label}`}
       >
         {show === SHOW_ALL ? <Layers className="w-3.5 h-3.5" /> : <AppWindow className="w-3.5 h-3.5" />}
-        <span className="max-w-[10rem] truncate">{label}</span>
-        <ChevronDown className="w-3 h-3" />
+        <span className="flex-1 min-w-0 truncate text-start">{label}</span>
+        <ChevronDown className="w-3 h-3 shrink-0" />
       </button>
       {m.at && (
         <CursorMenu x={m.at.x} y={m.at.y} className="z-50 rounded-xl shadow-2xl p-1.5 w-56 max-h-80 overflow-auto" style={menuStyle}>

@@ -156,6 +156,8 @@
   color: var(--tab-inactive-color);
   border-color: var(--tab-inactive-border);
 }
+/* The application selector leading the strip: the same size as a tab. */
+.note-app-select { width: 175px; min-width: 175px; max-width: 175px; flex: 0 0 175px; height: 32px; min-height: 32px; }
 .scratchpad-tab[data-active="false"]:hover { background: var(--bg-hover); border-color: var(--border-hover); color: var(--text); }
 /* The rename input must stay typeable: Chromium propagates the chip's
    user-select:none into descendant inputs and then REFUSES keyboard text
