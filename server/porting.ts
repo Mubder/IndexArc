@@ -1,6 +1,9 @@
 import crypto from "crypto";
 import { currentKdf, deriveKeyAsync, generateSalt, kdfFromEnvelope, type KdfParams } from "./crypto.js";
 import type { VaultEntry } from "./types.js";
+import { envKey, envQuote } from "../shared/apps.js";
+
+export { envKey, envQuote };
 
 // Import / export (R6.2). Parsers turn other tools' exports into IndexArc
 // candidates the user reviews before saving; exporters write .env or an
@@ -19,6 +22,8 @@ export interface ImportCandidate {
   family: VaultEntry["family"];
   labels: string[];
   notes?: string;
+  app?: string;
+  env?: string;
 }
 
 export interface ImportResult {
@@ -81,7 +86,7 @@ export function parseEnv(text: string): ImportResult {
   return { format: "env", candidates, skipped };
 }
 
-function envType(key: string): string {
+export function envType(key: string): string {
   const k = key.toLowerCase();
   if (/pass(word)?|pwd/.test(k)) return "password";
   if (/token/.test(k)) return "api token";
@@ -276,7 +281,7 @@ export function parseKeepassXml(text: string): ImportResult {
 
 // ── Encrypted IndexArc export ───────────────────────────────────────────────
 
-const EXPORT_FIELDS = ["value", "type", "name", "raw_fragment", "labels", "type_aliases", "status", "family", "notes", "source_file", "created_at", "updated_at"] as const;
+const EXPORT_FIELDS = ["value", "type", "name", "raw_fragment", "labels", "type_aliases", "status", "family", "notes", "source_file", "app", "env", "created_at", "updated_at"] as const;
 
 export async function buildEncryptedExport(entries: VaultEntry[], passphrase: string): Promise<string> {
   if (String(passphrase).length < EXPORT_MIN_PASSPHRASE) throw new Error(`Export passphrase must be at least ${EXPORT_MIN_PASSPHRASE} characters.`);
@@ -330,27 +335,13 @@ export async function parseEncryptedExport(text: string, passphrase: string): Pr
       family: (["secret", "command", "note", "unknown"].includes(e.family) ? e.family : "secret") as ImportCandidate["family"],
       labels: Array.isArray(e.labels) ? e.labels.map(String) : [],
       notes: e.notes ? String(e.notes) : undefined,
+      app: typeof e.app === "string" && e.app ? e.app : undefined,
+      env: typeof e.env === "string" && e.env ? e.env : undefined,
     }));
   return { format: "indexarc", candidates, skipped: {} };
 }
 
 // ── .env export ─────────────────────────────────────────────────────────────
-
-export function envKey(name: string): string {
-  let k = String(name || "SECRET")
-    .normalize("NFKD")
-    .replace(/[^\w]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .toUpperCase();
-  if (!k) k = "SECRET";
-  if (/^\d/.test(k)) k = `_${k}`;
-  return k;
-}
-
-export function envQuote(v: string): string {
-  if (/^[A-Za-z0-9_./:@%+-]*$/.test(v)) return v;
-  return `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, "\\n").replace(/\$/g, "\\$")}"`;
-}
 
 export function buildEnvExport(entries: VaultEntry[]): string {
   const used = new Map<string, number>();

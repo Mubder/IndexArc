@@ -19,6 +19,8 @@ const NUM = z.number().nullish(); // NaN from the client arrives as null
 const strList = (maxItems: number, maxLen = 512) => z.array(s(maxLen)).max(maxItems);
 const FAMILY = z.enum(["secret", "command", "note", "unknown"]);
 const DECISION = z.enum(["pending", "save", "park", "discard"]);
+const APP = 200;
+const ENV = 64;
 
 const candidate = {
   value: opt(TEXT),
@@ -31,6 +33,8 @@ const candidate = {
   notes: opt(TEXT),
   source_file: opt(s(4096)),
   temp_id: opt(ID),
+  app: opt(s(APP)),
+  env: opt(s(ENV)),
 };
 const candidates = z.array(obj(candidate));
 
@@ -62,14 +66,25 @@ export const BODIES = {
       labels: opt(strList(200)),
       family: opt(FAMILY),
       value: opt(TEXT),
+      app: opt(s(APP)),
+      env: opt(s(ENV)),
     }),
+    "POST /apps/upsert": obj({
+      app: s(APP),
+      env: opt(s(ENV)),
+      items: opt(z.array(obj({ name: s(1024), value: TEXT, type: opt(s(256)), notes: opt(TEXT) })).max(1000)),
+      text: opt(TEXT),
+      dry_run: opt(z.boolean()),
+    }),
+    "POST /apps/assign": obj({ ids: z.array(ID).max(100_000), app: opt(s(APP)), env: opt(s(ENV)) }),
+    "POST /apps/rename": obj({ from: s(APP), to: s(APP) }),
     "POST /bulk-delete": obj({ ids: opt(z.array(ID).max(100_000)) }),
     "POST /check-duplicate": obj({ value: opt(TEXT), name: opt(s(1024)) }),
   },
   cli: {
     "POST /tokens": obj({ name: opt(s(200)), password: opt(PASSWORD) }),
     "POST /tokens/:id/revoke": anyBody,
-    "POST /env": obj({ names: opt(strList(10_000, 256)), label: opt(s(200)), all: opt(z.boolean()) }),
+    "POST /env": obj({ names: opt(strList(10_000, 256)), label: opt(s(200)), all: opt(z.boolean()), app: opt(s(APP)), env: opt(s(ENV)) }),
   },
   porting: {
     "POST /import/preview": obj({ content: opt(TEXT), filename: opt(s(1024)), format: opt(s(64)), passphrase: opt(PASSWORD) }),

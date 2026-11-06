@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Search, X, StickyNote, KeyRound, Terminal, Compass, ArrowRight } from "lucide-react";
+import { Search, X, StickyNote, KeyRound, Terminal, Compass, ArrowRight, AppWindow } from "lucide-react";
 import { VaultEntry, Tab, Settings } from "../types";
 import { getTranslation } from "../utils/i18n";
 import { useDialogA11y } from "../hooks/useDialogA11y";
@@ -47,6 +47,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     () => [
       { id: "scratchpad", label: t("tab_scratchpad"), icon: <StickyNote className="w-4 h-4 text-emerald-400" /> },
       { id: "library", label: t("tab_library"), icon: <Compass className="w-4 h-4 text-indigo-400" /> },
+      { id: "apps", label: t("tab_apps"), icon: <AppWindow className="w-4 h-4 text-violet-400" /> },
       { id: "ask", label: t("tab_ask"), icon: <Search className="w-4 h-4 text-cyan-400" /> },
       { id: "settings", label: t("tab_settings"), icon: <Terminal className="w-4 h-4 text-amber-400" /> },
     ],

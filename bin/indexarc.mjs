@@ -4,8 +4,8 @@
 //   indexarc login                 store a CLI token (create one in Settings → CLI access)
 //   indexarc status                check the connection and the token
 //   indexarc get NAME [--id ID]    print one secret's value
-//   indexarc env NAME… | --label L | --all        print KEY=value lines
-//   indexarc run NAME… | --label L | --all -- cmd [args…]
+//   indexarc env NAME… | --label L | --all | --app A [--env E]   print KEY=value lines
+//   indexarc run NAME… | --label L | --all | --app A [--env E] -- cmd [args…]
 //                                  run a command with the secrets in its environment
 //   indexarc logout                forget the stored token
 //
@@ -46,7 +46,7 @@ function parseArgs(argv) {
       break;
     }
     if (a === "--all" || a === "--help" || a === "-h") out.flags[a.replace(/^-+/, "")] = true;
-    else if (a === "--label" || a === "--id" || a === "--url") {
+    else if (a === "--label" || a === "--id" || a === "--url" || a === "--app" || a === "--env") {
       if (i + 1 >= argv.length) throw new CliError(`${a} needs a value`, EXIT.usage);
       out.flags[a.slice(2)] = argv[++i];
     } else if (a.startsWith("--")) throw new CliError(`Unknown option ${a}`, EXIT.usage);
@@ -105,10 +105,15 @@ function envQuote(v) {
 }
 
 function envBody(args) {
-  if (args.flags.all) return { all: true };
-  if (args.flags.label) return { label: args.flags.label };
-  if (args._.length) return { names: args._ };
-  throw new CliError("Name the secrets, or pass --label LABEL or --all.", EXIT.usage);
+  // --app (and --env) narrow any selection to one application; alone, --app
+  // takes every key of that application (and environment).
+  if (args.flags.env && !args.flags.app) throw new CliError("--env needs --app.", EXIT.usage);
+  const scope = args.flags.app ? { app: args.flags.app, ...(args.flags.env ? { env: args.flags.env } : {}) } : {};
+  if (args.flags.all) return { all: true, ...scope };
+  if (args.flags.label) return { label: args.flags.label, ...scope };
+  if (args._.length) return { names: args._, ...scope };
+  if (args.flags.app) return scope;
+  throw new CliError("Name the secrets, or pass --label LABEL, --app APP or --all.", EXIT.usage);
 }
 
 async function fetchEnv(args) {
@@ -134,6 +139,7 @@ const HELP = `IndexArc CLI
   indexarc get NAME [--id ID]             print one secret
   indexarc env NAME… | --label L | --all  print KEY=value lines
   indexarc run NAME… | --label L | --all -- cmd [args…]
+      add --app APP [--env ENV] to take the keys of one application
   indexarc logout                         forget the stored token
 
 Options: --url URL (or INDEXARC_URL). Token: INDEXARC_TOKEN or the login file.

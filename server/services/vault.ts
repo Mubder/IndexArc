@@ -9,6 +9,7 @@ import { analyzePaste, embedText, embedModelId, resolveActiveProvider, isLocalPr
 import { addLog } from "../logs.js";
 import { asString, asStringArray } from "../validate.js";
 import { randomUUID } from "crypto";
+import { normalizeAppName, normalizeEnvName } from "../../shared/apps.js";
 
 function statusFromCandidate(c: AnalyzeCandidate): EntryStatus {
   if (c.needs_type && c.needs_name) return "needs_review";
@@ -142,8 +143,19 @@ export interface SaveCandidateInput {
   notes?: string;
   paste_id?: string;
   source_file?: string;
+  /** Application and environment (shared/apps.ts). */
+  app?: string;
+  env?: string;
   /** force into needs_* if incomplete */
   allow_incomplete?: boolean;
+}
+
+/** app/env as stored: blank or missing → absent; no environment without an application. */
+function appFields(app: unknown, env: unknown): { app?: string; env?: string } {
+  const a = normalizeAppName(app);
+  if (!a) return {};
+  const e = normalizeEnvName(env);
+  return e ? { app: a, env: e } : { app: a };
 }
 
 export async function saveCandidate(
@@ -198,6 +210,7 @@ export async function saveCandidate(
     family: finalFamily,
     notes: input.notes === undefined ? undefined : asString(input.notes),
     source_file: input.source_file === undefined ? undefined : asString(input.source_file),
+    ...appFields(input.app, input.env),
   });
 
   if (status === "saved") {
@@ -230,6 +243,9 @@ export async function clarifyEntry(
     labels?: string[];
     family?: VaultEntry["family"];
     value?: string;
+    /** null clears; undefined keeps. */
+    app?: string | null;
+    env?: string | null;
   }
 ): Promise<VaultEntry | null> {
   const existing = store.getEntry(id);
@@ -267,6 +283,10 @@ export async function clarifyEntry(
 
   // Preserve value verbatim — whatever pasted is what is saved (including leading _ , http, special chars)
   const verbatimValue = patch.value !== undefined ? asString(patch.value) : existing.value;
+  const app = appFields(
+    patch.app === undefined ? existing.app : patch.app,
+    patch.env === undefined ? existing.env : patch.env
+  );
 
   const updated = store.updateEntry(id, {
     value: verbatimValue,
@@ -277,6 +297,8 @@ export async function clarifyEntry(
     type_aliases: [...aliases],
     status,
     family,
+    app: app.app,
+    env: app.env,
   });
 
   if (updated && updated.status === "saved") {

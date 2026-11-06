@@ -8,6 +8,8 @@ import path from "path";
 import { findUsages, hygienePatch, hygieneSummary } from "../hygiene.js";
 import { validateBody } from "../request-body.js";
 import { BODIES } from "./bodies.js";
+import { envType, parseEnv } from "../porting.js";
+import { envKey, findAppKey, normalizeAppName, normalizeEnvName, sameName } from "../../shared/apps.js";
 
 export function entriesRoutes(ctx: RouteContext) {
   const r = Router();
@@ -39,6 +41,8 @@ export function entriesRoutes(ctx: RouteContext) {
             family: c.family,
             notes: c.notes,
             source_file: c.source_file,
+            app: c.app,
+            env: c.env,
             allow_incomplete: true,
           }))
         );
@@ -59,6 +63,8 @@ export function entriesRoutes(ctx: RouteContext) {
         family: c.family,
         notes: c.notes,
         paste_id,
+        app: c.app,
+        env: c.env,
         allow_incomplete: true,
       });
       sendSSE("entries-changed", { action: "save" });
@@ -150,6 +156,8 @@ export function entriesRoutes(ctx: RouteContext) {
       labels: req.body?.labels,
       family: req.body?.family,
       value: req.body?.value,
+      app: req.body?.app,
+      env: req.body?.env,
     });
     if (!updated) return res.status(404).json({ error: "Not found" });
     res.json(updated);
@@ -161,6 +169,97 @@ export function entriesRoutes(ctx: RouteContext) {
     addLog("VAULT", `Deleted entry ${req.params.id.slice(0, 8)}`);
     sendSSE("entries-changed", { action: "delete" });
     res.json({ success: true });
+  });
+
+  // ── Applications (shared/apps.ts) ──────────────────────────────────────
+  // Save keys into one application and environment. A key whose .env name
+  // already exists there is updated in place (the value change counts as a
+  // rotation); otherwise it is created. `text` takes .env lines instead of
+  // `items`. `dry_run` reports what would happen without writing.
+  r.post("/apps/upsert", validateBody(BODIES.entries["POST /apps/upsert"]), wrapAsync(async (req, res) => {
+    const app = normalizeAppName(req.body.app);
+    if (!app) return res.status(400).json({ error: "Name the application." });
+    const env = normalizeEnvName(req.body.env);
+    let skipped: Record<string, number> = {};
+    let items: Array<{ name: string; value: string; type?: string; notes?: string }> = [];
+    if (typeof req.body.text === "string" && req.body.text.trim()) {
+      const parsed = parseEnv(req.body.text);
+      skipped = parsed.skipped;
+      items = parsed.candidates.map((c) => ({ name: c.name, value: c.value, type: c.type }));
+    } else if (Array.isArray(req.body.items)) {
+      items = req.body.items.map((i: any) => ({
+        name: String(i.name || "").trim(),
+        value: String(i.value ?? ""),
+        type: i.type ?? undefined,
+        notes: i.notes ?? undefined,
+      }));
+    }
+    items = items.filter((i) => i.name && i.value);
+    const MAX_KEYS = 1000;
+    if (items.length > MAX_KEYS) return res.status(413).json({ error: `Too many keys in one save (max ${MAX_KEYS})` });
+    // Later lines win, as in a .env file.
+    const byKey = new Map<string, (typeof items)[number]>();
+    for (const i of items) byKey.set(envKey(i.name), i);
+    const entries = store.listEntries();
+    const plan = [...byKey.values()].map((i) => {
+      const existing = findAppKey(entries, app, env, i.name);
+      const status: "new" | "same" | "update" = !existing ? "new" : existing.value === i.value ? "same" : "update";
+      return { item: i, existing, status };
+    });
+    const report = plan.map((p) => ({ name: p.item.name, key: envKey(p.item.name), status: p.status, id: p.existing?.id }));
+    if (req.body.dry_run === true) return res.json({ app, env, items: report, skipped });
+    const settings = store.getSettings();
+    const now = new Date().toISOString();
+    for (const [i, p] of plan.entries()) {
+      if (p.status === "new") {
+        const e = await saveCandidate(store, settings, {
+          value: p.item.value,
+          name: p.item.name,
+          type: p.item.type || envType(p.item.name),
+          family: "secret",
+          notes: p.item.notes,
+          app,
+          env,
+          allow_incomplete: true,
+        });
+        report[i].id = e.id;
+      } else if (p.status === "update" && p.existing) {
+        await clarifyEntry(store, settings, p.existing.id, { value: p.item.value });
+        store.updateEntry(p.existing.id, { last_rotated_at: now });
+      }
+    }
+    const count = (s: string) => plan.filter((p) => p.status === s).length;
+    addLog("VAULT", `Application save: ${count("new")} new, ${count("update")} updated, ${count("same")} unchanged`);
+    if (count("new") || count("update")) sendSSE("entries-changed", { action: "apps-upsert" });
+    res.json({ app, env, items: report, skipped, created: count("new"), updated: count("update"), unchanged: count("same") });
+  }));
+
+  // Move entries into an application and environment, or out of any (no app).
+  r.post("/apps/assign", validateBody(BODIES.entries["POST /apps/assign"]), (req, res) => {
+    const app = normalizeAppName(req.body.app);
+    const env = app ? normalizeEnvName(req.body.env) : undefined;
+    let moved = 0;
+    for (const id of new Set<string>(req.body.ids)) {
+      if (store.updateEntry(id, { app, env })) moved++;
+    }
+    if (moved) sendSSE("entries-changed", { action: "apps-assign" });
+    res.json({ moved });
+  });
+
+  // Rename an application; renaming onto an existing one merges them.
+  r.post("/apps/rename", validateBody(BODIES.entries["POST /apps/rename"]), (req, res) => {
+    const from = normalizeAppName(req.body.from);
+    const to = normalizeAppName(req.body.to);
+    if (!from || !to) return res.status(400).json({ error: "Name the application." });
+    let renamed = 0;
+    for (const e of store.listEntries()) {
+      if (sameName(e.app, from) && e.app !== to) {
+        store.updateEntry(e.id, { app: to });
+        renamed++;
+      }
+    }
+    if (renamed) sendSSE("entries-changed", { action: "apps-rename" });
+    res.json({ renamed });
   });
 
   r.post("/bulk-delete", validateBody(BODIES.entries["POST /bulk-delete"]), (req, res) => {

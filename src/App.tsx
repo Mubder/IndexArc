@@ -8,6 +8,7 @@ import {
   StickyNote,
   Folder,
   KeyRound,
+  AppWindow,
 } from "lucide-react";
 
 import {
@@ -29,6 +30,7 @@ import { AnalyzeTab } from "./components/AnalyzeTab";
 import { FoldersTab } from "./components/FoldersTab";
 import { AskTab } from "./components/AskTab";
 import { LibraryTab } from "./components/LibraryTab";
+import { ApplicationsTab } from "./components/apps/ApplicationsTab";
 import { useSSE } from "./hooks/useSSE";
 import { SettingsTab } from "./components/SettingsTab";
 import { LockScreen } from "./components/LockScreen";
@@ -61,7 +63,7 @@ import { fill } from "./components/home/DashboardCards";
 export default function App() {
   // All valid Tab values (write and read sides must be symmetric — "analyze"
   // used to be dropped on restore).
-  const TAB_VALUES = ["home", "scratchpad", "analyze", "folders", "library", "ask", "settings"] as const;
+  const TAB_VALUES = ["home", "scratchpad", "analyze", "folders", "library", "apps", "ask", "settings"] as const;
   const [tab, setTab] = useState<Tab>(() => {
     const saved = localStorage.getItem("indexarc-tab");
     return (TAB_VALUES as readonly string[]).includes(saved || "") ? (saved as Tab) : "home";
@@ -450,6 +452,7 @@ export default function App() {
       { id: "analyze", label: t("tab_paste"), icon: <Sparkles className="w-4 h-4" />, badge: candidates.length || undefined },
       { id: "ask", label: t("tab_ask"), icon: <Search className="w-4 h-4" /> },
       { id: "library", label: t("tab_library"), icon: <KeyRound className="w-4 h-4" /> },
+      { id: "apps", label: t("tab_apps"), icon: <AppWindow className="w-4 h-4" /> },
       {
         id: "folders",
         label: t("tab_folders"),
@@ -654,6 +657,10 @@ return (
                 }}
                 settings={settings}
               />
+            )}
+
+            {tab === "apps" && (
+              <ApplicationsTab entries={entries} settings={settings} onFetchAll={fetchAll} showConfirm={showConfirm} showToast={showToast} />
             )}
 
             {tab === "settings" && (

@@ -16,6 +16,10 @@ export interface VaultEntry {
   expires_at?: string;
   rotate_every_days?: number;
   last_rotated_at?: string;
+  /** Application this entry belongs to (shared/apps.ts). */
+  app?: string;
+  /** Environment within the application, e.g. "Production". */
+  env?: string;
 }
 
 export interface AnalyzeCandidate {
@@ -157,7 +161,7 @@ export interface Settings {
   local_openai_api_key_configured?: boolean;
 }
 
-export type Tab = "home" | "scratchpad" | "analyze" | "folders" | "library" | "ask" | "settings";
+export type Tab = "home" | "scratchpad" | "analyze" | "folders" | "library" | "apps" | "ask" | "settings";
 
 export type LibraryFilter = "all" | "secret" | "command" | "note" | "unknown" | "attention";
 

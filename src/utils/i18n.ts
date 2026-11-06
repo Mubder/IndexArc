@@ -9,6 +9,74 @@ export interface TranslationDict {
   tab_folders: string;
   tab_ask: string;
   tab_library: string;
+  tab_apps: string;
+  apps_search: string;
+  apps_new: string;
+  apps_name_placeholder: string;
+  apps_create: string;
+  apps_cancel: string;
+  apps_save: string;
+  apps_empty_title: string;
+  apps_empty_body: string;
+  apps_no_match: string;
+  apps_count_keys: string;
+  apps_paste_env: string;
+  apps_copy_env: string;
+  apps_copied_env: string;
+  apps_add_existing: string;
+  apps_rename: string;
+  apps_rename_title: string;
+  apps_delete: string;
+  apps_delete_title: string;
+  apps_delete_msg: string;
+  apps_env_none: string;
+  apps_env_add: string;
+  apps_env_placeholder: string;
+  apps_col_key: string;
+  apps_col_value: string;
+  apps_add_key: string;
+  apps_value_placeholder: string;
+  apps_no_keys_env: string;
+  apps_reveal: string;
+  apps_hide: string;
+  apps_copy: string;
+  apps_copied: string;
+  apps_edit: string;
+  apps_remove_from_app: string;
+  apps_delete_key: string;
+  apps_delete_key_title: string;
+  apps_delete_key_msg: string;
+  apps_notes_placeholder: string;
+  apps_notes_saved: string;
+  apps_paste_title: string;
+  apps_paste_hint: string;
+  apps_preview: string;
+  apps_back: string;
+  apps_status_new: string;
+  apps_status_update: string;
+  apps_status_same: string;
+  apps_save_n: string;
+  apps_saved_result: string;
+  apps_skipped_lines: string;
+  apps_nothing_to_save: string;
+  apps_existing_title: string;
+  apps_existing_hint: string;
+  apps_existing_none: string;
+  apps_move_n: string;
+  apps_moved: string;
+  apps_env_label: string;
+  apps_app_label: string;
+  apps_none_library: string;
+  apps_new_option: string;
+  apps_new_env_option: string;
+  apps_save_secrets_title: string;
+  apps_checking: string;
+  apps_error: string;
+  apps_name_required: string;
+  apps_expired: string;
+  apps_expiring: string;
+  apps_rotation_due: string;
+  apps_select_all: string;
   tab_settings: string;
   tab_logs: string;
   logs_copy_all: string;
@@ -782,6 +850,74 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     tab_folders: "Folder Watcher",
     tab_ask: "Ask Assistant",
     tab_library: "Library",
+    tab_apps: "Applications",
+    apps_search: "Search apps and keys",
+    apps_new: "New application",
+    apps_name_placeholder: "Application name",
+    apps_create: "Create",
+    apps_cancel: "Cancel",
+    apps_save: "Save",
+    apps_empty_title: "Keep each application's secrets together",
+    apps_empty_body: "Create an application, then paste its .env file or add keys one by one. Secrets you already saved can be moved in.",
+    apps_no_match: "No application or key matches your search.",
+    apps_count_keys: "{n} keys",
+    apps_paste_env: "Paste .env",
+    apps_copy_env: "Copy as .env",
+    apps_copied_env: "Copied {n} keys as .env. The clipboard clears itself.",
+    apps_add_existing: "Add existing secrets",
+    apps_rename: "Rename",
+    apps_rename_title: "Rename application",
+    apps_delete: "Delete application",
+    apps_delete_title: "Delete {app}?",
+    apps_delete_msg: "This deletes its {n} keys and its notes from the vault.",
+    apps_env_none: "No environment",
+    apps_env_add: "Add environment",
+    apps_env_placeholder: "Environment name",
+    apps_col_key: "Key",
+    apps_col_value: "Value",
+    apps_add_key: "Add key",
+    apps_value_placeholder: "Value",
+    apps_no_keys_env: "No keys in this environment yet.",
+    apps_reveal: "Reveal",
+    apps_hide: "Hide",
+    apps_copy: "Copy value",
+    apps_copied: "Copied",
+    apps_edit: "Edit",
+    apps_remove_from_app: "Remove from application (keeps it in the Library)",
+    apps_delete_key: "Delete key",
+    apps_delete_key_title: "Delete {key}?",
+    apps_delete_key_msg: "The key is removed from the vault.",
+    apps_notes_placeholder: "Notes for this application: logins, URLs, how to rotate keys",
+    apps_notes_saved: "Notes saved",
+    apps_paste_title: "Paste .env into {app}",
+    apps_paste_hint: "One KEY=value per line. Lines starting with # are ignored. Existing keys with the same name are updated.",
+    apps_preview: "Preview",
+    apps_back: "Back",
+    apps_status_new: "new",
+    apps_status_update: "update",
+    apps_status_same: "unchanged",
+    apps_save_n: "Save {n}",
+    apps_saved_result: "{created} added, {updated} updated",
+    apps_skipped_lines: "{n} lines skipped",
+    apps_nothing_to_save: "Nothing to save: every key is unchanged.",
+    apps_existing_title: "Add existing secrets to {app}",
+    apps_existing_hint: "Secrets that aren't in any application yet.",
+    apps_existing_none: "Every secret already belongs to an application.",
+    apps_move_n: "Move {n}",
+    apps_moved: "Moved {n} secrets",
+    apps_env_label: "Environment",
+    apps_app_label: "Application",
+    apps_none_library: "No application (Library only)",
+    apps_new_option: "+ New application…",
+    apps_new_env_option: "+ New environment…",
+    apps_save_secrets_title: "Save {n} secrets",
+    apps_checking: "Checking…",
+    apps_error: "Couldn't save. Try again.",
+    apps_name_required: "Enter a name",
+    apps_expired: "expired",
+    apps_expiring: "expires soon",
+    apps_rotation_due: "rotation due",
+    apps_select_all: "Select all",
     tab_settings: "Settings",
     tab_logs: "Logs",
     logs_copy_all: "Copy all",
@@ -1553,6 +1689,74 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     tab_folders: "مراقب المجلدات",
     tab_ask: "اسأل المساعد",
     tab_library: "المكتبة",
+    tab_apps: "التطبيقات",
+    apps_search: "ابحث في التطبيقات والمفاتيح",
+    apps_new: "تطبيق جديد",
+    apps_name_placeholder: "اسم التطبيق",
+    apps_create: "إنشاء",
+    apps_cancel: "إلغاء",
+    apps_save: "حفظ",
+    apps_empty_title: "اجمع أسرار كل تطبيق في مكان واحد",
+    apps_empty_body: "أنشئ تطبيقًا، ثم الصق ملف ‎.env‎ الخاص به أو أضف المفاتيح واحدًا تلو الآخر. ويمكنك نقل الأسرار المحفوظة سابقًا إليه.",
+    apps_no_match: "لا يوجد تطبيق أو مفتاح يطابق بحثك.",
+    apps_count_keys: "{n} مفاتيح",
+    apps_paste_env: "لصق ‎.env‎",
+    apps_copy_env: "نسخ بصيغة ‎.env‎",
+    apps_copied_env: "تم نسخ {n} مفاتيح بصيغة ‎.env‎. ستُمسح الحافظة تلقائيًا.",
+    apps_add_existing: "إضافة أسرار موجودة",
+    apps_rename: "إعادة تسمية",
+    apps_rename_title: "إعادة تسمية التطبيق",
+    apps_delete: "حذف التطبيق",
+    apps_delete_title: "حذف {app}؟",
+    apps_delete_msg: "سيؤدي هذا إلى حذف مفاتيحه ({n}) وملاحظاته من الخزنة.",
+    apps_env_none: "بدون بيئة",
+    apps_env_add: "إضافة بيئة",
+    apps_env_placeholder: "اسم البيئة",
+    apps_col_key: "المفتاح",
+    apps_col_value: "القيمة",
+    apps_add_key: "إضافة مفتاح",
+    apps_value_placeholder: "القيمة",
+    apps_no_keys_env: "لا توجد مفاتيح في هذه البيئة بعد.",
+    apps_reveal: "إظهار",
+    apps_hide: "إخفاء",
+    apps_copy: "نسخ القيمة",
+    apps_copied: "تم النسخ",
+    apps_edit: "تعديل",
+    apps_remove_from_app: "إزالة من التطبيق (يبقى في المكتبة)",
+    apps_delete_key: "حذف المفتاح",
+    apps_delete_key_title: "حذف {key}؟",
+    apps_delete_key_msg: "سيُحذف المفتاح من الخزنة.",
+    apps_notes_placeholder: "ملاحظات لهذا التطبيق: بيانات الدخول، الروابط، طريقة تدوير المفاتيح",
+    apps_notes_saved: "تم حفظ الملاحظات",
+    apps_paste_title: "لصق ‎.env‎ في {app}",
+    apps_paste_hint: "سطر واحد لكل KEY=value. تُتجاهل الأسطر التي تبدأ بـ #. تُحدَّث المفاتيح الموجودة بالاسم نفسه.",
+    apps_preview: "معاينة",
+    apps_back: "رجوع",
+    apps_status_new: "جديد",
+    apps_status_update: "تحديث",
+    apps_status_same: "بلا تغيير",
+    apps_save_n: "حفظ {n}",
+    apps_saved_result: "أُضيف {created}، وحُدِّث {updated}",
+    apps_skipped_lines: "تُخطّي {n} أسطر",
+    apps_nothing_to_save: "لا شيء للحفظ: كل المفاتيح بلا تغيير.",
+    apps_existing_title: "إضافة أسرار موجودة إلى {app}",
+    apps_existing_hint: "الأسرار غير المرتبطة بأي تطبيق بعد.",
+    apps_existing_none: "كل الأسرار مرتبطة بتطبيقات بالفعل.",
+    apps_move_n: "نقل {n}",
+    apps_moved: "تم نقل {n} أسرار",
+    apps_env_label: "البيئة",
+    apps_app_label: "التطبيق",
+    apps_none_library: "بدون تطبيق (المكتبة فقط)",
+    apps_new_option: "+ تطبيق جديد…",
+    apps_new_env_option: "+ بيئة جديدة…",
+    apps_save_secrets_title: "حفظ {n} أسرار",
+    apps_checking: "جارٍ التحقق…",
+    apps_error: "تعذّر الحفظ. حاول مرة أخرى.",
+    apps_name_required: "أدخل اسمًا",
+    apps_expired: "منتهي",
+    apps_expiring: "ينتهي قريبًا",
+    apps_rotation_due: "حان التدوير",
+    apps_select_all: "تحديد الكل",
     tab_settings: "الإعدادات",
     tab_logs: "السجلات",
     logs_copy_all: "نسخ الكل",

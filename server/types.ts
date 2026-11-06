@@ -34,6 +34,10 @@ export interface VaultEntry {
   rotate_every_days?: number;
   /** Last time the user marked it rotated (defaults to created_at). */
   last_rotated_at?: string;
+  /** Application this entry belongs to (shared/apps.ts). */
+  app?: string;
+  /** Environment within the application, e.g. "Production". */
+  env?: string;
 }
 
 export interface VectorChunk {

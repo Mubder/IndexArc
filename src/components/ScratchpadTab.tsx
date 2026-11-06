@@ -29,6 +29,9 @@ import { useSpellcheck } from "./scratchpad/useSpellcheck";
 import { useScratchpadSync } from "./scratchpad/useScratchpadSync";
 import { useNoteActions } from "./scratchpad/useNoteActions";
 import { useScrollAffordances } from "./scratchpad/useScrollAffordances";
+import { SaveToAppDialog } from "./apps/SaveToAppDialog";
+import type { UpsertItem } from "./apps/appsApi";
+import { keyNameFromFragment } from "../../shared/apps";
 
 // Re-exported: these used to live here.
 export { type NoteRevision, getNoteRevisions, saveNoteRevision, smartFormatParagraphs };
@@ -233,6 +236,20 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   );
   const { analyze, handleCopy, handleProofread, handleRephrase, handleSaveNote, handleSaveSecret, handleUndoRephrase } = useNoteActions({ active, activeId, detection, protectedIdsRef, recordSnapshot, rephraseUndo, setBusy, setContent, setCopied, setDetections, setRephraseUndo, setStatus, style, t });
 
+  // "Save secret to Vault" asks which application and environment the
+  // detected secrets belong to (SaveToAppDialog); "No application" falls
+  // back to handleSaveSecret's Library-only save.
+  const [saveToApp, setSaveToApp] = useState<UpsertItem[] | null>(null);
+  const openSaveToApp = useCallback(async () => {
+    const found = (detection?.candidates || [])
+      .filter((c) => (c.family === "secret" || c.family === "unknown") && c.value)
+      // Prefer the variable name the line was written under (STRIPE_SECRET_KEY=…)
+      // so it matches a key already saved in the application.
+      .map((c) => ({ name: (keyNameFromFragment(c.raw_fragment) || c.name || c.type || "SECRET").trim(), value: c.value, type: c.type || undefined }));
+    if (!found.length) return handleSaveSecret();
+    setSaveToApp(found);
+  }, [detection, handleSaveSecret]);
+
   const handleSmartSplitParagraphs = useCallback(() => {
     if (!tiptap || tiptap.isDestroyed) return;
     const currentHtml = safeGetHTML(tiptap);
@@ -421,7 +438,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           handleProofread={handleProofread}
           handleRephrase={handleRephrase}
           handleSaveNote={handleSaveNote}
-          handleSaveSecret={handleSaveSecret}
+          handleSaveSecret={openSaveToApp}
           handleSmartSplitParagraphs={handleSmartSplitParagraphs}
           handleUndoRephrase={handleUndoRephrase}
           hasSecret={hasSecret}
@@ -482,6 +499,16 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           tiptap={tiptap}
           toolbarRef={toolbarRef}
         />
+
+        {saveToApp && (
+          <SaveToAppDialog
+            items={saveToApp}
+            t={t}
+            onClose={() => setSaveToApp(null)}
+            onSaved={(msg) => { setSaveToApp(null); setStatus(msg); }}
+            onSaveLibraryOnly={handleSaveSecret}
+          />
+        )}
 
         {/* Detection status, moved to underneath the text box. */}
         {detection ? (

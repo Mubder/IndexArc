@@ -59,6 +59,9 @@ const POLICY: Record<string, Policy> = {
   "DELETE /api/entries/:id": "token+unlocked",
   "POST /api/entries/bulk-delete": "token+unlocked",
   "POST /api/entries/check-duplicate": "token+unlocked",
+  "POST /api/entries/apps/upsert": "token+unlocked",
+  "POST /api/entries/apps/assign": "token+unlocked",
+  "POST /api/entries/apps/rename": "token+unlocked",
 
   // --- folders / fs ---
   "GET /api/folders": "token+unlocked",

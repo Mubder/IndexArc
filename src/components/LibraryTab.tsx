@@ -7,6 +7,7 @@ import { VirtualRows, VirtualTbody, VIRTUALIZE_FROM } from "./library/VirtualLis
 import { NoteDetailModal } from "./NoteDetailModal";
 import { getTranslation } from "../utils/i18n";
 import { maskValue } from "../utils";
+import { isAppNote } from "../../shared/apps";
 
 interface LibraryTabProps {
   entries: VaultEntry[];
@@ -124,13 +125,15 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
   const libraryFiltered = useMemo(() => {
     const q = libraryQuery.trim().toLowerCase();
     return entries.filter((e) => {
+      // An application's notes live on the Applications page.
+      if (isAppNote(e)) return false;
       if (libraryFilter === "attention") {
         if (e.status === "saved") return false;
       } else if (libraryFilter !== "all" && e.family !== libraryFilter) {
          return false;
       }
       if (!q) return true;
-      const blob = `${e.name} ${e.type} ${e.value} ${e.raw_fragment} ${(e.labels || []).join(" ")}`.toLowerCase();
+      const blob = `${e.name} ${e.type} ${e.value} ${e.raw_fragment} ${(e.labels || []).join(" ")} ${e.app || ""} ${e.env || ""}`.toLowerCase();
       return blob.includes(q);
     });
   }, [entries, libraryFilter, libraryQuery]);

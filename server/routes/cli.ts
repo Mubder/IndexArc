@@ -3,6 +3,7 @@ import { addLog } from "../logs.js";
 import { throttle, recordFailure, recordSuccess } from "./throttle.js";
 import { createCliToken, listCliTokens, revokeCliToken } from "../cli.js";
 import { envKey } from "../porting.js";
+import { normalizeAppName, normalizeEnvName, sameName } from "../../shared/apps.js";
 import type { VaultEntry } from "../types.js";
 import type { RouteContext } from "./types.js";
 import { validateBody } from "../request-body.js";
@@ -99,7 +100,11 @@ export function cliRoutes(ctx: RouteContext) {
 
   r.post("/env", validateBody(BODIES.cli["POST /env"]), (req: any, res) => {
     const { names, label, all } = req.body || {};
-    const entries = store.listEntries();
+    // --app / --env narrow every selection to one application (and environment).
+    const app = normalizeAppName(req.body?.app);
+    const envName = normalizeEnvName(req.body?.env);
+    let entries = store.listEntries();
+    if (app) entries = entries.filter((e) => sameName(e.app, app) && (!envName || sameName(e.env, envName)));
     const env: Record<string, string> = {};
     const missing: string[] = [];
     let picked: VaultEntry[] = [];
@@ -113,10 +118,10 @@ export function cliRoutes(ctx: RouteContext) {
       }
     } else if (typeof label === "string" && label) {
       picked = entries.filter((e) => e.family === "secret" && e.labels.includes(label));
-    } else if (all === true) {
+    } else if (all === true || app) {
       picked = entries.filter((e) => e.family === "secret");
     } else {
-      return res.status(400).json({ error: "Pass names, a label, or all: true" });
+      return res.status(400).json({ error: "Pass names, a label, an app, or all: true" });
     }
     for (const e of picked) env[envKey(e.name)] = e.value;
     audit?.log("cli.env", `${who(req)}: ${Object.keys(env).length} secrets`);

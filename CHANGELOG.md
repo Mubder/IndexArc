@@ -10,6 +10,13 @@ Commit messages follow the convention in
 ## [Unreleased]
 
 ### Added
+- Applications page: keep each application's secrets together, split by environment (Production,
+  Staging, Development or your own). Values stay masked with a copy button on every key; paste a
+  whole `.env` file (with a preview of what is new or updated), copy an environment back as
+  `.env`, move existing secrets in, and keep notes per application. Saving from the Scratchpad
+  asks which application and environment the detected secrets belong to, and updates a key that is
+  already there instead of adding a duplicate. The CLI takes `--app NAME [--env ENV]`, and
+  encrypted exports keep both fields.
 - The `indexarc` command-line tool is now a standalone program (no Node install needed), and the
   Windows installer adds it to your PATH; uninstalling removes it.
 - CI checks performance at 10k entries on every push (`npm run bench`): p95 save under 50 ms and
@@ -42,6 +49,10 @@ Commit messages follow the convention in
   translated.
 
 ### Fixed
+- Terminal windows no longer flash up while the app runs: starting Ollama, the spelling server
+  and the Ollama installer now run with their console windows hidden. A test fails if any new
+  background process is started without that.
+- Right-click menus open at the cursor and stay inside the window.
 - Clipboard auto-clear never ran (Electron's `readText()` is asynchronous).
 - A dev or test launch could repoint the installed app's data folder.
 
