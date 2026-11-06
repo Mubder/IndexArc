@@ -157,6 +157,9 @@
   border-color: var(--tab-inactive-border);
 }
 /* The application selector leading the strip: the same size as a tab. */
+/* "All notes" gets its own teal so it stands apart from the note tabs. */
+.note-app-select[data-all="true"] { background: var(--app-select-bg); color: var(--app-select-color); border: 1px solid var(--app-select-border); }
+.note-app-select[data-all="true"]:hover { filter: brightness(1.12); }
 .note-app-select { width: 175px; min-width: 175px; max-width: 175px; flex: 0 0 175px; height: 32px; min-height: 32px; }
 .scratchpad-tab[data-active="false"]:hover { background: var(--bg-hover); border-color: var(--border-hover); color: var(--text); }
 /* The rename input must stay typeable: Chromium propagates the chip's
@@ -291,6 +294,9 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --tab-active-color: #ffffff;
   --tab-inactive-bg: rgba(255, 255, 255, 0.045);
   --tab-inactive-border: rgba(255, 255, 255, 0.12);
+  --app-select-bg: rgba(20, 184, 166, 0.16);
+  --app-select-border: rgba(45, 212, 191, 0.5);
+  --app-select-color: #5eead4;
   --tab-inactive-color: var(--text-muted);
 }
 
@@ -347,6 +353,9 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --tab-active-color: #0c1526;
   --tab-inactive-bg: rgba(15, 23, 42, 0.04);
   --tab-inactive-border: rgba(15, 23, 42, 0.14);
+  --app-select-bg: rgba(13, 148, 136, 0.1);
+  --app-select-border: rgba(13, 148, 136, 0.45);
+  --app-select-color: #0f766e;
   --tab-inactive-color: var(--text-dim);
 }
 

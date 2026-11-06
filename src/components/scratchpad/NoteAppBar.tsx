@@ -75,7 +75,8 @@ export function NoteFilter({ show, setShow, apps, t }: { show: string; setShow: 
         aria-haspopup="menu"
         aria-expanded={!!m.at}
         className="note-app-select h-8 px-3 inline-flex items-center gap-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
-        style={{ background: show === SHOW_ALL ? "var(--bg-input)" : "var(--accent-bg)", color: show === SHOW_ALL ? "var(--text-dim)" : "var(--accent-bright)", border: show === SHOW_ALL ? "1px solid var(--border)" : "1px solid var(--border-glow)" }}
+        data-all={show === SHOW_ALL}
+        style={show === SHOW_ALL ? undefined : { background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
         title={t("notes_show")}
         aria-label={`${t("notes_show")}: ${label}`}
       >

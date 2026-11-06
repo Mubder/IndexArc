@@ -36,7 +36,6 @@ export function NoteTabStrip({ activeId, addTab, archiveTab, closeTab, commitRen
         {filter && (
           <>
             {filter}
-            <span className="w-px h-5 mx-0.5 shrink-0" style={{ background: "var(--border)" }} />
           </>
         )}
         {[...tabs.filter((t) => !t.archived)].sort((a, b) => {
