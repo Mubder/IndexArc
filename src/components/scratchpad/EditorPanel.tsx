@@ -11,6 +11,7 @@ import { REWRITE_STYLES, REWRITE_STYLE_KEYS } from "./constants";
 import { getTranslation } from "../../utils/i18n";
 import React from "react";
 import { safeGetHTML } from "./domText";
+import { CursorMenu } from "./CursorMenu";
 import { EditorContent } from "@tiptap/react";
 
 export interface EditorPanelProps {
@@ -416,11 +417,11 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
 
             {/* Custom Spelling Context Menu Popup */}
             {contextMenu && (
-              <div
-                className="fixed z-50 rounded-xl shadow-2xl p-2 w-64 space-y-1 text-xs backdrop-blur-md animate-in fade-in zoom-in-95"
+              <CursorMenu
+                x={contextMenu.x}
+                y={contextMenu.y}
+                className="z-50 rounded-xl shadow-2xl p-2 w-64 space-y-1 text-xs backdrop-blur-md animate-in fade-in zoom-in-95"
                 style={{
-                  top: Math.min(contextMenu.y, window.innerHeight - 280),
-                  left: Math.min(contextMenu.x, window.innerWidth - 270),
                   background: "var(--bg-surface)",
                   border: "1px solid var(--border-glow)",
                   boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)",
@@ -470,7 +471,7 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
                     {fill(t("spell_ignore"), { word: contextMenu.word })}
                   </button>
                 </div>
-              </div>
+              </CursorMenu>
             )}
             {/* Always-visible corners of the editor frame (not mid-document). */}
             {noteOverflows && (

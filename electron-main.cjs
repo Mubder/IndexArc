@@ -1259,7 +1259,9 @@ function createWindow() {
     menu.append(new MenuItem({ type: "separator" }));
     menu.append(new MenuItem({ label: "Select All", role: "selectAll" }));
 
-    menu.popup({ window: /** @type {Win} */ (mainWindow) });
+    // Open where the user right-clicked, not where the cursor is now: the
+    // spellcheck lookups above are async and the mouse may have moved.
+    menu.popup({ window: /** @type {Win} */ (mainWindow), x: params.x, y: params.y });
   });
 
   mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
