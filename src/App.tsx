@@ -666,8 +666,8 @@ return (
                 onFetchAll={fetchAll}
                 showConfirm={showConfirm}
                 showToast={showToast}
-                onOpenNote={(id) => {
-                  focusScratchpadNote(id);
+                onOpenNote={(id, app) => {
+                  focusScratchpadNote(id, app);
                   setTab("scratchpad");
                 }}
               />

@@ -21,8 +21,8 @@ Commit messages follow the convention in
   Its notes are real Scratchpad notes, so they hold anything (steps, commands, explanations, keys):
   copy a whole note, open it in the Scratchpad, or start a new one from the application. Commands
   are saved with a name and copied with one click. In the Scratchpad, each note shows its
-  application, "Show" narrows the note tabs to one application, and "Save to {app}" saves the
-  note's keys (pick the environment) and commands into it, skipping ones already there. The old
+  application; the application selector at the start of the note tabs shows only that
+  application's notes (and new notes join it); and "Save to {app}" saves the note's keys (pick the environment) and commands into it, skipping ones already there. The old
   single notes box becomes the application's "Overview" note, and renaming an application moves
   its notes too.
 - Scratchpad: a "Copy all" button and a copy icon in the editor corner copy the whole note.

@@ -4,7 +4,7 @@ import { Settings, RewriteStyle, Detection, Busy, ScratchTab, NoteBidiMode, type
 import { getTranslation } from "../utils/i18n";
 import { fill } from "./home/DashboardCards";
 import { drainScratchpadSaves, setSyncedScratchpadTabs, forceSaveScratchpadTab } from "../scratchpadSaveQueue";
-import { takeHandoffNote, REOPEN_NOTE_EVENT, FOCUS_NOTE_EVENT, peekFocusNote, clearFocusNote } from "../noteHandoff";
+import { takeHandoffNote, REOPEN_NOTE_EVENT, FOCUS_NOTE_EVENT, peekFocusNote, clearFocusNote, takeFocusApp } from "../noteHandoff";
 import { ensureHtmlParagraphs, htmlToPlainText } from "../lib/noteHtml";
 
 import { type NoteRevision, getNoteRevisions, saveNoteRevision } from "./scratchpad/revisions";
@@ -38,6 +38,8 @@ import { keyNameFromFragment } from "../../shared/apps";
 
 // Re-exported: these used to live here.
 export { type NoteRevision, getNoteRevisions, saveNoteRevision, smartFormatParagraphs };
+
+let lastShow: string = SHOW_ALL;
 
 export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ settings }) => {
   const t = (key: Parameters<typeof getTranslation>[1]) => getTranslation(settings, key);
@@ -271,7 +273,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
   // The Scratchpad side of Applications: which notes the strip shows, and
   // which application the open note belongs to.
-  const [show, setShow] = useState<string>(SHOW_ALL);
+  // Kept while the Scratchpad is hidden (it unmounts on other pages).
+  const [show, setShowState] = useState<string>(() => (lastShow = takeFocusApp() ?? lastShow));
   const [appNames, reloadAppNames] = useAppNames(tabs);
   const visibleTabs = useMemo(() => filterTabs(tabs, show), [tabs, show]);
   useEffect(() => {
@@ -400,6 +403,13 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     [ghostCompletion, enablePredictions, tiptap, historyUndo, historyRedo]
   );
   const { addTab, closeTab, commitRename, renameId, renameInputRef, renameValue, reorderTab, setRenameId, setRenameValue, startRename } = useTabActions({ activeId, setActiveId, setDetections, setRephraseUndo, setStatus, setTabs, t, tabs, titleTouched });
+  // Choosing an application shows only its notes; one with none yet
+  // starts its first note so the editor never shows a note from elsewhere.
+  const chooseApp = useCallback((v: string) => {
+    lastShow = v;
+    setShowState(v);
+    if (v !== SHOW_ALL && v !== SHOW_NONE && !filterTabs(tabsRef.current, v).length) addTab(v);
+  }, [addTab]);
   const { canScrollDown, canScrollUp, noteOverflows, scrollEditor } = useScrollAffordances({ active, activeId, bidiMode, editorRef, misspelledWords, noteFontSize, recomputeSpellRects, scratchRootRef, shellRef, updateScrollAffordancesRef });
 
   // Effective dir attribute for the editor + overlay.
@@ -447,7 +457,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         startRename={startRename}
         t={t}
         tabs={visibleTabs}
-        filter={<NoteFilter show={show} setShow={setShow} apps={appNames} t={t} />}
+        filter={<NoteFilter show={show} setShow={chooseApp} apps={appNames} t={t} />}
       />
 
       {/* Save-health alarm — saves are NOT landing; typing exists only in

@@ -24,7 +24,7 @@ export interface NoteTabStripProps {
   startRename: (id: string) => void;
   t: (key: keyof TranslationDict) => string;
   tabs: ScratchTab[];
-  /** The "Show" filter, at the end of the strip. */
+  /** The application selector, at the start of the strip. */
   filter?: React.ReactNode;
 }
 
@@ -33,6 +33,12 @@ export function NoteTabStrip({ activeId, addTab, archiveTab, closeTab, commitRen
     <>
       {/* Internal tabs — unified pill strip */}
       <div className="scratchpad-tab-strip flex items-center gap-1.5 flex-wrap">
+        {filter && (
+          <>
+            {filter}
+            <span className="w-px h-5 mx-0.5 shrink-0" style={{ background: "var(--border)" }} />
+          </>
+        )}
         {[...tabs.filter((t) => !t.archived)].sort((a, b) => {
           const ap = (a as any).pinned ? 1 : 0;
           const bp = (b as any).pinned ? 1 : 0;
@@ -151,7 +157,6 @@ className="scratchpad-tab group cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5" />
         </button>
-        {filter && <span className="ms-auto">{filter}</span>}
       </div>
     </>
   );

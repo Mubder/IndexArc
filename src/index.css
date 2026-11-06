@@ -287,8 +287,8 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --tab-active-border: rgba(147, 197, 253, 0.55);
   --tab-active-shadow: 0 6px 22px -6px rgba(99, 102, 241, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   --tab-active-color: #ffffff;
-  --tab-inactive-bg: transparent;
-  --tab-inactive-border: transparent;
+  --tab-inactive-bg: rgba(255, 255, 255, 0.045);
+  --tab-inactive-border: rgba(255, 255, 255, 0.12);
   --tab-inactive-color: var(--text-muted);
 }
 
@@ -343,8 +343,8 @@ mark.hl-purple { background: #d8b4fe; color: #1a1a2e; }
   --tab-active-border: var(--accent);
   --tab-active-shadow: 0 2px 8px rgba(37, 99, 235, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.5);
   --tab-active-color: #0c1526;
-  --tab-inactive-bg: transparent;
-  --tab-inactive-border: transparent;
+  --tab-inactive-bg: rgba(15, 23, 42, 0.04);
+  --tab-inactive-border: rgba(15, 23, 42, 0.14);
   --tab-inactive-color: var(--text-dim);
 }
 

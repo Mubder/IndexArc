@@ -22,7 +22,7 @@ interface Props {
   showConfirm: (title: string, message: string, onConfirm: () => void, confirmText?: string) => Promise<void>;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
   /** Show one Scratchpad note (an application's note) in the Scratchpad. */
-  onOpenNote: (noteId: string) => void;
+  onOpenNote: (noteId: string, app: string) => void;
 }
 
 type Section = "keys" | "notes" | "commands";
@@ -274,7 +274,7 @@ export function ApplicationsTab({ entries, settings, onFetchAll, showConfirm, sh
                 if (note) await patchEntry(note.id, { notes: "", value: "" });
                 await onFetchAll();
               }}
-              onOpen={onOpenNote}
+              onOpen={(id) => onOpenNote(id, current.name)}
               onError={fail}
               onCount={setNoteCount}
               t={t}

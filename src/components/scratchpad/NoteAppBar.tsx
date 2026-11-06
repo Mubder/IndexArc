@@ -1,7 +1,7 @@
 // Scratchpad ↔ Applications: which application a note belongs to (picker
 // chip) and which notes the tab strip shows (filter).
 import React, { useCallback, useEffect, useState } from "react";
-import { AppWindow, Check, ChevronDown, Filter, Plus } from "lucide-react";
+import { AppWindow, Check, ChevronDown, Layers, Plus } from "lucide-react";
 import { normalizeAppName, sameName, summarizeApps } from "../../../shared/apps";
 import type { ScratchTab } from "../../types";
 import type { TranslationDict } from "../../utils/i18n";
@@ -59,7 +59,7 @@ function useMenu() {
   return { at, open, close: () => setAt(null) };
 }
 
-/** "Show: All notes ▾" — narrows the tab strip to one application. */
+/** The application selector at the start of the tab strip: only the chosen application's notes are shown. */
 export function NoteFilter({ show, setShow, apps, t }: { show: string; setShow: (v: string) => void; apps: string[]; t: T }) {
   const m = useMenu();
   const label = show === SHOW_ALL ? t("notes_show_all") : show === SHOW_NONE ? t("notes_show_none") : show;
@@ -74,18 +74,24 @@ export function NoteFilter({ show, setShow, apps, t }: { show: string; setShow: 
         onClick={m.open}
         aria-haspopup="menu"
         aria-expanded={!!m.at}
-        className="h-7 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs whitespace-nowrap"
-        style={{ background: show === SHOW_ALL ? "transparent" : "var(--accent-bg)", color: show === SHOW_ALL ? "var(--text-muted)" : "var(--accent-bright)", border: "1px solid var(--border)" }}
+        className="h-8 px-3 inline-flex items-center gap-1.5 rounded-full text-xs font-semibold whitespace-nowrap shrink-0"
+        style={{ background: show === SHOW_ALL ? "var(--bg-input)" : "var(--accent-bg)", color: show === SHOW_ALL ? "var(--text-dim)" : "var(--accent-bright)", border: show === SHOW_ALL ? "1px solid var(--border)" : "1px solid var(--border-glow)" }}
         title={t("notes_show")}
+        aria-label={`${t("notes_show")}: ${label}`}
       >
-        <Filter className="w-3 h-3" /> <span className="max-w-[10rem] truncate">{t("notes_show")}: {label}</span> <ChevronDown className="w-3 h-3" />
+        {show === SHOW_ALL ? <Layers className="w-3.5 h-3.5" /> : <AppWindow className="w-3.5 h-3.5" />}
+        <span className="max-w-[10rem] truncate">{label}</span>
+        <ChevronDown className="w-3 h-3" />
       </button>
       {m.at && (
         <CursorMenu x={m.at.x} y={m.at.y} className="z-50 rounded-xl shadow-2xl p-1.5 w-56 max-h-80 overflow-auto" style={menuStyle}>
+          <div className="px-2.5 py-1 text-[10px] uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>{t("notes_show")}</div>
           <MenuItem on={show === SHOW_ALL} label={t("notes_show_all")} onClick={() => pick(SHOW_ALL)} />
+          {apps.length > 0 && <div className="my-1 h-px" style={{ background: "var(--border)" }} />}
           {apps.map((a) => (
             <MenuItem key={a} on={sameName(show, a)} label={a} icon onClick={() => pick(a)} />
           ))}
+          <div className="my-1 h-px" style={{ background: "var(--border)" }} />
           <MenuItem on={show === SHOW_NONE} label={t("notes_show_none")} onClick={() => pick(SHOW_NONE)} />
         </CursorMenu>
       )}

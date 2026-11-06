@@ -26,9 +26,11 @@ export function takeHandoffNote(): HandoffNote | null {
 // show. Kept until the Scratchpad has loaded that note from the server.
 export const FOCUS_NOTE_EVENT = "indexarc-focus-note";
 let pendingFocus: string | null = null;
+let pendingFocusApp: string | null = null;
 
-export function focusScratchpadNote(id: string): void {
+export function focusScratchpadNote(id: string, app?: string): void {
   pendingFocus = id;
+  pendingFocusApp = app ?? null;
   window.dispatchEvent(new Event(FOCUS_NOTE_EVENT));
 }
 
@@ -38,4 +40,11 @@ export function peekFocusNote(): string | null {
 
 export function clearFocusNote(): void {
   pendingFocus = null;
+}
+
+/** The application of the note being opened, so the Scratchpad shows its notes. */
+export function takeFocusApp(): string | null {
+  const a = pendingFocusApp;
+  pendingFocusApp = null;
+  return a;
 }
