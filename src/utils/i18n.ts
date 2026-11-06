@@ -46,8 +46,6 @@ export interface TranslationDict {
   apps_delete_key: string;
   apps_delete_key_title: string;
   apps_delete_key_msg: string;
-  apps_notes_placeholder: string;
-  apps_notes_saved: string;
   apps_paste_title: string;
   apps_paste_hint: string;
   apps_preview: string;
@@ -57,6 +55,43 @@ export interface TranslationDict {
   apps_status_same: string;
   apps_save_n: string;
   apps_saved_result: string;
+  apps_section_keys: string;
+  apps_section_notes: string;
+  apps_section_commands: string;
+  apps_loading: string;
+  apps_overview: string;
+  apps_note_default_title: string;
+  apps_new_note: string;
+  apps_no_notes: string;
+  apps_note_empty: string;
+  apps_untitled_note: string;
+  apps_copy_note: string;
+  apps_open_in_scratchpad: string;
+  apps_unlink_note: string;
+  apps_no_commands: string;
+  apps_add_command: string;
+  apps_command: string;
+  apps_command_name: string;
+  apps_command_name_placeholder: string;
+  apps_delete_command_title: string;
+  apps_delete_command_msg: string;
+  apps_save_commands_title: string;
+  apps_saved_commands: string;
+  notes_ai: string;
+  notes_more: string;
+  notes_rephrase_style: string;
+  notes_copy_all: string;
+  notes_copy_all_title: string;
+  notes_save_to_app: string;
+  notes_save_to_app_title: string;
+  notes_nothing_to_save: string;
+  notes_app_title: string;
+  notes_app_none: string;
+  notes_linked: string;
+  notes_unlinked: string;
+  notes_show: string;
+  notes_show_all: string;
+  notes_show_none: string;
   apps_skipped_lines: string;
   apps_nothing_to_save: string;
   apps_existing_title: string;
@@ -887,8 +922,6 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     apps_delete_key: "Delete key",
     apps_delete_key_title: "Delete {key}?",
     apps_delete_key_msg: "The key is removed from the vault.",
-    apps_notes_placeholder: "Notes for this application: logins, URLs, how to rotate keys",
-    apps_notes_saved: "Notes saved",
     apps_paste_title: "Paste .env into {app}",
     apps_paste_hint: "One KEY=value per line. Lines starting with # are ignored. Existing keys with the same name are updated.",
     apps_preview: "Preview",
@@ -898,6 +931,43 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     apps_status_same: "unchanged",
     apps_save_n: "Save {n}",
     apps_saved_result: "{created} added, {updated} updated",
+    apps_section_keys: "Keys",
+    apps_section_notes: "Notes",
+    apps_section_commands: "Commands",
+    apps_loading: "Loading…",
+    apps_overview: "Overview",
+    apps_note_default_title: "{app} note",
+    apps_new_note: "New note",
+    apps_no_notes: "No notes yet. Notes can hold anything: steps, commands, explanations, keys.",
+    apps_note_empty: "Empty note",
+    apps_untitled_note: "Untitled note",
+    apps_copy_note: "Copy whole note",
+    apps_open_in_scratchpad: "Open in Scratchpad",
+    apps_unlink_note: "Remove from this application",
+    apps_no_commands: "No commands yet.",
+    apps_add_command: "Add command",
+    apps_command: "Command",
+    apps_command_name: "Name",
+    apps_command_name_placeholder: "What it does, e.g. Deploy to production",
+    apps_delete_command_title: "Delete \"{name}\"?",
+    apps_delete_command_msg: "The command is removed from the vault.",
+    apps_save_commands_title: "Save {n} command(s)",
+    apps_saved_commands: "{n} command(s) added",
+    notes_ai: "AI",
+    notes_more: "More note tools",
+    notes_rephrase_style: "Rephrase style",
+    notes_copy_all: "Copy all",
+    notes_copy_all_title: "Copy the whole note",
+    notes_save_to_app: "Save to {app}",
+    notes_save_to_app_title: "Save this note's keys and commands into its application",
+    notes_nothing_to_save: "No keys or commands found in this note.",
+    notes_app_title: "Application",
+    notes_app_none: "No application",
+    notes_linked: "Note added to {app}",
+    notes_unlinked: "Note removed from its application",
+    notes_show: "Show",
+    notes_show_all: "All notes",
+    notes_show_none: "No application",
     apps_skipped_lines: "{n} lines skipped",
     apps_nothing_to_save: "Nothing to save: every key is unchanged.",
     apps_existing_title: "Add existing secrets to {app}",
@@ -1726,8 +1796,6 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     apps_delete_key: "حذف المفتاح",
     apps_delete_key_title: "حذف {key}؟",
     apps_delete_key_msg: "سيُحذف المفتاح من الخزنة.",
-    apps_notes_placeholder: "ملاحظات لهذا التطبيق: بيانات الدخول، الروابط، طريقة تدوير المفاتيح",
-    apps_notes_saved: "تم حفظ الملاحظات",
     apps_paste_title: "لصق ‎.env‎ في {app}",
     apps_paste_hint: "سطر واحد لكل KEY=value. تُتجاهل الأسطر التي تبدأ بـ #. تُحدَّث المفاتيح الموجودة بالاسم نفسه.",
     apps_preview: "معاينة",
@@ -1737,6 +1805,43 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     apps_status_same: "بلا تغيير",
     apps_save_n: "حفظ {n}",
     apps_saved_result: "أُضيف {created}، وحُدِّث {updated}",
+    apps_section_keys: "المفاتيح",
+    apps_section_notes: "الملاحظات",
+    apps_section_commands: "الأوامر",
+    apps_loading: "جارٍ التحميل…",
+    apps_overview: "نظرة عامة",
+    apps_note_default_title: "ملاحظة {app}",
+    apps_new_note: "ملاحظة جديدة",
+    apps_no_notes: "لا ملاحظات بعد. الملاحظة تحفظ أي شيء: خطوات وأوامر وشروحات ومفاتيح.",
+    apps_note_empty: "ملاحظة فارغة",
+    apps_untitled_note: "ملاحظة بلا عنوان",
+    apps_copy_note: "نسخ الملاحظة كاملة",
+    apps_open_in_scratchpad: "فتح في المسودة",
+    apps_unlink_note: "إزالة من هذا التطبيق",
+    apps_no_commands: "لا أوامر بعد.",
+    apps_add_command: "إضافة أمر",
+    apps_command: "الأمر",
+    apps_command_name: "الاسم",
+    apps_command_name_placeholder: "ماذا يفعل، مثل: النشر على الإنتاج",
+    apps_delete_command_title: "حذف \"{name}\"؟",
+    apps_delete_command_msg: "يُحذف الأمر من الخزنة.",
+    apps_save_commands_title: "حفظ {n} أمر",
+    apps_saved_commands: "أُضيف {n} أمر",
+    notes_ai: "الذكاء الاصطناعي",
+    notes_more: "أدوات أخرى للملاحظة",
+    notes_rephrase_style: "أسلوب إعادة الصياغة",
+    notes_copy_all: "نسخ الكل",
+    notes_copy_all_title: "نسخ الملاحظة كاملة",
+    notes_save_to_app: "حفظ في {app}",
+    notes_save_to_app_title: "حفظ مفاتيح هذه الملاحظة وأوامرها في تطبيقها",
+    notes_nothing_to_save: "لم يُعثر على مفاتيح أو أوامر في هذه الملاحظة.",
+    notes_app_title: "التطبيق",
+    notes_app_none: "بلا تطبيق",
+    notes_linked: "أُضيفت الملاحظة إلى {app}",
+    notes_unlinked: "أُزيلت الملاحظة من تطبيقها",
+    notes_show: "عرض",
+    notes_show_all: "كل الملاحظات",
+    notes_show_none: "بلا تطبيق",
     apps_skipped_lines: "تُخطّي {n} أسطر",
     apps_nothing_to_save: "لا شيء للحفظ: كل المفاتيح بلا تغيير.",
     apps_existing_title: "إضافة أسرار موجودة إلى {app}",

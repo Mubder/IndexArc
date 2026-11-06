@@ -137,7 +137,11 @@ export function useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, 
       // unchanged when the title already matches: an unconditional new
       // object here turned setEditable's re-emitted "update" into an
       // infinite setTabs → effect → setEditable → update render loop.
-      if (!titleTouched.current[id]) {
+      // A note named on the Applications page ("Overview", "Kazma note") keeps
+      // its name; only default "Scratch N" names follow the first line.
+      const named = tabsRef.current.find((x) => x.id === id);
+      const keepName = !!named?.app && !/^Scratch( \d+)?$/.test(named.title || "");
+      if (!titleTouched.current[id] && !keepName) {
         let firstBlock = "";
         editor.state.doc.forEach((node) => {
           if (firstBlock) return;

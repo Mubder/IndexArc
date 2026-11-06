@@ -258,8 +258,10 @@ export function entriesRoutes(ctx: RouteContext) {
         renamed++;
       }
     }
+    // The application's notes move with it.
+    const notes = store.renameScratchpadApp((a) => sameName(a as string | undefined, from), to);
     if (renamed) sendSSE("entries-changed", { action: "apps-rename" });
-    res.json({ renamed });
+    res.json({ renamed, notes });
   });
 
   r.post("/bulk-delete", validateBody(BODIES.entries["POST /bulk-delete"]), (req, res) => {

@@ -21,7 +21,7 @@ import {
 } from "./types";
 
 import { getTranslation } from "./utils/i18n";
-import { offerNoteToScratchpad } from "./noteHandoff";
+import { focusScratchpadNote, offerNoteToScratchpad } from "./noteHandoff";
 
 // Subcomponents — Scratchpad is TipTap-heavy, lazy-split to keep main bundle ~220kB
 import { HomeTab } from "./components/HomeTab";
@@ -660,7 +660,17 @@ return (
             )}
 
             {tab === "apps" && (
-              <ApplicationsTab entries={entries} settings={settings} onFetchAll={fetchAll} showConfirm={showConfirm} showToast={showToast} />
+              <ApplicationsTab
+                entries={entries}
+                settings={settings}
+                onFetchAll={fetchAll}
+                showConfirm={showConfirm}
+                showToast={showToast}
+                onOpenNote={(id) => {
+                  focusScratchpadNote(id);
+                  setTab("scratchpad");
+                }}
+              />
             )}
 
             {tab === "settings" && (

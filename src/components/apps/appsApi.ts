@@ -70,3 +70,50 @@ export function hygieneBadge(e: { expires_at?: string; rotate_every_days?: numbe
   }
   return null;
 }
+
+// ── Notes (Scratchpad tabs linked to an application) ──────────────────────
+
+export interface NoteSummary {
+  id: string;
+  title: string;
+  content: string;
+  app?: string;
+  updated_at?: string;
+  pinned?: boolean;
+  protected?: boolean;
+}
+
+export async function listNotes(): Promise<NoteSummary[]> {
+  const res = await fetch("/api/scratchpad");
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data?.tabs) ? data.tabs.filter((t: any) => t && !t.archived) : [];
+}
+
+/** Create a Scratchpad note already linked to `app`; returns its id. */
+export async function createNote(app: string | undefined, title: string, html = "<p></p>"): Promise<string> {
+  const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `note-${Date.now()}`;
+  const res = await fetch(`/api/scratchpad/tabs/${encodeURIComponent(id)}/content`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: html, title, ...(app ? { app } : {}) }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return id;
+}
+
+/** Link a note to an application, or unlink it (null). */
+export async function setNoteApp(id: string, app: string | null): Promise<void> {
+  const res = await fetch(`/api/scratchpad/tabs/${encodeURIComponent(id)}/meta`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ app }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+/** Plain text → note HTML, one paragraph per line. */
+export function textToNoteHtml(text: string): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text.split(/\r?\n/).map((l) => `<p>${esc(l) || "<br>"}</p>`).join("");
+}

@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
+import type React from "react";
 import type { ScratchTab } from "../../types";
 import type { TranslationDict } from "../../utils/i18n";
 import { Pencil, Archive, X, Plus } from "lucide-react";
@@ -23,9 +24,11 @@ export interface NoteTabStripProps {
   startRename: (id: string) => void;
   t: (key: keyof TranslationDict) => string;
   tabs: ScratchTab[];
+  /** The "Show" filter, at the end of the strip. */
+  filter?: React.ReactNode;
 }
 
-export function NoteTabStrip({ activeId, addTab, archiveTab, closeTab, commitRename, dragId, overId, renameId, renameInputRef, renameValue, reorderTab, setActiveId, setDragId, setOverId, setRenameId, setRenameValue, startRename, t, tabs }: NoteTabStripProps) {
+export function NoteTabStrip({ activeId, addTab, archiveTab, closeTab, commitRename, dragId, overId, renameId, renameInputRef, renameValue, reorderTab, setActiveId, setDragId, setOverId, setRenameId, setRenameValue, startRename, t, tabs, filter }: NoteTabStripProps) {
   return (
     <>
       {/* Internal tabs — unified pill strip */}
@@ -148,6 +151,7 @@ className="scratchpad-tab group cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5" />
         </button>
+        {filter && <span className="ms-auto">{filter}</span>}
       </div>
     </>
   );

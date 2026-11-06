@@ -190,9 +190,27 @@ describe("applications API", () => {
     await call("PATCH", `/api/entries/${id}`, { app: "Shop", env: "Production" });
   });
 
+  it("links Scratchpad notes to an application", async () => {
+    const made = await call("POST", "/api/scratchpad/tabs/note-1/content", { content: "<p>npm run deploy</p>", title: "Deploy", app: "  Shop " });
+    expect(made.status).toBe(200);
+    expect(store.getScratchpad().find((t: any) => t.id === "note-1")?.app).toBe("Shop");
+    await call("POST", "/api/scratchpad/tabs/note-2/content", { content: "<p>free</p>", title: "Free" });
+    expect(store.getScratchpad().find((t: any) => t.id === "note-2")?.app).toBeUndefined();
+    // Linking later, and unlinking.
+    expect((await call("POST", "/api/scratchpad/tabs/note-2/meta", { app: "shop" })).body.tab.app).toBe("shop");
+    expect((await call("POST", "/api/scratchpad/tabs/note-2/meta", { app: null })).body.tab.app).toBeUndefined();
+    expect((await call("POST", "/api/scratchpad/tabs/missing/meta", { app: "Shop" })).status).toBe(404);
+    // The application is set only when the note is created, not by later saves.
+    const rev = store.getScratchpad().find((t: any) => t.id === "note-1")?.rev;
+    await call("POST", "/api/scratchpad/tabs/note-1/content", { content: "<p>npm run deploy:prod</p>", base_rev: rev, app: "Other" });
+    expect(store.getScratchpad().find((t: any) => t.id === "note-1")?.app).toBe("Shop");
+  });
+
   it("renames an application, merging into an existing one", async () => {
     const r = await call("POST", "/api/entries/apps/rename", { from: "SHOP", to: "Shop backend" });
     expect(r.body.renamed).toBe(4);
+    expect(r.body.notes).toBe(1);
+    expect(store.getScratchpad().find((t: any) => t.id === "note-1")?.app).toBe("Shop backend");
     expect(summarizeApps(store.listEntries()).map((s) => s.name)).toEqual(["Shop backend"]);
   });
 

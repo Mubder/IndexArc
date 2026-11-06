@@ -202,8 +202,11 @@
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   border-radius: 0.5rem;
 }
-.note-jump-btn--top {
+.note-copy-btn {
   top: 8px;
+}
+.note-jump-btn--top {
+  top: 52px;
 }
 .note-jump-btn--bottom {
   bottom: 8px;

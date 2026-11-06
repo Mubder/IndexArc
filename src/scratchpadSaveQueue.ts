@@ -89,6 +89,8 @@ async function postTabContent(
     // Title is only used when this POST creates the tab server-side
     // (upsert); existing tabs keep their title — renames go through /meta.
     title: t.title || undefined,
+    // Likewise the application (Applications page) a new note starts in.
+    app: t.app || undefined,
     base_rev: baseRev,
     force: force || undefined,
   });

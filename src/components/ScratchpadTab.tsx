@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X, RotateCcw } from "lucide-react";
-import { Settings, RewriteStyle, Detection, Busy, ScratchTab, NoteBidiMode } from "../types";
+import { Settings, RewriteStyle, Detection, Busy, ScratchTab, NoteBidiMode, type AnalyzeCandidate } from "../types";
 import { getTranslation } from "../utils/i18n";
+import { fill } from "./home/DashboardCards";
 import { drainScratchpadSaves, setSyncedScratchpadTabs, forceSaveScratchpadTab } from "../scratchpadSaveQueue";
-import { takeHandoffNote, REOPEN_NOTE_EVENT } from "../noteHandoff";
+import { takeHandoffNote, REOPEN_NOTE_EVENT, FOCUS_NOTE_EVENT, peekFocusNote, clearFocusNote } from "../noteHandoff";
 import { ensureHtmlParagraphs, htmlToPlainText } from "../lib/noteHtml";
 
 import { type NoteRevision, getNoteRevisions, saveNoteRevision } from "./scratchpad/revisions";
@@ -29,7 +30,9 @@ import { useSpellcheck } from "./scratchpad/useSpellcheck";
 import { useScratchpadSync } from "./scratchpad/useScratchpadSync";
 import { useNoteActions } from "./scratchpad/useNoteActions";
 import { useScrollAffordances } from "./scratchpad/useScrollAffordances";
-import { SaveToAppDialog } from "./apps/SaveToAppDialog";
+import { SaveToAppDialog, type CommandItem } from "./apps/SaveToAppDialog";
+import { NoteAppPicker, NoteFilter, SHOW_ALL, SHOW_NONE, filterTabs, useAppNames } from "./scratchpad/NoteAppBar";
+import { setNoteApp } from "./apps/appsApi";
 import type { UpsertItem } from "./apps/appsApi";
 import { keyNameFromFragment } from "../../shared/apps";
 
@@ -140,6 +143,18 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     handleReopenEvent();
     return () => window.removeEventListener(REOPEN_NOTE_EVENT, handleReopenEvent);
   }, []);
+  // "Open in Scratchpad" while the Scratchpad is already showing.
+  useEffect(() => {
+    const onFocus = () => {
+      const id = peekFocusNote();
+      if (id && tabsRef.current.some((x) => x.id === id)) {
+        clearFocusNote();
+        setActiveId(id);
+      }
+    };
+    window.addEventListener(FOCUS_NOTE_EVENT, onFocus);
+    return () => window.removeEventListener(FOCUS_NOTE_EVENT, onFocus);
+  }, []);
   const { tiptap } = useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, editorHtmlRef, editorRef, lastActiveTabId, lastNonEmptyContentRef, lastSnapshotTimeRef, pastePlainRef, recordSnapshot, setClearedAlert, setSlashOpen, setTabs, settings, tabs, tabsRef, titleTouched });
 
   // One size for dual-language notes: larger of EN/AR settings so neither
@@ -239,16 +254,63 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   // "Save secret to Vault" asks which application and environment the
   // detected secrets belong to (SaveToAppDialog); "No application" falls
   // back to handleSaveSecret's Library-only save.
-  const [saveToApp, setSaveToApp] = useState<UpsertItem[] | null>(null);
-  const openSaveToApp = useCallback(async () => {
-    const found = (detection?.candidates || [])
+  const [saveToApp, setSaveToApp] = useState<{ items: UpsertItem[]; commands: CommandItem[]; app?: string } | null>(null);
+  const keysOf = (cands: AnalyzeCandidate[]) =>
+    cands
       .filter((c) => (c.family === "secret" || c.family === "unknown") && c.value)
       // Prefer the variable name the line was written under (STRIPE_SECRET_KEY=…)
       // so it matches a key already saved in the application.
       .map((c) => ({ name: (keyNameFromFragment(c.raw_fragment) || c.name || c.type || "SECRET").trim(), value: c.value, type: c.type || undefined }));
+  const commandsOf = (cands: AnalyzeCandidate[]) =>
+    cands.filter((c) => c.family === "command" && (c.value || "").trim()).map((c) => ({ name: (c.name || c.value).trim().slice(0, 80), command: c.value.trim() }));
+  const openSaveToApp = useCallback(async () => {
+    const found = keysOf(detection?.candidates || []);
     if (!found.length) return handleSaveSecret();
-    setSaveToApp(found);
+    setSaveToApp({ items: found, commands: [] });
   }, [detection, handleSaveSecret]);
+
+  // The Scratchpad side of Applications: which notes the strip shows, and
+  // which application the open note belongs to.
+  const [show, setShow] = useState<string>(SHOW_ALL);
+  const [appNames, reloadAppNames] = useAppNames(tabs);
+  const visibleTabs = useMemo(() => filterTabs(tabs, show), [tabs, show]);
+  useEffect(() => {
+    if (show !== SHOW_ALL && visibleTabs.length && !visibleTabs.some((x) => x.id === activeId)) setActiveId(visibleTabs[0].id);
+  }, [show, visibleTabs, activeId]);
+  const setActiveApp = useCallback(async (app: string | null) => {
+    const id = activeIdRef.current;
+    setTabs((prev) => prev.map((x) => {
+      if (x.id !== id) return x;
+      const { app: _old, ...rest } = x;
+      return app ? { ...rest, app } : rest;
+    }));
+    try {
+      // A note not on the server yet takes its application with its first save.
+      await setNoteApp(id, app);
+    } catch {
+      /* not saved yet */
+    }
+    reloadAppNames();
+    setStatus(app ? fill(t("notes_linked"), { app }) : t("notes_unlinked"));
+  }, [reloadAppNames, setStatus]);
+  // "Save to {app}": the note's keys and commands into its application.
+  const saveNoteToApp = useCallback(async () => {
+    let cands = detection?.candidates;
+    if (!cands) {
+      const text = htmlToPlainText(active?.content || "").trim();
+      if (!text) return;
+      try {
+        const res = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: text }) });
+        cands = res.ok ? ((await res.json()).candidates as AnalyzeCandidate[]) || [] : [];
+      } catch {
+        cands = [];
+      }
+    }
+    const items = keysOf(cands);
+    const commands = commandsOf(cands);
+    if (!items.length && !commands.length) return setStatus(t("notes_nothing_to_save"));
+    setSaveToApp({ items, commands, app: active?.app });
+  }, [detection, active, setStatus]);
 
   const handleSmartSplitParagraphs = useCallback(() => {
     if (!tiptap || tiptap.isDestroyed) return;
@@ -367,7 +429,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       )}
       <NoteTabStrip
         activeId={activeId}
-        addTab={addTab}
+        addTab={() => addTab(show !== SHOW_ALL && show !== SHOW_NONE ? show : undefined)}
         archiveTab={archiveTab}
         closeTab={closeTab}
         commitRename={commitRename}
@@ -384,7 +446,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         setRenameValue={setRenameValue}
         startRename={startRename}
         t={t}
-        tabs={tabs}
+        tabs={visibleTabs}
+        filter={<NoteFilter show={show} setShow={setShow} apps={appNames} t={t} />}
       />
 
       {/* Save-health alarm — saves are NOT landing; typing exists only in
@@ -414,6 +477,8 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
       >
         <EditorPanel
           active={active}
+          appPicker={<NoteAppPicker app={active?.app} apps={appNames} onChange={setActiveApp} t={t} />}
+          handleSaveToApp={saveNoteToApp}
           activeCharCount={activeCharCount}
           activeId={activeId}
           activeIsPinned={activeIsPinned}
@@ -502,10 +567,12 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
         {saveToApp && (
           <SaveToAppDialog
-            items={saveToApp}
+            items={saveToApp.items}
+            commands={saveToApp.commands}
+            defaultApp={saveToApp.app}
             t={t}
             onClose={() => setSaveToApp(null)}
-            onSaved={(msg) => { setSaveToApp(null); setStatus(msg); }}
+            onSaved={(msg) => { setSaveToApp(null); setStatus(msg); reloadAppNames(); }}
             onSaveLibraryOnly={handleSaveSecret}
           />
         )}

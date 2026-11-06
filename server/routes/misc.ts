@@ -11,6 +11,7 @@ import { serverIdentity } from "../auth.js";
 import type { RouteContext } from "./types.js";
 import { validateBody } from "../request-body.js";
 import { BODIES } from "./bodies.js";
+import { normalizeAppName } from "../../shared/apps.js";
 
 function fileSizeOrNull(file: string): number | null {
   try {
@@ -448,7 +449,8 @@ export function miscRoutes(ctx: RouteContext) {
     const title = req.body?.title;
     // NOTE: force/override is intentionally NOT accepted from request bodies —
     // protection can only be lifted via the dedicated /protect route.
-    const result = store.updateScratchpadTabContent(req.params.id, content, baseRev, false, title);
+    // Like the title, the application is honoured only when this creates the note.
+    const result = store.updateScratchpadTabContent(req.params.id, content, baseRev, false, title, normalizeAppName(req.body?.app));
     if (result.protected) {
       return res.status(423).json({ error: "This note is protected", server_tab: result.tab });
     }
@@ -474,6 +476,12 @@ export function miscRoutes(ctx: RouteContext) {
         }
         throw e;
       }
+    }
+    // Link to an application; null or "" unlinks.
+    if (req.body && "app" in req.body) {
+      const tab = store.setScratchpadTabApp(req.params.id, normalizeAppName(req.body.app));
+      if (!tab) return res.status(404).json({ error: "Tab not found" });
+      return res.json({ tab });
     }
     res.status(400).json({ error: "Nothing to update" });
   });

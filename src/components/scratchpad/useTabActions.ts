@@ -53,9 +53,10 @@ export function useTabActions({ activeId, setActiveId, setDetections, setRephras
     return `Scratch ${n}`;
   }, []);
 
-  const addTab = () => {
+  /** New note; `app` links it to an application (the Scratchpad filter's). */
+  const addTab = (app?: string) => {
     const id = uid();
-    setTabs((prev) => [...prev, { id, title: nextTitle(prev), content: "" }]);
+    setTabs((prev) => [...prev, { id, title: nextTitle(prev), content: "", ...(app ? { app } : {}) }]);
     setActiveId(id);
   };
 

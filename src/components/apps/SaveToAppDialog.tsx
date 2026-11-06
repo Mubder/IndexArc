@@ -1,10 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { DEFAULT_ENVS, envKey, normalizeAppName, normalizeEnvName, summarizeApps, type AppSummary } from "../../../shared/apps";
+import { DEFAULT_ENVS, envKey, normalizeAppName, normalizeEnvName, sameName, summarizeApps, type AppSummary } from "../../../shared/apps";
 import { fill } from "../home/DashboardCards";
 import { AppDialog, GHOST, PRIMARY, btnGhost, btnPrimary } from "./AppDialog";
 import { UpsertPreview } from "./UpsertPreview";
-import { upsertAppKeys, type UpsertItem, type UpsertReportItem } from "./appsApi";
+import { saveEntries, upsertAppKeys, type UpsertItem, type UpsertReportItem } from "./appsApi";
+import { commandCandidate } from "./AppCommandsPanel";
+
+export interface CommandItem {
+  name: string;
+  command: string;
+}
 import type { TFn } from "./types";
 
 const NONE = "__none__";
@@ -14,23 +20,32 @@ const NEW = "__new__";
  * Scratchpad → "Save secret to Vault": pick an application and environment
  * for the detected secrets. Each key shows whether it is new or updates one
  * already saved there. "No application" keeps the old Library-only save.
+ * Detected commands are saved to the application too (Commands section),
+ * skipping any it already has.
  */
 export function SaveToAppDialog({
   items,
+  commands = [],
+  defaultApp,
   t,
   onClose,
   onSaved,
   onSaveLibraryOnly,
 }: {
   items: UpsertItem[];
+  commands?: CommandItem[];
+  /** The note's application, chosen up front. */
+  defaultApp?: string;
   t: TFn;
   onClose: () => void;
   onSaved: (msg: string) => void;
   onSaveLibraryOnly: () => Promise<void>;
 }) {
   const [apps, setApps] = useState<AppSummary[] | null>(null);
+  const [existing, setExisting] = useState<any[]>([]);
   const [appChoice, setAppChoice] = useState<string>(NEW);
-  const [newApp, setNewApp] = useState("");
+  const [newApp, setNewApp] = useState(defaultApp ?? "");
+  const [cmdChecked, setCmdChecked] = useState<Set<number>>(() => new Set(commands.map((_, i) => i)));
   const [envChoice, setEnvChoice] = useState<string>(DEFAULT_ENVS[0]);
   const [newEnv, setNewEnv] = useState("");
   const [plan, setPlan] = useState<UpsertReportItem[] | null>(null);
@@ -44,9 +59,13 @@ export function SaveToAppDialog({
       .then((r) => (r.ok ? r.json() : []))
       .then((list) => {
         if (!live) return;
-        const s = summarizeApps(Array.isArray(list) ? list : []);
+        const all = Array.isArray(list) ? list : [];
+        const s = summarizeApps(all);
         setApps(s);
-        if (s.length) setAppChoice(s[0].name);
+        setExisting(all);
+        const own = defaultApp ? s.find((a) => sameName(a.name, defaultApp)) : undefined;
+        if (own) setAppChoice(own.name);
+        else if (!defaultApp && s.length) setAppChoice(s[0].name);
       })
       .catch(() => live && setApps([]));
     return () => {
@@ -65,6 +84,10 @@ export function SaveToAppDialog({
   useEffect(() => {
     setPlan(null);
     if (!app) return;
+    if (!items.length) {
+      setPlan([]);
+      return;
+    }
     let live = true;
     const h = setTimeout(() => {
       upsertAppKeys({ app, env, items, dry_run: true })
@@ -83,7 +106,11 @@ export function SaveToAppDialog({
 
   const selected = items.filter((i) => checked.has(envKey(i.name)));
   const libraryOnly = appChoice === NONE;
-  const count = libraryOnly ? items.length : plan ? plan.filter((p) => p.status !== "same" && checked.has(p.key)).length : selected.length;
+  // A command the application already has is not saved twice.
+  const cmdKnown = (c: CommandItem) => !!app && existing.some((e) => e.family === "command" && sameName(e.app, app) && (e.value || "").trim() === c.command.trim());
+  const cmdToSave = libraryOnly ? [] : commands.filter((c, i) => cmdChecked.has(i) && !cmdKnown(c));
+  const keyCount = libraryOnly ? items.length : plan ? plan.filter((p) => p.status !== "same" && checked.has(p.key)).length : selected.length;
+  const count = keyCount + cmdToSave.length;
 
   const save = async () => {
     setError("");
@@ -101,8 +128,11 @@ export function SaveToAppDialog({
     if (envChoice === NEW && !env) return setError(t("apps_name_required"));
     setBusy(true);
     try {
-      const r = await upsertAppKeys({ app, env, items: selected });
-      onSaved(`${app}${env ? ` · ${env}` : ""}: ${fill(t("apps_saved_result"), { created: r.created ?? 0, updated: r.updated ?? 0 })}`);
+      const r = selected.length ? await upsertAppKeys({ app, env, items: selected }) : { created: 0, updated: 0 };
+      if (cmdToSave.length) await saveEntries(cmdToSave.map((c) => commandCandidate(app, c.name, c.command)));
+      const parts = [fill(t("apps_saved_result"), { created: r.created ?? 0, updated: r.updated ?? 0 })];
+      if (cmdToSave.length) parts.push(fill(t("apps_saved_commands"), { n: cmdToSave.length }));
+      onSaved(`${app}${env ? ` · ${env}` : ""}: ${parts.join(" · ")}`);
     } catch (e: any) {
       setError(e?.message || t("apps_error"));
     } finally {
@@ -112,7 +142,7 @@ export function SaveToAppDialog({
 
   return (
     <AppDialog
-      title={fill(t("apps_save_secrets_title"), { n: items.length })}
+      title={items.length ? fill(t("apps_save_secrets_title"), { n: items.length }) : fill(t("apps_save_commands_title"), { n: commands.length })}
       onClose={onClose}
       footer={
         <>
@@ -167,6 +197,34 @@ export function SaveToAppDialog({
         <p className="text-xs flex items-center gap-2" style={{ color: "var(--text-muted)" }}><Loader2 className="w-3.5 h-3.5 animate-spin" /> {t("apps_checking")}</p>
       ) : (
         <UpsertPreview items={items.map((i) => ({ name: i.name, key: envKey(i.name), status: "new" as const }))} label={(s) => t(`apps_status_${s}` as any)} />
+      )}
+      {!libraryOnly && commands.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-[10px] uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>{t("apps_section_commands")}</p>
+          <ul className="rounded-lg max-h-40 overflow-auto" style={{ border: "1px solid var(--border)" }}>
+            {commands.map((c, i) => {
+              const known = cmdKnown(c);
+              return (
+                <li key={i} className="flex items-center gap-2 px-2.5 py-1.5 text-xs" style={{ borderTop: i ? "1px solid var(--border)" : undefined }}>
+                  <input
+                    type="checkbox"
+                    checked={!known && cmdChecked.has(i)}
+                    disabled={known}
+                    aria-label={c.name}
+                    onChange={() => setCmdChecked((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(i)) next.delete(i);
+                      else next.add(i);
+                      return next;
+                    })}
+                  />
+                  <code className="flex-1 min-w-0 truncate font-mono" dir="ltr" style={{ color: "var(--text-dim)" }} title={c.command}>{c.command}</code>
+                  <span className="text-[10px] shrink-0" style={{ color: known ? "var(--text-muted)" : "var(--emerald)" }}>{t(known ? "apps_status_same" : "apps_status_new")}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
       {error && <p className="text-xs" style={{ color: "var(--danger)" }}>{error}</p>}
     </AppDialog>

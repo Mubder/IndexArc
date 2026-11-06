@@ -251,6 +251,8 @@ export interface ScratchTab {
   pinned_at?: number;
   protected?: boolean;
   protected_at?: number;
+  /** Application this note belongs to (shared/apps.ts). */
+  app?: string;
 }
 
 export interface Detection {

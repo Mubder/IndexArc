@@ -4,18 +4,21 @@ import type { TranslationDict } from "../../utils/i18n";
 import { fill } from "../home/DashboardCards";
 import type { Editor } from "@tiptap/react";
 import type { SpellRect } from "./domText";
-import { Loader2, KeyRound, Save, Copy, Trash2, Sparkles, Wand2, Zap, ZapOff, AlignJustify, History, ArrowLeftRight, LifeBuoy, Undo2, Bold, Italic, Underline, Highlighter, BookPlus, EyeOff, ArrowUp, ArrowDown } from "lucide-react";
+import { Check, Copy, Loader2, Sparkles, Zap, Bold, Italic, Underline, Highlighter, BookPlus, EyeOff, ArrowUp, ArrowDown } from "lucide-react";
 import { htmlToPlainText } from "../../lib/noteHtml";
 import { RewriteStyle } from "../../types";
-import { REWRITE_STYLES, REWRITE_STYLE_KEYS } from "./constants";
-import { getTranslation } from "../../utils/i18n";
 import React from "react";
 import { safeGetHTML } from "./domText";
 import { CursorMenu } from "./CursorMenu";
+import { NoteToolbar } from "./NoteToolbar";
 import { EditorContent } from "@tiptap/react";
 
 export interface EditorPanelProps {
   active: ScratchTab;
+  /** The note's application chip (NoteAppPicker). */
+  appPicker: React.ReactNode;
+  /** Save the detected keys and commands into the note's application. */
+  handleSaveToApp: () => void;
   activeCharCount: number;
   activeId: string;
   activeIsPinned: boolean;
@@ -76,211 +79,44 @@ export interface EditorPanelProps {
   triggerAutocomplete: (prefixText: string) => void;
 }
 
-export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned, activeIsProtected, activeReadingTime, activeWordCount, analyze, b, bidiMode, canScrollDown, canScrollUp, contextMenu, copied, detectedDir, enablePredictions, ghostCompletion, handleAddToDictionary, handleApplySuggestion, handleCopy, handleIgnoreWord, handleOpenRevisions, handleProofread, handleRephrase, handleSaveNote, handleSaveSecret, handleSmartSplitParagraphs, handleUndoRephrase, hasSecret, highlightColor, noteFontSize, noteOverflows, onContextMenu, onKeyDown, openCompare, openRescue, recordSnapshot, rephraseUndo, scrollEditor, setContent, setContextMenu, setGhostCompletion, setProtectConfirmInput, setProtectError, setProtectModal, setSlashOpen, setStyle, settings, shellRef, slashOpen, spellRects, statusMsg, style, t, tabs, tiptap, togglePin, togglePredictions, triggerAutocomplete }: EditorPanelProps) {
+export function EditorPanel({ active, appPicker, handleSaveToApp, activeCharCount, activeId, activeIsPinned, activeIsProtected, activeReadingTime, activeWordCount, analyze, b, bidiMode, canScrollDown, canScrollUp, contextMenu, copied, detectedDir, enablePredictions, ghostCompletion, handleAddToDictionary, handleApplySuggestion, handleCopy, handleIgnoreWord, handleOpenRevisions, handleProofread, handleRephrase, handleSaveNote, handleSaveSecret, handleSmartSplitParagraphs, handleUndoRephrase, hasSecret, highlightColor, noteFontSize, noteOverflows, onContextMenu, onKeyDown, openCompare, openRescue, recordSnapshot, rephraseUndo, scrollEditor, setContent, setContextMenu, setGhostCompletion, setProtectConfirmInput, setProtectError, setProtectModal, setSlashOpen, setStyle, settings, shellRef, slashOpen, spellRects, statusMsg, style, t, tabs, tiptap, togglePin, togglePredictions, triggerAutocomplete }: EditorPanelProps) {
   return (
     <>
-        {/* Toolbar — grouped action clusters with uniform button sizing:
-            Note | AI | Tools …(spacer)… Rephrase. Groups stay together when
-            the bar wraps; every control is h-8 so the row stays aligned. */}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-          {/* ── Note actions ── */}
-          <div className="flex items-center gap-1.5">
-            {hasSecret ? (
-              <button
-                type="button"
-                onClick={handleSaveSecret}
-                disabled={b.save}
-                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: "var(--emerald-bg)", color: "var(--emerald)", border: "1px solid rgba(52, 211, 153, 0.2)" }}
-              >
-                {b.save ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <KeyRound className="w-3.5 h-3.5 shrink-0" />}
-                {b.save ? t("scratchpad_saving") : t("scratchpad_save_secret")}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSaveNote}
-                disabled={b.save}
-                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
-              >
-                {b.save ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Save className="w-3.5 h-3.5 shrink-0" />}
-                {b.save ? t("scratchpad_saving") : t("scratchpad_save_note")}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
-              style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
-            >
-              <Copy className="w-3.5 h-3.5 shrink-0" />
-              {copied ? t("scratchpad_copied") : t("scratchpad_copy")}
-            </button>
-            {!activeIsProtected && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm(t("confirm_clear_note"))) {
-                    recordSnapshot(activeId, active?.content || "", "Before Clear");
-                    setContent(activeId, "");
-                  }
-                }}
-                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
-                style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
-              >
-                <Trash2 className="w-3.5 h-3.5 shrink-0" />
-                {t("scratchpad_clear")}
-              </button>
-            )}
-          </div>
-
-          <div className="w-px h-5 shrink-0" style={{ background: "var(--border)" }} />
-
-          {/* ── AI actions ── */}
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => analyze(activeId, htmlToPlainText(active?.content || ""))}
-              disabled={b.analyze || !htmlToPlainText(active?.content || "").trim()}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
-            >
-              {b.analyze ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 shrink-0" />}
-              {b.analyze ? t("scratchpad_detecting") : t("scratchpad_detect")}
-            </button>
-            {settings?.enable_ai_proofreader !== false && !activeIsProtected && (
-              <button
-                type="button"
-                onClick={handleProofread}
-                disabled={b.proofread || !(active?.content || "").trim()}
-                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: "transparent", color: "var(--amber)", border: "1px solid rgba(245, 158, 11, 0.2)" }}
-                title={t("scratchpad_proofread")}
-              >
-                {b.proofread ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Wand2 className="w-3.5 h-3.5 shrink-0" />}
-                {t("scratchpad_proofread")}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={togglePredictions}
-              title={enablePredictions ? t("predictions_enabled_title") : t("predictions_disabled_title")}
-              aria-pressed={enablePredictions}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
-              style={{
-                background: enablePredictions ? "rgba(99, 102, 241, 0.15)" : "transparent",
-                color: enablePredictions ? "var(--accent-bright)" : "var(--text-muted)",
-                border: `1px solid ${enablePredictions ? "rgba(99, 102, 241, 0.4)" : "var(--border)"}`,
-              }}
-            >
-              {enablePredictions ? <Zap className="w-3.5 h-3.5 shrink-0" /> : <ZapOff className="w-3.5 h-3.5 shrink-0" />}
-              <span>{t("predictions_label")}: <strong>{enablePredictions ? t("state_on") : t("state_off")}</strong></span>
-            </button>
-          </div>
-
-          <div className="w-px h-5 shrink-0" style={{ background: "var(--border)" }} />
-
-          {/* ── Note tools ── */}
-          <div className="flex items-center gap-1.5">
-            {!activeIsProtected && (
-              <button
-                type="button"
-                onClick={handleSmartSplitParagraphs}
-                disabled={!(active?.content || "").trim()}
-                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: "rgba(56, 189, 248, 0.1)", color: "#38bdf8", border: "1px solid rgba(56, 189, 248, 0.3)" }}
-                title={t("format_paragraphs_title")}
-              >
-                <AlignJustify className="w-3.5 h-3.5 shrink-0" />
-                <span>{t("format_paragraphs")}</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleOpenRevisions}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
-              style={{ background: "rgba(245, 158, 11, 0.12)", color: "#fbbf24", border: "1px solid rgba(245, 158, 11, 0.3)" }}
-              title={t("scratchpad_history_title")}
-            >
-              <History className="w-3.5 h-3.5 shrink-0" />
-              <span>{t("scratchpad_history")}</span>
-            </button>
-            <button
-              type="button"
-              onClick={openCompare}
-              disabled={tabs.length < 2}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ background: "rgba(99, 102, 241, 0.12)", color: "#a5b4fc", border: "1px solid rgba(99, 102, 241, 0.3)" }}
-              title={t("scratchpad_compare_title")}
-            >
-              <ArrowLeftRight className="w-3.5 h-3.5 shrink-0" />
-              <span>{t("scratchpad_compare")}</span>
-            </button>
-            <button
-              type="button"
-              onClick={openRescue}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer"
-              style={{ background: "rgba(52, 211, 153, 0.12)", color: "#6ee7b7", border: "1px solid rgba(52, 211, 153, 0.3)" }}
-              title={t("scratchpad_rescue_title")}
-            >
-              <LifeBuoy className="w-3.5 h-3.5 shrink-0" />
-              <span>{t("scratchpad_rescue")}</span>
-            </button>
-          </div>
-
-          <div className="flex-1" />
-
-          {/* ── Rephrase (right side) ── */}
-          <div className="flex items-center gap-1.5">
-            {(rephraseUndo[activeId]?.length ?? 0) > 0 && (
-              <button
-                type="button"
-                onClick={handleUndoRephrase}
-                disabled={b.rewrite}
-                className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
-                title={t("scratchpad_rephrase_undo")}
-              >
-                <Undo2 className="w-3.5 h-3.5 shrink-0" />
-                {t("scratchpad_rephrase_undo")}
-              </button>
-            )}
-            <select
-              value={style}
-              onChange={(e) => setStyle(e.target.value as RewriteStyle)}
-              className="h-8 rounded-lg px-2.5 text-xs font-medium focus:outline-none cursor-pointer"
-              style={{
-                background: "var(--bg-input, #18181b)",
-                border: "1px solid var(--border, #3f3f46)",
-                color: "var(--text, #ffffff)",
-              }}
-            >
-              {REWRITE_STYLES.map((s) => (
-                <option
-                  key={s}
-                  value={s}
-                  style={{
-                    backgroundColor: "#18181b",
-                    color: "#ffffff",
-                  }}
-                >
-                  {t(REWRITE_STYLE_KEYS[s] as Parameters<typeof getTranslation>[1]) || s}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={handleRephrase}
-              disabled={b.rewrite || !(active?.content || "").trim()}
-              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ background: "var(--bg-active)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
-            >
-              {b.rewrite ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Wand2 className="w-3.5 h-3.5 shrink-0" />}
-              {b.rewrite ? t("scratchpad_rewriting") : t("scratchpad_rephrase")}
-            </button>
-          </div>
-        </div>
+        <NoteToolbar
+          appPicker={appPicker}
+          noteApp={active?.app}
+          b={b}
+          copied={copied}
+          hasSecret={hasSecret}
+          hasText={!!htmlToPlainText(active?.content || "").trim()}
+          isProtected={activeIsProtected}
+          proofreaderOn={settings?.enable_ai_proofreader !== false}
+          enablePredictions={enablePredictions}
+          canCompare={tabs.length >= 2}
+          canUndoRephrase={(rephraseUndo[activeId]?.length ?? 0) > 0}
+          style={style}
+          setStyle={setStyle}
+          onSaveToApp={handleSaveToApp}
+          onSaveSecret={handleSaveSecret}
+          onSaveNote={handleSaveNote}
+          onCopy={handleCopy}
+          onDetect={() => analyze(activeId, htmlToPlainText(active?.content || ""))}
+          onProofread={handleProofread}
+          onRephrase={handleRephrase}
+          onUndoRephrase={handleUndoRephrase}
+          onFormat={handleSmartSplitParagraphs}
+          onTogglePredictions={togglePredictions}
+          onHistory={handleOpenRevisions}
+          onCompare={openCompare}
+          onRescue={openRescue}
+          onClear={() => {
+            if (window.confirm(t("confirm_clear_note"))) {
+              recordSnapshot(activeId, active?.content || "", "Before Clear");
+              setContent(activeId, "");
+            }
+          }}
+          t={t}
+        />
 
         {statusMsg && (
           <p className="text-xs" style={{ color: "var(--accent-bright)" }}>
@@ -300,6 +136,17 @@ export function EditorPanel({ active, activeCharCount, activeId, activeIsPinned,
           {/* Frame is height-locked to the viewport. Jump FABs pin to its
               top/bottom corners so they stay reachable on very long notes. */}
           <div className="note-editor-frame">
+            <button
+              type="button"
+              onClick={handleCopy}
+              disabled={!htmlToPlainText(active?.content || "").trim()}
+              className="note-jump-btn note-copy-btn p-2 transition-all disabled:opacity-0"
+              style={{ background: "var(--bg-surface-solid, var(--bg-surface))", color: copied ? "var(--emerald)" : "var(--text-muted)", border: "1px solid var(--border)" }}
+              title={copied ? t("scratchpad_copied") : t("notes_copy_all_title")}
+              aria-label={t("notes_copy_all_title")}
+            >
+              {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+            </button>
             {tiptap ? (
               <div
                 onContextMenu={onContextMenu}

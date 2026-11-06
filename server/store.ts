@@ -2409,7 +2409,8 @@ export class VaultStore {
     content: string,
     baseRev?: number,
     force = false,
-    title?: unknown
+    title?: unknown,
+    app?: string
   ): { ok: boolean; conflict?: boolean; protected?: boolean; tab?: any } {
     const active = this.getScratchpad();
     const tab = active.find((t: any) => t.id === id);
@@ -2426,6 +2427,7 @@ export class VaultStore {
         title: (title && String(title)) || "Scratch",
         content,
         archived: false,
+        ...(app ? { app } : {}),
       };
       const saved = this.saveScratchpad([...active, created], { force: true });
       return { ok: true, tab: saved.find((t: any) => t.id === id) };
@@ -2438,6 +2440,34 @@ export class VaultStore {
     // protected notes) and carries the override through the store guard.
     const saved = this.saveScratchpad(updated, { force: true, override_protected: force });
     return { ok: true, tab: saved.find((t: any) => t.id === id) };
+  }
+
+/** Link a note to an application (shared/apps.ts), or unlink it (undefined). Allowed on protected notes: it is not content. */
+  setScratchpadTabApp(id: string, app: string | undefined): any | null {
+    const active = this.getScratchpad();
+    if (!active.some((t: any) => t.id === id)) return null;
+    const saved = this.saveScratchpad(
+      active.map((t: any) => {
+        if (t.id !== id) return t;
+        const { app: _old, ...rest } = t;
+        return app ? { ...rest, app } : rest;
+      }),
+      { force: true }
+    );
+    return saved.find((t: any) => t.id === id) || null;
+  }
+
+  /** Move every active note of one application to another (application rename). */
+  renameScratchpadApp(isFrom: (app: unknown) => boolean, to: string): number {
+    const active = this.getScratchpad();
+    let n = 0;
+    const next = active.map((t: any) => {
+      if (!isFrom(t.app) || t.app === to) return t;
+      n++;
+      return { ...t, app: to };
+    });
+    if (n) this.saveScratchpad(next, { force: true });
+    return n;
   }
 
   renameScratchpadTab(id: string, title: string): any | null {

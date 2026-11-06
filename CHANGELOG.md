@@ -17,6 +17,15 @@ Commit messages follow the convention in
   asks which application and environment the detected secrets belong to, and updates a key that is
   already there instead of adding a duplicate. The CLI takes `--app NAME [--env ENV]`, and
   encrypted exports keep both fields.
+- Applications and the Scratchpad work together. Each application has Keys, Notes and Commands.
+  Its notes are real Scratchpad notes, so they hold anything (steps, commands, explanations, keys):
+  copy a whole note, open it in the Scratchpad, or start a new one from the application. Commands
+  are saved with a name and copied with one click. In the Scratchpad, each note shows its
+  application, "Show" narrows the note tabs to one application, and "Save to {app}" saves the
+  note's keys (pick the environment) and commands into it, skipping ones already there. The old
+  single notes box becomes the application's "Overview" note, and renaming an application moves
+  its notes too.
+- Scratchpad: a "Copy all" button and a copy icon in the editor corner copy the whole note.
 - The `indexarc` command-line tool is now a standalone program (no Node install needed), and the
   Windows installer adds it to your PATH; uninstalling removes it.
 - CI checks performance at 10k entries on every push (`npm run bench`): p95 save under 50 ms and
@@ -40,6 +49,9 @@ Commit messages follow the convention in
   verify the update signature install it; others link to the release page.
 
 ### Changed
+- Scratchpad toolbar is one tidy row: the note's application, save, Copy all and Detect stay visible;
+  Proofread, Rephrase (with its style), Format paragraphs and Predictions are under "AI", and
+  History, Compare, Rescue and Clear are under "⋯".
 - Storage: entries and search vectors move from JSON files into an SQLite database. Each row is
   encrypted separately and bound to its table and id. Existing vaults migrate on unlock after an
   automatic snapshot.

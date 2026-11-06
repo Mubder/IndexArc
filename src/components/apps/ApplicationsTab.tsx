@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  AppWindow, Check, ClipboardPaste, Copy, Edit3, Eye, EyeOff, FolderInput, KeyRound, Loader2, MoreHorizontal, Plus, Search, StickyNote, Trash2, Unlink, X,
+  AppWindow, Check, ClipboardPaste, Copy, Edit3, Eye, EyeOff, FolderInput, KeyRound, Loader2, MoreHorizontal, Plus, Search, StickyNote, Terminal, Trash2, Unlink, X,
 } from "lucide-react";
 import { APP_NOTE_TYPE, DEFAULT_ENVS, appKeys, normalizeAppName, normalizeEnvName, sameName, summarizeApps, toDotenv } from "../../../shared/apps";
 import type { Settings, VaultEntry } from "../../types";
@@ -10,6 +10,8 @@ import { fill } from "../home/DashboardCards";
 import { CursorMenu } from "../scratchpad/CursorMenu";
 import { PasteEnvDialog } from "./PasteEnvDialog";
 import { AddExistingDialog } from "./AddExistingDialog";
+import { AppNotesPanel } from "./AppNotesPanel";
+import { AppCommandsPanel } from "./AppCommandsPanel";
 import { assignToApp, deleteEntries, hygieneBadge, patchEntry, renameApp, saveEntries, upsertAppKeys } from "./appsApi";
 import type { TFn } from "./types";
 
@@ -19,14 +21,18 @@ interface Props {
   onFetchAll: () => Promise<void>;
   showConfirm: (title: string, message: string, onConfirm: () => void, confirmText?: string) => Promise<void>;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
+  /** Show one Scratchpad note (an application's note) in the Scratchpad. */
+  onOpenNote: (noteId: string) => void;
 }
+
+type Section = "keys" | "notes" | "commands";
 
 const chip = "px-2 py-0.5 rounded-full text-[10px] font-medium";
 const iconBtn = "p-1.5 rounded-md hover:bg-[var(--bg-hover)] transition-colors";
 const softBtn = "h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all disabled:opacity-50";
 const softStyle: React.CSSProperties = { background: "var(--bg-input)", color: "var(--text-dim)", border: "1px solid var(--border)" };
 
-export function ApplicationsTab({ entries, settings, onFetchAll, showConfirm, showToast }: Props) {
+export function ApplicationsTab({ entries, settings, onFetchAll, showConfirm, showToast, onOpenNote }: Props) {
   const t: TFn = (key) => getTranslation(settings, key);
   const apps = useMemo(() => summarizeApps(entries), [entries]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -41,6 +47,8 @@ export function ApplicationsTab({ entries, settings, onFetchAll, showConfirm, sh
   const [envDraft, setEnvDraft] = useState("");
   const [dialog, setDialog] = useState<"paste" | "existing" | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [section, setSection] = useState<Section>("keys");
+  const [noteCount, setNoteCount] = useState<number | null>(null);
   const q = query.trim().toLowerCase();
   const visibleApps = useMemo(() => {
     if (!q) return apps;
@@ -74,6 +82,9 @@ export function ApplicationsTab({ entries, settings, onFetchAll, showConfirm, sh
     if (!q || current.name.toLowerCase().includes(q)) return list;
     return list.filter((e) => e.name.toLowerCase().includes(q));
   }, [entries, current, env, q]);
+
+  const commands = useMemo(() => (current ? entries.filter((e) => e.family === "command" && sameName(e.app, current.name)) : []), [entries, current]);
+  useEffect(() => setNoteCount(null), [current?.name]);
 
   const refresh = async (msg?: string) => {
     await onFetchAll();
@@ -217,14 +228,61 @@ export function ApplicationsTab({ entries, settings, onFetchAll, showConfirm, sh
               <span className={chip} style={{ background: "var(--bg-input)", color: "var(--text-muted)", border: "1px solid var(--border)" }}>{fill(t("apps_count_keys"), { n: current.count })}</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <button type="button" className={softBtn} style={softStyle} onClick={() => setDialog("paste")}><ClipboardPaste className="w-3.5 h-3.5" /> {t("apps_paste_env")}</button>
-              <button type="button" className={softBtn} style={softStyle} onClick={copyEnv} disabled={!keys.length}><Copy className="w-3.5 h-3.5" /> {t("apps_copy_env")}</button>
+              {section === "keys" && (
+                <>
+                  <button type="button" className={softBtn} style={softStyle} onClick={() => setDialog("paste")}><ClipboardPaste className="w-3.5 h-3.5" /> {t("apps_paste_env")}</button>
+                  <button type="button" className={softBtn} style={softStyle} onClick={copyEnv} disabled={!keys.length}><Copy className="w-3.5 h-3.5" /> {t("apps_copy_env")}</button>
+                </>
+              )}
               <button type="button" className={iconBtn} style={{ color: "var(--text-muted)" }} aria-label="More" aria-haspopup="menu" onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ x: r.left, y: r.bottom + 4 }); }}>
                 <MoreHorizontal className="w-4 h-4" />
               </button>
             </div>
           </div>
 
+          {/* Keys | Notes | Commands */}
+          <div className="flex items-center gap-4" role="tablist" aria-label={current.name} style={{ borderBottom: "1px solid var(--border)" }}>
+            {([
+              ["keys", <KeyRound key="i" className="w-3.5 h-3.5" />, t("apps_section_keys"), current.count],
+              ["notes", <StickyNote key="i" className="w-3.5 h-3.5" />, t("apps_section_notes"), noteCount],
+              ["commands", <Terminal key="i" className="w-3.5 h-3.5" />, t("apps_section_commands"), commands.length],
+            ] as const).map(([id, icon, label, n]) => {
+              const on = section === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={on}
+                  onClick={() => setSection(id)}
+                  className="inline-flex items-center gap-1.5 px-1 pb-2 -mb-px text-xs font-semibold transition-colors"
+                  style={{ color: on ? "var(--accent-bright)" : "var(--text-muted)", borderBottom: on ? "2px solid var(--accent-bright)" : "2px solid transparent" }}
+                >
+                  {icon} {label} {n != null && <span className="tabular-nums font-normal" style={{ color: "var(--text-muted)" }}>{n}</span>}
+                </button>
+              );
+            })}
+          </div>
+
+          {section === "notes" && (
+            <AppNotesPanel
+              key={current.name}
+              app={current.name}
+              legacyText={(current.note as VaultEntry | undefined)?.notes}
+              onLegacyMoved={async () => {
+                const note = current.note as VaultEntry | undefined;
+                if (note) await patchEntry(note.id, { notes: "", value: "" });
+                await onFetchAll();
+              }}
+              onOpen={onOpenNote}
+              onError={fail}
+              onCount={setNoteCount}
+              t={t}
+            />
+          )}
+          {section === "commands" && <AppCommandsPanel app={current.name} commands={commands} t={t} onChanged={refresh} onError={fail} showConfirm={showConfirm} />}
+
+          {section === "keys" && (<>
           {/* Environments */}
           <div className="flex flex-wrap items-center gap-1" role="tablist">
             {envTabs.map((e) => {
@@ -268,8 +326,7 @@ export function ApplicationsTab({ entries, settings, onFetchAll, showConfirm, sh
             {!keys.length && <p className="px-3 py-3 text-xs" style={{ color: "var(--text-muted)", borderTop: "1px solid var(--border)" }}>{t("apps_no_keys_env")}</p>}
             <AddKeyRow app={current.name} env={env} t={t} onSaved={refresh} onError={fail} />
           </div>
-
-          <AppNotes app={current.name} note={current.note as VaultEntry | undefined} t={t} onSaved={refresh} onError={fail} />
+          </>)}
         </section>
       ) : (
         <div />
@@ -446,44 +503,5 @@ function AddKeyRow({ app, env, t, onSaved, onError }: { app: string; env: string
         <button type="button" className={iconBtn} style={{ color: "var(--text-muted)" }} onClick={() => setOpen(false)} aria-label={t("apps_cancel")}><X className="w-3.5 h-3.5" /></button>
       </span>
     </form>
-  );
-}
-
-function AppNotes({ app, note, t, onSaved, onError }: { app: string; note?: VaultEntry; t: TFn; onSaved: (msg?: string) => Promise<void>; onError: (e: any) => void }) {
-  const [draft, setDraft] = useState(note?.notes ?? "");
-  const saved = useRef(note?.notes ?? "");
-  useEffect(() => {
-    setDraft(note?.notes ?? "");
-    saved.current = note?.notes ?? "";
-  }, [note?.id, note?.notes, app]);
-
-  const save = async () => {
-    if (draft === saved.current) return;
-    try {
-      if (note) await patchEntry(note.id, { notes: draft, value: draft });
-      else await saveEntries([{ value: draft, name: `${app} notes`, type: APP_NOTE_TYPE, family: "note", notes: draft, app, raw_fragment: "", labels: [], type_aliases: [APP_NOTE_TYPE] }]);
-      saved.current = draft;
-      await onSaved(t("apps_notes_saved"));
-    } catch (e) {
-      onError(e);
-    }
-  };
-
-  return (
-    <label className="block rounded-xl p-3 space-y-1.5" style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}>
-      <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
-        <StickyNote className="w-3 h-3" /> {app}
-      </span>
-      <textarea
-        className="w-full bg-transparent text-xs resize-y outline-none"
-        style={{ color: "var(--text-dim)" }}
-        rows={3}
-        dir="auto"
-        placeholder={t("apps_notes_placeholder")}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={save}
-      />
-    </label>
   );
 }

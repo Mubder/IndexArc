@@ -3,6 +3,7 @@ import { drainScratchpadSaves, setSyncedScratchpadTabs, enqueueScratchpadSave, s
 import { ScratchTab } from "../../types";
 import { normalizeServerTab } from "../../lib/serverTabs";
 import { dropLegacyLocalTabs } from "./noteTabs";
+import { clearFocusNote, peekFocusNote } from "../../noteHandoff";
 import type { Dispatch, SetStateAction, RefObject } from "react";
 
 export interface UseScratchpadSyncArgs {
@@ -60,7 +61,10 @@ export function useScratchpadSync({ initial, serverLoaded, setActiveId, setArchi
         if (serverTabs.length) {
           // Server has the durable copy — it wins over the localStorage cache.
           setTabs(serverTabs);
-          setActiveId(serverTabs[0].id);
+          // "Open in Scratchpad" from the Applications page picks the note.
+          const focus = peekFocusNote();
+          clearFocusNote();
+          setActiveId(focus && serverTabs.some((x) => x.id === focus) ? focus : serverTabs[0].id);
           dropLegacyLocalTabs();
         } else {
           // First run on this vault: migrate existing localStorage tabs up so

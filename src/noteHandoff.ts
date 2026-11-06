@@ -21,3 +21,21 @@ export function takeHandoffNote(): HandoffNote | null {
   noteHandoff.pending = null;
   return n;
 }
+
+// "Open in Scratchpad" from the Applications page: which existing note to
+// show. Kept until the Scratchpad has loaded that note from the server.
+export const FOCUS_NOTE_EVENT = "indexarc-focus-note";
+let pendingFocus: string | null = null;
+
+export function focusScratchpadNote(id: string): void {
+  pendingFocus = id;
+  window.dispatchEvent(new Event(FOCUS_NOTE_EVENT));
+}
+
+export function peekFocusNote(): string | null {
+  return pendingFocus;
+}
+
+export function clearFocusNote(): void {
+  pendingFocus = null;
+}
