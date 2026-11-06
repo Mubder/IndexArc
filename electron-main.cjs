@@ -621,10 +621,7 @@ handleTrusted("start-ollama", async () => {
   const p = findOllamaPath();
   if (!p) return false;
   try {
-    // windowsHide: a detached console program gets its own console window on
-    // Windows; without this one flashes up (and `serve` exits at once when
-    // Ollama is already running, so it is only a flash).
-    spawn(p, ["serve"], { detached: true, stdio: "ignore", windowsHide: true, env: childEnv() }).unref();
+    spawnOllamaServe(p);
     return true;
   } catch {
     return false;
@@ -722,6 +719,25 @@ handleTrusted("add-custom-word", async (_e, word) => {
   return true;
 });
 
+/**
+ * Start `ollama serve` without any console window, now or later.
+ *
+ * On Windows it must NOT be detached: a detached process has no console, so
+ * every helper Ollama starts afterwards (ollama.exe runner, llama-server.exe,
+ * one per model load, e.g. on each save that computes search vectors) gets a
+ * new visible console that flashes up and closes. Not detached plus
+ * windowsHide gives it a hidden console its helpers share. The cost: Node ties
+ * a non-detached child to the app, so an Ollama that IndexArc started stops
+ * when IndexArc quits (an Ollama the user started is used and left alone).
+ * @param {string} exe
+ */
+function spawnOllamaServe(exe) {
+  const win = process.platform === "win32";
+  ollamaProcess = spawn(exe, ["serve"], { detached: !win, stdio: "ignore", windowsHide: true, env: childEnv() });
+  ollamaProcess.on("error", (e) => console.log("Ollama start failed:", e.message));
+  ollamaProcess.unref();
+}
+
 async function startOllamaIfNeeded() {
   try {
     const res = await fetch("http://127.0.0.1:11434/api/tags", {
@@ -762,13 +778,7 @@ async function startOllamaIfNeeded() {
     return;
   }
 
-  ollamaProcess = spawn(ollamaPath, ["serve"], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true, // no console window (see start-ollama)
-    env: childEnv(),
-  });
-  ollamaProcess.unref();
+  spawnOllamaServe(ollamaPath);
 
   for (let i = 0; i < 20; i++) {
     await new Promise((r) => setTimeout(r, 500));

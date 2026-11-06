@@ -50,4 +50,16 @@ describe("child processes never open a console window", () => {
     }
     expect(missing).toEqual([]);
   });
+
+  it("nothing is spawned detached on Windows", () => {
+    // A detached process has no console, so console programs IT starts later
+    // (Ollama's per-model runners) each open a visible window. Detach only
+    // off Windows, as spawnOllamaServe does.
+    const bad: string[] = [];
+    for (const file of sources()) {
+      const src = fs.readFileSync(file, "utf8");
+      for (const m of src.matchAll(/detached:\s*true/g)) bad.push(`${path.relative(ROOT, file)}:${src.slice(0, m.index).split("\n").length}`);
+    }
+    expect(bad).toEqual([]);
+  });
 });
