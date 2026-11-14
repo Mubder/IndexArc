@@ -122,6 +122,11 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
     return c;
   }, [entries]);
 
+  const matchesQuery = (e: VaultEntry, q: string) => {
+    if (!q) return true;
+    const blob = `${e.name} ${e.type} ${e.value} ${e.raw_fragment} ${(e.labels || []).join(" ")} ${e.app || ""} ${e.env || ""}`.toLowerCase();
+    return blob.includes(q);
+  };
   const libraryFiltered = useMemo(() => {
     const q = libraryQuery.trim().toLowerCase();
     return entries.filter((e) => {
@@ -132,11 +137,18 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
       } else if (libraryFilter !== "all" && e.family !== libraryFilter) {
          return false;
       }
-      if (!q) return true;
-      const blob = `${e.name} ${e.type} ${e.value} ${e.raw_fragment} ${(e.labels || []).join(" ")} ${e.app || ""} ${e.env || ""}`.toLowerCase();
-      return blob.includes(q);
+      return matchesQuery(e, q);
     });
   }, [entries, libraryFilter, libraryQuery]);
+  // The category chip stays selected after leaving the Library (a Home card
+  // can set it too), so a search for a just-saved key could come back empty
+  // while the key sits in another category. Count those hidden matches so
+  // the empty state can offer them instead of "nothing found".
+  const hiddenMatches = useMemo(() => {
+    const q = libraryQuery.trim().toLowerCase();
+    if (!q || libraryFilter === "all" || libraryFiltered.length) return 0;
+    return entries.filter((e) => !isAppNote(e) && matchesQuery(e, q)).length;
+  }, [entries, libraryFilter, libraryQuery, libraryFiltered.length]);
 
   const libraryChips: {
     id: LibraryFilter;
@@ -463,6 +475,16 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({
           <p className="text-sm font-medium" style={{ color: "var(--text-dim)" }}>
             {t("lib_no_match") || "No entries found"} {libraryQuery.trim() ? `for "${libraryQuery.trim()}"` : ""}
           </p>
+          {hiddenMatches > 0 && (
+            <button
+              type="button"
+              onClick={() => setLibraryFilter("all")}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}
+            >
+              {t("lib_found_in_all").replace("{n}", String(hiddenMatches))}
+            </button>
+          )}
         </div>
       )}
 

@@ -1,5 +1,6 @@
 import { AnalyzeCandidate } from "../../types";
 import { findDuplicateHits } from "../../utils";
+import { useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Tab } from "../../types";
 import type { TranslationDict } from "../../utils/i18n";
@@ -79,7 +80,21 @@ export function usePasteActions({ candidates, fetchAll, paste, pasteId, selected
     });
   };
 
+  // One save at a time. The Save buttons stay clickable while the duplicate
+  // check and the save run, so a double-click started a second save whose
+  // duplicate check found the first one's brand-new entry: "saved" followed
+  // by a "Possible duplicates" prompt for the very same key.
+  const savingRef = useRef(false);
   const handleSaveSelected = async (parkIncomplete: boolean) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try {
+      await saveSelected(parkIncomplete);
+    } finally {
+      savingRef.current = false;
+    }
+  };
+  const saveSelected = async (parkIncomplete: boolean) => {
     const items = candidates.filter((c) => selected[c.temp_id]);
     if (!items.length) return;
     const doSave = async () => {

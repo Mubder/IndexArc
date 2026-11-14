@@ -332,6 +332,7 @@ export interface TranslationDict {
   lib_search_placeholder: string;
   lib_empty: string;
   lib_no_match: string;
+  lib_found_in_all: string;
   fs_modal_title: string;
   fs_modal_subtitle: string;
   fs_up_btn: string;
@@ -1208,6 +1209,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     lib_search_placeholder: "Filter by name, type, source file or value...",
     lib_empty: "The vault is currently empty.",
     lib_no_match: "No entries match this filter",
+    lib_found_in_all: "{n} found in All Items — show them",
     fs_modal_title: "Select folder on this machine",
     fs_modal_subtitle: "Reads in place · no upload · path the server can access",
     fs_up_btn: "↑ Up",
@@ -2082,6 +2084,7 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     lib_search_placeholder: "تصفية حسب الاسم، النوع، ملف المصدر أو القيمة...",
     lib_empty: "الخزنة فارغة حالياً.",
     lib_no_match: "لا توجد نتائج تطابق فلاتر البحث",
+    lib_found_in_all: "يوجد {n} في كل العناصر — اعرضها",
     fs_modal_title: "اختر مجلدًا على هذا الجهاز",
     fs_modal_subtitle: "القراءة من المصدر مباشرة · لا يتم الرفع · المسار الذي يمكن للخادم الوصول إليه",
     fs_up_btn: "↑ للأعلى",
