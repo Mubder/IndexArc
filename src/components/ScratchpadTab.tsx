@@ -3,7 +3,7 @@ import { X, RotateCcw } from "lucide-react";
 import { Settings, RewriteStyle, Detection, Busy, ScratchTab, NoteBidiMode, type AnalyzeCandidate } from "../types";
 import { getTranslation } from "../utils/i18n";
 import { fill } from "./home/DashboardCards";
-import { drainScratchpadSaves, setSyncedScratchpadTabs, forceSaveScratchpadTab } from "../scratchpadSaveQueue";
+import { drainScratchpadSaves, forceSaveScratchpadTab, mergeSyncedScratchpadTab } from "../scratchpadSaveQueue";
 import { takeHandoffNote, REOPEN_NOTE_EVENT, FOCUS_NOTE_EVENT, peekFocusNote, clearFocusNote, takeFocusApp } from "../noteHandoff";
 import { ensureHtmlParagraphs, htmlToPlainText } from "../lib/noteHtml";
 
@@ -231,7 +231,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     } else {
       // Adopt the server version.
       setTabs((prev) => prev.map((x) => (x.id === conflictTab.id ? { ...x, content: conflictTab.content, rev: conflictTab.rev } : x)));
-      setSyncedScratchpadTabs(tabs.map((x) => (x.id === conflictTab.id ? { ...conflictTab, title: x.title } : x)));
+      mergeSyncedScratchpadTab(conflictTab);
       if (activeId === conflictTab.id) setContent(conflictTab.id, conflictTab.content);
     }
     setConflictTab(null);

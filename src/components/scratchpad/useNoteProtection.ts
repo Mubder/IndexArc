@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from "react";
-import { setSyncedScratchpadTabs } from "../../scratchpadSaveQueue";
+import { mergeSyncedScratchpadTab } from "../../scratchpadSaveQueue";
 import type { Dispatch, SetStateAction } from "react";
 import type { ScratchTab } from "../../types";
 import type { TranslationDict } from "../../utils/i18n";
@@ -62,7 +62,9 @@ export function useNoteProtection({ activeId, setTabs, tabs, t }: UseNoteProtect
         const data = await res.json();
         if (data.tab) {
           setTabs((prev) => prev.map((x) => (x.id === activeId ? { ...x, ...(data.tab as any) } : x)));
-          setSyncedScratchpadTabs(tabs.map((x) => (x.id === activeId ? { ...(data.tab as any), title: x.title } : x)));
+          // Only the server's copy of this one note goes into the save queue's
+          // mirror — the other tabs' React copies may hold unsaved words.
+          mergeSyncedScratchpadTab(data.tab as any);
         }
       }
     } catch {}

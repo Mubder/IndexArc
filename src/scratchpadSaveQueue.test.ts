@@ -243,4 +243,53 @@ describe("scratchpadSaveQueue", () => {
     await drainScratchpadSaves();
     expect((globalThis as any).fetch.mock.calls.length).toBe(calls);
   });
+
+  // A fake server with real optimistic concurrency: rev bumps on every
+  // content change, and a stale base_rev with different content is a 409.
+  function revServer(start: Record<string, { content: string; rev: number }>) {
+    const db = { ...start };
+    (globalThis as any).fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const id = decodeURIComponent(String(url).split("/tabs/")[1].split("/")[0]);
+      const body = JSON.parse((init?.body as string) || "{}");
+      const cur = db[id];
+      if (cur && Number.isFinite(body.base_rev) && cur.rev > body.base_rev && cur.content !== body.content) {
+        return { ok: false, status: 409, json: async () => ({ server_tab: { id, ...cur } }) } as any;
+      }
+      const changed = !cur || cur.content !== body.content;
+      db[id] = { content: body.content, rev: changed ? (cur?.rev ?? 0) + 1 : cur.rev };
+      return { ok: true, status: 200, json: async () => ({ tab: { id, title: body.title, ...db[id] } }) } as any;
+    });
+    return db;
+  }
+
+  it("typing after a title-only change never raises a false 'changed in another window' conflict", async () => {
+    // Loaded from the server at rev 5; the editor's tab list keeps rev 5
+    // forever (the queue's saves never write revs back into React state).
+    revServer({ a: { content: "<p>x</p>", rev: 5 } });
+    const loaded = { id: "a", title: "Scratch 2", content: "<p>x</p>", rev: 5 };
+    setSyncedScratchpadTabs([loaded]);
+    // Typing saves: the server is now at rev 6.
+    enqueueScratchpadSave([{ ...loaded, content: "<p>xy</p>" }]);
+    await drainScratchpadSaves();
+    // Auto-title (or a pin) changes the tab list without changing content.
+    enqueueScratchpadSave([{ ...loaded, title: "xy", content: "<p>xy</p>" }]);
+    await drainScratchpadSaves();
+    // More typing must save, not 409 against the app's own earlier save.
+    enqueueScratchpadSave([{ ...loaded, title: "xy", content: "<p>xyz</p>" }]);
+    await drainScratchpadSaves();
+    expect(conflictsRouted).toBe(0);
+  });
+
+  it("re-baselining from the editor's (stale-rev) tab list cannot roll a rev back", async () => {
+    revServer({ a: { content: "<p>x</p>", rev: 5 } });
+    const loaded = { id: "a", title: "A", content: "<p>x</p>", rev: 5 };
+    setSyncedScratchpadTabs([loaded]);
+    enqueueScratchpadSave([{ ...loaded, content: "<p>xy</p>" }]);
+    await drainScratchpadSaves();
+    // e.g. after a tab reorder/pin, the mirror was reset from React state.
+    setSyncedScratchpadTabs([{ ...loaded, content: "<p>xy</p>" }]);
+    enqueueScratchpadSave([{ ...loaded, content: "<p>xyz</p>" }]);
+    await drainScratchpadSaves();
+    expect(conflictsRouted).toBe(0);
+  });
 });

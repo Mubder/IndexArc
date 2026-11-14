@@ -34,14 +34,14 @@ export function useTabActions({ activeId, setActiveId, setDetections, setRephras
       const next = [...prev];
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
-      // Persist the order explicitly (ids only) and resync the save queue's mirror.
+      // Persist the order explicitly (ids only). The save queue's mirror is
+      // left alone: order is not content, and re-baselining it from `next`
+      // marked words typed in the last second as already saved.
       fetch("/api/scratchpad/order", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: next.filter((x) => !x.archived).map((x) => x.id) }),
-      })
-        .then(() => setSyncedScratchpadTabs(next))
-        .catch(() => {});
+      }).catch(() => {});
       return next;
     });
   }, []);
@@ -100,7 +100,8 @@ export function useTabActions({ activeId, setActiveId, setDetections, setRephras
       if (id === activeId) setActiveId(next[0].id);
       return next;
     });
-    setSyncedScratchpadTabs(remainingTabs);
+    // forgetScratchpadTab above already dropped it from the save queue's
+    // mirror; the other notes' mirror entries stay server-known.
     delete titleTouched.current[id];
     setDetections((d) => {
       const n = { ...d };

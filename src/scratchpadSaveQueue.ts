@@ -54,8 +54,23 @@ function setSaveFailing(next: boolean): void {
   } catch {}
 }
 
+/**
+ * The server only ever RAISES a tab's rev, so the mirror never lowers one.
+ * Callers hand us client copies whose rev is whatever was loaded (React state
+ * never learns the revs the queue's own saves produced); taking those at face
+ * value rolled the mirror back, and the next keystroke 409'd against the
+ * app's own earlier save — the "changed in another window" banner mid-typing.
+ */
+function keepNewestRev(t: ScratchTab, prev: ScratchTab | undefined): ScratchTab {
+  const a = Number(prev?.rev);
+  const b = Number(t.rev);
+  if (!Number.isFinite(a) || (Number.isFinite(b) && b >= a)) return { ...t };
+  return { ...t, rev: a };
+}
+
 export function setSyncedScratchpadTabs(tabs: ScratchTab[]): void {
-  lastSynced = (tabs || []).map((t) => ({ ...t }));
+  const byId = new Map(lastSynced.map((t) => [t.id, t]));
+  lastSynced = (tabs || []).map((t) => keepNewestRev(t, byId.get(t.id)));
 }
 
 /**
@@ -72,6 +87,7 @@ export function purgeScratchpadMirrorOnLock(): void {
  *  the content POST upserts and would resurrect the note. */
 export function forgetScratchpadTab(id: string): void {
   lockedOut.delete(id);
+  lastSynced = lastSynced.filter((t) => t.id !== id);
   if (pending) pending = pending.filter((t) => t.id !== id);
 }
 
@@ -150,7 +166,7 @@ async function postTabContent(
 
 function mergeSynced(tabs: ScratchTab[]): void {
   const byId = new Map(lastSynced.map((t) => [t.id, t]));
-  for (const t of tabs) byId.set(t.id, { ...t });
+  for (const t of tabs) byId.set(t.id, keepNewestRev(t, byId.get(t.id)));
   lastSynced = [...byId.values()];
 }
 
