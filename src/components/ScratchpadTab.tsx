@@ -157,7 +157,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     window.addEventListener(FOCUS_NOTE_EVENT, onFocus);
     return () => window.removeEventListener(FOCUS_NOTE_EVENT, onFocus);
   }, []);
-  const { tiptap } = useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, editorHtmlRef, editorRef, lastActiveTabId, lastNonEmptyContentRef, lastSnapshotTimeRef, pastePlainRef, recordSnapshot, setClearedAlert, setSlashOpen, setTabs, settings, tabs, tabsRef, titleTouched });
+  const { tiptap } = useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, editorHtmlRef, editorRef, lastActiveTabId, lastNonEmptyContentRef, lastSnapshotTimeRef, pastePlainRef, recordSnapshot, setClearedAlert, setSlashOpen, setTabs, settings, tabs, tabsRef, titleTouched, serverLoaded });
 
   // One size for dual-language notes: larger of EN/AR settings so neither
   // script is cramped, without per-script scaling that desyncs the overlay.

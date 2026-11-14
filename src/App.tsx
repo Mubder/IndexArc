@@ -35,6 +35,7 @@ import { useSSE } from "./hooks/useSSE";
 import { SettingsTab } from "./components/SettingsTab";
 import { LockScreen } from "./components/LockScreen";
 import { purgeScratchpadMirrorOnLock } from "./scratchpadSaveQueue";
+import { flushEverything } from "./lib/flushOnExit";
 import { SetupScreen } from "./components/SetupScreen";
 import { SetupChecker } from "./components/SetupChecker";
 import { HealthModal } from "./components/HealthModal";
@@ -245,6 +246,8 @@ export default function App() {
 
   const handleLockVault = async () => {
     try {
+      // Land the newest note text BEFORE the lock closes the store.
+      await flushEverything();
       const res = await fetch("/api/vault/lock", { method: "POST" });
       if (res.ok) {
         setVaultStatus((prev) => prev ? { ...prev, is_locked: true } : null);
@@ -401,7 +404,12 @@ export default function App() {
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === "hidden" && settingsRef.current?.lock_on_minimize) {
-        fetch("/api/vault/lock", { method: "POST" }).catch(() => {});
+        // Save first, lock second: the hide-time note flush and this lock used
+        // to race, and when the lock won the last words typed were refused.
+        void flushEverything()
+          .catch(() => {})
+          .then(() => fetch("/api/vault/lock", { method: "POST" }))
+          .catch(() => {});
       }
     };
     document.addEventListener("visibilitychange", onVisibility);

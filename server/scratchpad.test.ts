@@ -93,4 +93,17 @@ describe("Scratchpad Cold Archive Storage", () => {
     expect(remaining.length).toBe(1);
     expect(remaining[0].id).toBe("archived1");
   });
+
+  it("a user-named note keeps title_custom on disk (rename, or named before its first save)", () => {
+    store.updateScratchpadTabContent("auto", "<p>first line</p>", undefined, false, "first line");
+    expect(store.getScratchpad().find((t: any) => t.id === "auto")?.title_custom).toBeUndefined();
+    store.renameScratchpadTab("auto", "My name");
+    store.updateScratchpadTabContent("auto", "<p>first line, more</p>");
+    const renamed = store.getScratchpad().find((t: any) => t.id === "auto");
+    expect(renamed?.title).toBe("My name");
+    expect(renamed?.title_custom).toBe(true);
+
+    store.updateScratchpadTabContent("early", "<p>text</p>", undefined, false, "Named early", undefined, true);
+    expect(store.getScratchpad().find((t: any) => t.id === "early")?.title_custom).toBe(true);
+  });
 });

@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { setSyncedScratchpadTabs, mergeSyncedScratchpadTab } from "../../scratchpadSaveQueue";
+import { setSyncedScratchpadTabs, mergeSyncedScratchpadTab, forgetScratchpadTab } from "../../scratchpadSaveQueue";
 import { ScratchTab } from "../../types";
 import { uid } from "./noteTabs";
 import type { Dispatch, SetStateAction, RefObject } from "react";
@@ -81,6 +81,7 @@ export function useTabActions({ activeId, setActiveId, setDetections, setRephras
       return;
     }
 
+    forgetScratchpadTab(id);
     // Server confirmed the deletion. Replace an emptied notebook with a fresh
     // note (the old one is already gone server-side, so no resurrection).
     const remainingTabs = tabs.filter((x) => x.id !== id);
@@ -117,7 +118,9 @@ export function useTabActions({ activeId, setActiveId, setDetections, setRephras
     const name = renameValue.trim();
     if (name) {
       titleTouched.current[id] = true;
-      setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, title: name } : x)));
+      // title_custom travels with the note (and its first content save, if the
+      // rename beat it to the server), so a remount can't auto-title it again.
+      setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, title: name, title_custom: true } : x)));
       fetch(`/api/scratchpad/tabs/${encodeURIComponent(id)}/meta`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

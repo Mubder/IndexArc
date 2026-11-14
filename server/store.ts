@@ -2410,7 +2410,8 @@ export class VaultStore {
     baseRev?: number,
     force = false,
     title?: unknown,
-    app?: string
+    app?: string,
+    titleCustom = false
   ): { ok: boolean; conflict?: boolean; protected?: boolean; tab?: any } {
     const active = this.getScratchpad();
     const tab = active.find((t: any) => t.id === id);
@@ -2428,6 +2429,8 @@ export class VaultStore {
         content,
         archived: false,
         ...(app ? { app } : {}),
+        // The user named it before its first save (rename of an unsaved note).
+        ...(titleCustom ? { title_custom: true } : {}),
       };
       const saved = this.saveScratchpad([...active, created], { force: true });
       return { ok: true, tab: saved.find((t: any) => t.id === id) };
@@ -2477,7 +2480,12 @@ export class VaultStore {
     if (target.protected && target.title !== title) {
       throw new ProtectedTabError([id]);
     }
-    const saved = this.saveScratchpad(active.map((t: any) => (t.id === id ? { ...t, title } : t)), { force: true });
+    // An explicit rename: the title stops following the note's first line
+    // (persisted, so it survives a lock / restart, not just this window).
+    const saved = this.saveScratchpad(
+      active.map((t: any) => (t.id === id ? { ...t, title, title_custom: true } : t)),
+      { force: true }
+    );
     return saved.find((t: any) => t.id === id) || null;
   }
 

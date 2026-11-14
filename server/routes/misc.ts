@@ -450,7 +450,7 @@ export function miscRoutes(ctx: RouteContext) {
     // NOTE: force/override is intentionally NOT accepted from request bodies —
     // protection can only be lifted via the dedicated /protect route.
     // Like the title, the application is honoured only when this creates the note.
-    const result = store.updateScratchpadTabContent(req.params.id, content, baseRev, false, title, normalizeAppName(req.body?.app));
+    const result = store.updateScratchpadTabContent(req.params.id, content, baseRev, false, title, normalizeAppName(req.body?.app), req.body?.title_custom === true);
     if (result.protected) {
       return res.status(423).json({ error: "This note is protected", server_tab: result.tab });
     }

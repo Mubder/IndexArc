@@ -29,6 +29,13 @@ let conflictHandler: ((serverTab: any) => void) | null = null;
 // disk, and the text dies with the window. The banner this drives is the
 // loud "do not close the app" warning.
 let saveFailing = false;
+// Saves the server refused because the VAULT WAS LOCKED (423 is_locked).
+// Distinct from a protected note's 423: these are the user's newest words
+// and must survive until the vault is unlocked. Treating them like the
+// protected case (drop + mark synced) silently lost the last few words typed
+// before an auto-lock / lock-on-minimize. Keyed by tab id; a newer queued
+// snapshot of the same tab supersedes the held copy.
+const lockedOut = new Map<string, ScratchTab>();
 let failureHandler: ((failing: boolean) => void) | null = null;
 
 export function setScratchpadFailureHandler(fn: ((failing: boolean) => void) | null): void {
@@ -58,7 +65,14 @@ export function setSyncedScratchpadTabs(tabs: ScratchTab[]): void {
  * re-baselines the mirror from the server when it remounts.
  */
 export function purgeScratchpadMirrorOnLock(): void {
-  if (!pending) lastSynced = [];
+  if (!pending && lockedOut.size === 0) lastSynced = [];
+}
+
+/** A tab was deleted for good: never re-save a held (locked-out) copy of it —
+ *  the content POST upserts and would resurrect the note. */
+export function forgetScratchpadTab(id: string): void {
+  lockedOut.delete(id);
+  if (pending) pending = pending.filter((t) => t.id !== id);
 }
 
 /**
@@ -80,7 +94,7 @@ async function postTabContent(
   baseRev?: number,
   force?: boolean,
   opts: { keepalive?: boolean } = {}
-): Promise<ScratchTab | false> {
+): Promise<ScratchTab | false | "locked"> {
   const url = `/api/scratchpad/tabs/${encodeURIComponent(t.id)}/content`;
   const body = JSON.stringify({
     // Sanitize-on-write: the durable store only ever receives allowlisted
@@ -91,6 +105,8 @@ async function postTabContent(
     title: t.title || undefined,
     // Likewise the application (Applications page) a new note starts in.
     app: t.app || undefined,
+    // ...and whether the user named it (stops auto-title after a reload).
+    title_custom: t.title_custom || undefined,
     base_rev: baseRev,
     force: force || undefined,
   });
@@ -119,6 +135,10 @@ async function postTabContent(
     return false;
   }
   if (res.status === 423) {
+    const data = await res.json().catch(() => null);
+    // Vault locked (the unlock gate answers 423 { is_locked: true }): the
+    // save is NOT refused for good — hold it and retry after unlock.
+    if (data?.is_locked || data?.locked) return "locked";
     // Protected note: the server refuses, period. Drop the local divergence
     // instead of retrying forever.
     return false;
@@ -135,25 +155,46 @@ function mergeSynced(tabs: ScratchTab[]): void {
 }
 
 function doFlush(keepalive: boolean): void {
-  const save = pending;
+  // Held (locked-out) tabs ride along unless this snapshot has a newer copy.
+  let save = pending;
+  if (lockedOut.size) {
+    const ids = new Set((save || []).map((t) => t.id));
+    const held = [...lockedOut.values()].filter((t) => !ids.has(t.id));
+    save = [...(save || []), ...held];
+    lockedOut.clear();
+  }
   pending = null;
   chain = chain
     .then(async () => {
-      if (!save) return;
+      if (!save || !save.length) return;
       const changed = save.filter((t) => {
         const s = lastSynced.find((x) => x.id === t.id);
         return !s || s.content !== t.content;
       });
       const serverTabs: ScratchTab[] = [];
+      const locked: ScratchTab[] = [];
       for (const t of changed) {
         const s = lastSynced.find((x) => x.id === t.id);
         const saved = await postTabContent(t, s?.rev, undefined, { keepalive });
+        if (saved === "locked") {
+          locked.push(t);
+          continue;
+        }
         if (!saved) continue; // 409 surfaced to the handler / 423 protected: this tab is not retryable — keep saving the others
         serverTabs.push(saved);
+        lockedOut.delete(t.id); // an older held copy must never overwrite this save
       }
       // Server tabs merged LAST so their fresh revs win over the client
-      // copies — otherwise the next save 409s against our own write.
-      mergeSynced([...save, ...serverTabs]);
+      // copies — otherwise the next save 409s against our own write. Tabs
+      // held by the lock are NOT merged: the mirror must keep saying they
+      // differ from the server, or the retry would skip them.
+      const lockedIds = new Set(locked.map((t) => t.id));
+      mergeSynced([...save.filter((t) => !lockedIds.has(t.id)), ...serverTabs]);
+      if (locked.length) {
+        // Flushes run serially, so this flush's copy is the newest one.
+        for (const t of locked) lockedOut.set(t.id, t);
+        if (timer === null) timer = setTimeout(fire, RETRY_MS);
+      }
       setSaveFailing(false);
     })
     .catch(() => {
@@ -165,7 +206,7 @@ function doFlush(keepalive: boolean): void {
 
 function fire(): void {
   timer = null;
-  if (pending) doFlush(false);
+  if (pending || lockedOut.size) doFlush(false);
 }
 
 /** Record the latest tab state; changed tabs are saved after the quiet period. */
@@ -186,10 +227,15 @@ export function forceSaveScratchpadTab(tab: ScratchTab): Promise<void> {
   chain = chain
     .then(async () => {
       const saved = await postTabContent(tab, undefined, true);
-      if (saved) {
+      if (saved === "locked") {
+        // Vault locked mid-choice: hold it like any other locked-out save.
+        lockedOut.set(tab.id, tab);
+        if (timer === null) timer = setTimeout(fire, RETRY_MS);
+      } else if (saved) {
         // Adopt the server's saved tab (fresh rev) — the client copy's rev
         // is stale the moment the server accepts the write.
         mergeSynced([tab, saved]);
+        lockedOut.delete(tab.id);
       }
     })
     .catch(() => {});
@@ -207,7 +253,7 @@ export async function drainScratchpadSaves(opts: { keepalive?: boolean } = {}): 
     clearTimeout(timer);
     timer = null;
   }
-  if (pending) doFlush(!!opts.keepalive);
+  if (pending || lockedOut.size) doFlush(!!opts.keepalive);
   await chain.catch(() => {});
 }
 
@@ -218,6 +264,7 @@ export function __resetScratchpadSaveQueueForTests(): void {
   pending = null;
   chain = Promise.resolve();
   lastSynced = [];
+  lockedOut.clear();
   conflictHandler = null;
   saveFailing = false;
   failureHandler = null;

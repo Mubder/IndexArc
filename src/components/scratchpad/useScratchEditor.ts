@@ -34,11 +34,12 @@ export interface UseScratchEditorArgs {
   tabs: ScratchTab[];
   tabsRef: RefObject<ScratchTab[]>;
   titleTouched: RefObject<Record<string, boolean>>;
+  serverLoaded: RefObject<boolean>;
 }
 
 // The TipTap editor instance, the exit-flush hook, and per-tab content/BIDI sync.
 // Moved verbatim from ScratchpadTab (R3.4); the component wires the inputs.
-export function useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, editorHtmlRef, editorRef, lastActiveTabId, lastNonEmptyContentRef, lastSnapshotTimeRef, pastePlainRef, recordSnapshot, setClearedAlert, setSlashOpen, setTabs, settings, tabs, tabsRef, titleTouched }: UseScratchEditorArgs) {
+export function useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, editorHtmlRef, editorRef, lastActiveTabId, lastNonEmptyContentRef, lastSnapshotTimeRef, pastePlainRef, recordSnapshot, setClearedAlert, setSlashOpen, setTabs, settings, tabs, tabsRef, titleTouched, serverLoaded }: UseScratchEditorArgs) {
   // TipTap industry editor — stable, transactional, BIDI-aware
   const tiptap = useEditor({
     extensions: [
@@ -94,7 +95,7 @@ export function useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, 
         return true;
       },
     },
-    onUpdate: ({ editor }) => {
+    onUpdate: ({ editor, transaction }) => {
       const html = safeGetHTML(editor);
       const id = activeIdRef.current;
       contentRef.current[id] = html;
@@ -139,17 +140,31 @@ export function useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, 
       // infinite setTabs → effect → setEditable → update render loop.
       // A note named on the Applications page ("Overview", "Kazma note") keeps
       // its name; only default "Scratch N" names follow the first line.
+      // A note the user renamed keeps its name for good: `title_custom` is
+      // stored on the note (titleTouched alone lived in this component and
+      // was wiped by every remount — a vault lock — after which the next
+      // keystroke replaced the user's name with the first line).
       const named = tabsRef.current.find((x) => x.id === id);
-      const keepName = !!named?.app && !/^Scratch( \d+)?$/.test(named.title || "");
-      if (!titleTouched.current[id] && !keepName) {
-        let firstBlock = "";
-        editor.state.doc.forEach((node) => {
-          if (firstBlock) return;
-          const t = node.textContent;
-          if (t.trim()) firstBlock = t;
-        });
-        if (firstBlock) {
-          const auto = firstBlock.trim().slice(0, 40) || "Scratch";
+      const title = named?.title || "";
+      const isDefault = /^Scratch( \d+)?$/.test(title);
+      const keepName = !!named?.app && !isDefault;
+      if (!titleTouched.current[id] && !keepName && !named?.title_custom) {
+        const autoOf = (doc: typeof editor.state.doc) => {
+          let firstBlock = "";
+          doc.forEach((node) => {
+            if (firstBlock) return;
+            const t = node.textContent;
+            if (t.trim()) firstBlock = t;
+          });
+          return firstBlock.trim().slice(0, 40);
+        };
+        // Notes renamed before title_custom existed carry no flag: follow the
+        // first line only while the title still IS that line (or a prefix of
+        // it — the server keeps the title from the note's first save).
+        const prevAuto = autoOf(transaction.before);
+        const followsFirstLine = isDefault || !named || title === prevAuto || (!!title && prevAuto.startsWith(title));
+        const auto = followsFirstLine ? autoOf(editor.state.doc) : "";
+        if (auto) {
           setTabs((prev) => {
             const cur = prev.find((x) => x.id === id);
             if (cur && cur.title === auto) return prev;
@@ -175,7 +190,7 @@ export function useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, 
   // timers die with the renderer and must never outrank this snapshot. The
   // flush module then drains the queue to the server before the app exits.
   useEffect(() => {
-    return registerFlushHook(() => {
+    const flushLive = () => {
       const ed = tiptapRef.current;
       const active = activeIdRef.current;
       if (ed && !ed.isDestroyed) {
@@ -195,7 +210,22 @@ export function useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, 
           content: x.id === active && live != null ? live : (contentRef.current[x.id] ?? x.content),
         }))
       );
-    });
+    };
+    const off = registerFlushHook(flushLive);
+    return () => {
+      // Unmount (vault lock swaps in the lock screen, page switch): the
+      // 280ms editor→tabs debounce dies with this component, so the newest
+      // words never reached the save queue — the "last few words lost on
+      // lock" bug. Hand the live text over now; the queue holds it through
+      // the lock and saves it after unlock. Skipped before the first server
+      // load: the placeholder tabs would be saved as a junk note.
+      if (serverLoaded.current) {
+        try {
+          flushLive();
+        } catch {}
+      }
+      off();
+    };
   }, []);
 
   // Keep editorRef in sync with TipTap DOM for spellcheck/scroll

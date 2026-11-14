@@ -150,7 +150,7 @@ export const BODIES = {
       wordCount: NUM,
       reason: opt(s(256)),
     }),
-    "POST /scratchpad/tabs/:id/content": obj({ content: opt(TEXT), base_rev: NUM, title: opt(s(10_000)), app: opt(s(APP)) }),
+    "POST /scratchpad/tabs/:id/content": obj({ content: opt(TEXT), base_rev: NUM, title: opt(s(10_000)), app: opt(s(APP)), title_custom: opt(z.boolean()) }),
     "POST /scratchpad/tabs/:id/meta": obj({ title: opt(s(10_000)), app: opt(s(APP)) }),
     "POST /scratchpad/tabs/:id/protect": obj({ protected: opt(z.boolean()), confirm_word: opt(s(256)), password: opt(PASSWORD) }),
     "POST /scratchpad/tabs/:id/pin": obj({ pinned: opt(z.boolean()) }),

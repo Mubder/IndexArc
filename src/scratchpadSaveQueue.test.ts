@@ -10,6 +10,8 @@ import {
   setScratchpadConflictHandler,
   setScratchpadFailureHandler,
   __resetScratchpadSaveQueueForTests,
+  purgeScratchpadMirrorOnLock,
+  forgetScratchpadTab,
 } from "./scratchpadSaveQueue";
 import type { ScratchTab } from "./types";
 
@@ -192,5 +194,53 @@ describe("scratchpadSaveQueue", () => {
     expect(conflictsRouted).toBe(1); // the 409 was surfaced
     expect(posts.length).toBe(1); // ...but tab b still saved
     expect(posts[0].url).toContain("/tabs/b/content");
+  });
+
+  it("a save refused because the VAULT is locked is held and lands after unlock", async () => {
+    // Regression: every 423 was read as "protected note" — the save was
+    // dropped AND marked synced, losing the last words typed before a lock.
+    let locked = true;
+    (globalThis as any).fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) || "{}");
+      if (locked) return { ok: false, status: 423, json: async () => ({ error: "Vault is locked", is_locked: true }) } as any;
+      posts.push({ url: String(url), body, keepalive: init?.keepalive === true });
+      return { ok: true, status: 200, json: async () => ({ tab: { ...body, id: "a", rev: 2 } }) } as any;
+    });
+    setSyncedScratchpadTabs([{ ...tab("a", "hello"), rev: 1 }]);
+    enqueueScratchpadSave([tab("a", "hello last words")]);
+    await drainScratchpadSaves();
+    expect(posts.length).toBe(0);
+    purgeScratchpadMirrorOnLock(); // the app's lock path must keep the held save
+    locked = false;
+    await drainScratchpadSaves(); // remount after unlock drains first
+    expect(posts.length).toBe(1);
+    expect(posts[0].body.content).toBe("hello last words");
+    expect(posts[0].body.base_rev).toBe(1);
+  });
+
+  it("a newer snapshot of a held tab wins, and a deleted tab is not resurrected", async () => {
+    let locked = true;
+    (globalThis as any).fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) || "{}");
+      if (locked) return { ok: false, status: 423, json: async () => ({ is_locked: true }) } as any;
+      posts.push({ url: String(url), body, keepalive: false });
+      return { ok: true, status: 200, json: async () => ({}) } as any;
+    });
+    enqueueScratchpadSave([tab("a", "v1"), tab("gone", "x")]);
+    await drainScratchpadSaves();
+    enqueueScratchpadSave([tab("a", "v2")]);
+    forgetScratchpadTab("gone");
+    locked = false;
+    await drainScratchpadSaves();
+    expect(posts.map((p) => [p.url.includes("/tabs/a/") ? "a" : "other", p.body.content])).toEqual([["a", "v2"]]);
+  });
+
+  it("a protected note's 423 is still dropped (not retried)", async () => {
+    (globalThis as any).fetch = vi.fn(async () => ({ ok: false, status: 423, json: async () => ({ error: "This note is protected" }) }) as any);
+    enqueueScratchpadSave([tab("p", "edit")]);
+    await drainScratchpadSaves();
+    const calls = (globalThis as any).fetch.mock.calls.length;
+    await drainScratchpadSaves();
+    expect((globalThis as any).fetch.mock.calls.length).toBe(calls);
   });
 });

@@ -253,6 +253,8 @@ export interface ScratchTab {
   protected_at?: number;
   /** Application this note belongs to (shared/apps.ts). */
   app?: string;
+  /** The user named this note: its title no longer follows the first line. */
+  title_custom?: boolean;
 }
 
 export interface Detection {
