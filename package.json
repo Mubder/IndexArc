@@ -53,7 +53,7 @@
     "@tiptap/react": "^3.30.5",
     "@tiptap/starter-kit": "^3.30.5",
     "@types/express": "^4.17.21",
-    "@types/node": "^22.14.0",
+    "@types/node": "^26.6.6",
     "@vitejs/plugin-react": "^5.0.4",
     "@vitest/coverage-v8": "^4.1.12",
     "@zxcvbn-ts/core": "4.2.0",
