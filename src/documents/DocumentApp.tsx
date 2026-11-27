@@ -5,7 +5,8 @@ import { textToNoteHtml } from "../sanitize";
 import type { Settings } from "../types";
 import { getTranslation, type TranslationDict } from "../utils/i18n";
 import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor";
-import { findMatches } from "./findText";
+import { SourceEditor, type CaretInfo, type SourceEditorHandle } from "./SourceEditor";
+import { findTextMatches, type FindOptions } from "./findText";
 
 interface OpenDoc {
   path: string;
@@ -19,21 +20,41 @@ interface OpenDoc {
 }
 
 const RECENT_KEY = "indexarc-recent-files";
+const RECENT_ENC_KEY = "indexarc-recent-files-enc";
 
-function loadRecent(): { path: string; name: string }[] {
+interface RecentFile { path: string; name: string }
+
+function parseRecent(raw: string | null | undefined): RecentFile[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
-    if (!Array.isArray(raw)) return [];
-    return raw.filter((x) => x && typeof x.path === "string" && typeof x.name === "string").slice(0, 12);
+    const list = JSON.parse(raw || "[]");
+    if (!Array.isArray(list)) return [];
+    return list.filter((x) => x && typeof x.path === "string" && typeof x.name === "string").slice(0, 12);
   } catch {
     return [];
   }
 }
 
-function rememberRecent(file: { path: string; name: string }): { path: string; name: string }[] {
-  const next = [file, ...loadRecent().filter((x) => x.path !== file.path)].slice(0, 12);
-  localStorage.setItem(RECENT_KEY, JSON.stringify(next));
-  return next;
+async function loadRecent(): Promise<RecentFile[]> {
+  const encrypted = localStorage.getItem(RECENT_ENC_KEY);
+  if (encrypted) {
+    const plain = await window.electronAPI?.decryptText?.(encrypted);
+    if (plain) return parseRecent(plain);
+  }
+  // Migrate the legacy plaintext list once; safeStorage may be unavailable.
+  const legacy = parseRecent(localStorage.getItem(RECENT_KEY));
+  if (legacy.length) await persistRecent(legacy);
+  return legacy;
+}
+
+async function persistRecent(list: RecentFile[]): Promise<RecentFile[]> {
+  const encrypted = await window.electronAPI?.encryptText?.(JSON.stringify(list));
+  if (encrypted) {
+    localStorage.setItem(RECENT_ENC_KEY, encrypted);
+    localStorage.removeItem(RECENT_KEY);
+  } else {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  }
+  return list;
 }
 
 function titleFrom(name: string): string {
@@ -52,17 +73,21 @@ export default function DocumentApp() {
   const [replaceOpen, setReplaceOpen] = useState(false);
   const [replaceQuery, setReplaceQuery] = useState("");
   const [findQuery, setFindQuery] = useState("");
+  const [findCase, setFindCase] = useState(false);
+  const [findRegex, setFindRegex] = useState(false);
   const [findAt, setFindAt] = useState(0);
   const [findTotal, setFindTotal] = useState(0);
   const [closeAsk, setCloseAsk] = useState<{ paths: string[]; names: string[]; then: "tab" | "window" } | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
-  const [recent, setRecent] = useState(loadRecent);
+  const [recent, setRecent] = useState<RecentFile[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   /** Bumped when a file is reloaded so the uncontrolled rich editor remounts. */
   const [docEpoch, setDocEpoch] = useState(0);
   const [externalChange, setExternalChange] = useState(false);
   const [focusTick, setFocusTick] = useState(0);
   const [caret, setCaret] = useState({ line: 1, col: 1, count: 0 });
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [backups, setBackups] = useState<{ id: string; createdAt: string; size: number }[]>([]);
 
   // Read through a ref so callbacks created once always see the current language.
   const settingsRef = useRef<Settings | null>(null);
@@ -71,15 +96,17 @@ export default function DocumentApp() {
 
   const docsRef = useRef<OpenDoc[]>([]);
   const mdRef = useRef<MarkdownEditorHandle>(null);
-  const areaRef = useRef<HTMLTextAreaElement>(null);
+  const sourceRef = useRef<SourceEditorHandle>(null);
   const findRef = useRef<HTMLInputElement>(null);
   const activeRef = useRef("");
   const histRef = useRef<Record<string, { undo: string[]; redo: string[] }>>({});
   const editRef = useRef({ undo: () => {}, redo: () => {}, rich: false });
   const writeChain = useRef<Promise<void>>(Promise.resolve());
   const blobUrls = useRef<Set<string>>(new Set());
+  const recentRef = useRef<RecentFile[]>([]);
   docsRef.current = docs;
   activeRef.current = active;
+  recentRef.current = recent;
 
   useEffect(() => {
     const applyTheme = () => {
@@ -102,6 +129,10 @@ export default function DocumentApp() {
       .then((r) => (r.ok ? r.json() : null))
       .then((s: Settings | null) => setSettings(s))
       .catch(() => {});
+    void loadRecent().then((list) => {
+      recentRef.current = list;
+      setRecent(list);
+    });
   }, []);
   useEffect(() => {
     const isAr = settings?.ui_language === "ar";
@@ -173,7 +204,10 @@ export default function DocumentApp() {
       setFindQuery("");
       setExternalChange(false);
       setDocEpoch((x) => x + 1);
-      setRecent(rememberRecent({ path: payload.path, name: payload.name }));
+      const nextRecent = [payload, ...recentRef.current.filter((r) => r.path !== payload.path)].slice(0, 12);
+      recentRef.current = nextRecent;
+      setRecent(nextRecent);
+      void persistRecent(nextRecent);
     }
   }, []);
 
@@ -253,6 +287,8 @@ export default function DocumentApp() {
   const openPathsRef = useRef(openPaths);
   openPathsRef.current = openPaths;
   const isMarkdown = (ext: string) => ext === ".md" || ext === ".markdown";
+  const sourceActive = !!current && current.editable && (mode === "source" || !isMarkdown(current.ext));
+  const richActive = !!current && current.editable && isMarkdown(current.ext) && mode === "rich";
 
   // Detect edits made outside this window by comparing the on-disk text with
   // the last saved baseline whenever the window regains focus.
@@ -299,8 +335,12 @@ export default function DocumentApp() {
 
   const undoEdit = () => {
     if (!current) return;
-    if (isMarkdown(current.ext) && mode === "rich") {
+    if (richActive) {
       mdRef.current?.undo();
+      return;
+    }
+    if (sourceActive) {
+      sourceRef.current?.undo();
       return;
     }
     const h = histRef.current[current.path];
@@ -312,8 +352,12 @@ export default function DocumentApp() {
 
   const redoEdit = () => {
     if (!current) return;
-    if (isMarkdown(current.ext) && mode === "rich") {
+    if (richActive) {
       mdRef.current?.redo();
+      return;
+    }
+    if (sourceActive) {
+      sourceRef.current?.redo();
       return;
     }
     const h = histRef.current[current.path];
@@ -325,7 +369,9 @@ export default function DocumentApp() {
   editRef.current = {
     undo: undoEdit,
     redo: redoEdit,
-    rich: !!current && isMarkdown(current.ext) && mode === "rich",
+    // Both editors own their own history; the custom array is only for the
+    // plain fallback, so skip the global handler while a real editor is shown.
+    rich: richActive || sourceActive,
   };
 
   const addToScratchpad = async () => {
@@ -375,64 +421,56 @@ export default function DocumentApp() {
     }
   };
 
+  const findCaseRef = useRef(findCase);
+  const findRegexRef = useRef(findRegex);
+  findCaseRef.current = findCase;
+  findRegexRef.current = findRegex;
+  const findOpts = (): FindOptions => ({ caseSensitive: findCaseRef.current, regex: findRegexRef.current });
+
   const replaceCurrent = (all: boolean) => {
-    if (!current?.editable || !areaRef.current || !findQuery.trim()) return;
-    const source = current.text;
-    const needle = findQuery.trim();
-    const hits = findMatches(source, needle);
+    if (!current?.editable || !sourceRef.current || !findQuery.trim()) return;
+    const editor = sourceRef.current;
+    const source = editor.getValue();
+    const hits = findTextMatches(source, findQuery, findOpts());
     if (!hits.length) return;
     if (all) {
       let out = "";
       let last = 0;
-      for (const at of hits) {
-        out += source.slice(last, at) + replaceQuery;
-        last = at + needle.length;
+      for (const hit of hits) {
+        out += source.slice(last, hit.index) + replaceQuery;
+        last = hit.index + hit.length;
       }
       out += source.slice(last);
-      updateText(out);
+      editor.setValue(out);
       setFindTotal(0);
       requestAnimationFrame(() => findRef.current?.focus());
       return;
     }
-    const at = hits[findAt] ?? hits[0];
-    updateText(source.slice(0, at) + replaceQuery + source.slice(at + needle.length));
+    const hit = hits[findAt] ?? hits[0];
+    editor.setValue(source.slice(0, hit.index) + replaceQuery + source.slice(hit.index + hit.length));
     setFindAt(0);
     jumpTo(findQuery, 0);
   };
 
-  const updateCaret = (el: HTMLTextAreaElement) => {
-    const upto = el.value.slice(0, el.selectionStart ?? 0);
-    const lines = upto.split("\n");
-    setCaret({
-      line: lines.length,
-      col: lines[lines.length - 1].length + 1,
-      count: el.value.length,
-    });
-  };
-
   const jumpTo = (query: string, nth: number) => {
     if (!current) return;
-    const rich = isMarkdown(current.ext) && mode === "rich" && richReady;
-    if (rich) {
-      const total = mdRef.current?.selectMatch(query, nth) ?? 0;
+    if (richActive && richReady) {
+      const total = mdRef.current?.selectMatch(query, nth, findOpts()) ?? 0;
       setFindTotal(total);
       if (total) setFindAt(((nth % total) + total) % total);
       requestAnimationFrame(() => findRef.current?.focus());
       return;
     }
-    const hits = findMatches(current.text, query);
+    if (!sourceRef.current) return;
+    const editor = sourceRef.current;
+    const hits = findTextMatches(editor.getValue(), query, findOpts());
     setFindTotal(hits.length);
-    if (!hits.length || !areaRef.current) return;
+    if (!hits.length) return;
     const at = ((nth % hits.length) + hits.length) % hits.length;
     setFindAt(at);
-    const index = hits[at] ?? 0;
-    const len = query.trim().length;
-    const el = areaRef.current;
-    el.setSelectionRange(index, index + len);
-    const measured = parseFloat(getComputedStyle(el).lineHeight);
-    const lineHeight = Number.isFinite(measured) ? measured : 22;
-    const line = el.value.slice(0, index).split("\n").length - 1;
-    el.scrollTop = Math.max(0, line * lineHeight - el.clientHeight / 3);
+    const hit = hits[at];
+    editor.selectRange(hit.index, hit.index + hit.length);
+    editor.scrollToSelection();
     requestAnimationFrame(() => findRef.current?.focus());
   };
 
@@ -494,6 +532,24 @@ export default function DocumentApp() {
     setCloseAsk(null);
     if (ask.then === "window") window.electronAPI?.docsCloseResult?.(true);
     else dropDocs(ask.paths);
+  };
+
+  const openHistory = async () => {
+    if (!current) return;
+    const res = await window.electronAPI?.listDocBackups?.(current.path);
+    setBackups(res?.items || []);
+    setHistoryOpen(true);
+  };
+
+  const restoreBackup = async (id: string) => {
+    if (!current) return;
+    const res = await window.electronAPI?.readDocBackup?.(current.path, id);
+    if (res?.ok && typeof res.text === "string") {
+      await write(current, res.text);
+      setHistoryOpen(false);
+    } else {
+      setStatus(t("docs_cannot_open"));
+    }
   };
 
   const copyDoc = () => {
@@ -559,6 +615,7 @@ export default function DocumentApp() {
                 <button type="button" className="px-3 py-1 rounded-full" style={{ border: "1px solid var(--border)" }} onClick={() => { setReplaceOpen((v) => !v); setFindOpen(true); setTimeout(() => findRef.current?.select(), 0); }}>{t("docs_replace")}</button>
               )}
               <button type="button" className="px-3 py-1 rounded-full" style={{ border: "1px solid var(--border)" }} onClick={copyDoc}>{t("docs_copy")}</button>
+              <button type="button" className="px-3 py-1 rounded-full" style={{ border: "1px solid var(--border)" }} onClick={() => void openHistory()}>{t("docs_history")}</button>
               <button type="button" className="px-3 py-1 rounded-full" style={{ border: "1px solid var(--border-glow)", background: "var(--accent-bg)" }} onClick={() => void addToScratchpad()}>{t("docs_add_scratchpad")}</button>
             </>
           ) : null}
@@ -585,6 +642,8 @@ export default function DocumentApp() {
             autoFocus
           />
           <span style={{ color: "var(--text-muted)" }}>{findQuery.trim() ? `${findTotal ? findAt + 1 : 0} of ${findTotal}` : ""}</span>
+          <button type="button" title={t("docs_match_case")} aria-label={t("docs_match_case")} className="px-2 py-1 rounded-lg font-mono" style={{ border: "1px solid var(--border)", background: findCase ? "var(--accent)" : "transparent", color: findCase ? "#fff" : "var(--text-muted)" }} onClick={() => { setFindCase((v) => !v); setFindAt(0); setTimeout(() => jumpTo(findQuery, 0), 0); }}>Aa</button>
+          <button type="button" title={t("docs_regex")} aria-label={t("docs_regex")} className="px-2 py-1 rounded-lg font-mono" style={{ border: "1px solid var(--border)", background: findRegex ? "var(--accent)" : "transparent", color: findRegex ? "#fff" : "var(--text-muted)" }} onClick={() => { setFindRegex((v) => !v); setFindAt(0); setTimeout(() => jumpTo(findQuery, 0), 0); }}>.*</button>
           <button type="button" className="px-2 py-1 rounded-lg" style={{ border: "1px solid var(--border)" }} onClick={() => jumpTo(findQuery, findAt - 1)}>{t("docs_prev")}</button>
           <button type="submit" className="px-2 py-1 rounded-lg" style={{ border: "1px solid var(--border)" }}>{t("docs_next")}</button>
           <button type="button" className="px-2 py-1" style={{ color: "var(--text-muted)" }} onClick={() => setFindOpen(false)}>{t("docs_close")}</button>
@@ -621,33 +680,19 @@ export default function DocumentApp() {
             </div>
           </div>
         )}
-        {current && current.editable && (mode === "source" || !isMarkdown(current.ext)) && (
+        {sourceActive && (
           <>
-            <textarea
-              data-doc-scroll
-              ref={areaRef}
-              value={current.text}
-              dir="auto"
-              spellCheck={false}
-              onChange={(e) => { updateText(e.target.value); updateCaret(e.currentTarget); }}
-              onSelect={(e) => updateCaret(e.currentTarget)}
-              onKeyUp={(e) => updateCaret(e.currentTarget)}
-              onClick={(e) => updateCaret(e.currentTarget)}
-              onPaste={(e) => {
-                const incoming = e.clipboardData?.getData("text/plain");
-                if (!incoming || (current.ext !== ".txt" && current.ext !== ".text" && mode !== "source")) return;
-                e.preventDefault();
-                const el = e.currentTarget;
-                const start = el.selectionStart ?? current.text.length;
-                const end = el.selectionEnd ?? current.text.length;
-                const norm = normalizePastedPlain(incoming);
-                const next = current.text.slice(0, start) + norm + current.text.slice(end);
-                updateText(next);
-                updateCaret(el);
-              }}
-              className="w-full flex-1 min-h-0 p-8 bg-transparent outline-none resize-none"
-              style={{ fontFamily: current.ext === ".txt" || current.ext === ".text" ? "var(--font-sans)" : "var(--font-mono)", color: "var(--text)" }}
-            />
+            <div className="flex-1 min-h-0" data-doc-scroll>
+              <SourceEditor
+                ref={sourceRef}
+                key={`${current!.path}:${mode}:${docEpoch}`}
+                value={current!.text}
+                ext={current!.ext}
+                normalizePaste={current!.ext === ".txt" || current!.ext === ".text" || (isMarkdown(current!.ext) && mode === "source")}
+                onChange={(text) => updateText(text, false)}
+                onCaret={(info: CaretInfo) => setCaret(info)}
+              />
+            </div>
             <div className="shrink-0 px-3 py-1 text-[10px] flex justify-end gap-3" style={{ borderTop: "1px solid var(--border)", color: "var(--text-muted)" }}>
               <span>Ln {caret.line}, Col {caret.col}</span>
               <span>{caret.count} chars</span>
@@ -656,6 +701,22 @@ export default function DocumentApp() {
         )}
       </div>
       {status && <p className="px-4 pb-3 text-xs" style={{ color: "var(--text-muted)" }}>{status}</p>}
+      {historyOpen && current && (
+        <div className="mx-4 mb-4 rounded-xl p-3 text-xs" style={{ border: "1px solid var(--border)", background: "var(--bg-surface)", maxHeight: "30vh", overflowY: "auto" }}>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="font-semibold flex-1">{t("docs_history_title")} — {current.name}</span>
+            <button type="button" className="px-2 py-1" style={{ color: "var(--text-muted)" }} onClick={() => setHistoryOpen(false)}>{t("docs_close")}</button>
+          </div>
+          {backups.length === 0 && <p style={{ color: "var(--text-muted)" }}>{t("docs_history_empty")}</p>}
+          {backups.map((b) => (
+            <div key={b.id} className="flex items-center gap-2 py-1" style={{ borderTop: "1px solid var(--border)" }}>
+              <span className="flex-1">{new Date(b.createdAt).toLocaleString()}</span>
+              <span style={{ color: "var(--text-muted)" }}>{Math.max(1, Math.round(b.size / 1024))} KB</span>
+              <button type="button" className="px-2 py-0.5 rounded-full" style={{ border: "1px solid var(--border)" }} onClick={() => void restoreBackup(b.id)}>{t("docs_restore")}</button>
+            </div>
+          ))}
+        </div>
+      )}
       {closeAsk && (
         <div className="mx-4 mb-4 flex items-center gap-2 rounded-xl px-3 py-2 text-xs" style={{ border: "1px solid var(--border)", background: "var(--bg-surface)" }}>
           <span className="flex-1">{t("docs_close_ask")} {closeAsk.names.join(", ")}</span>

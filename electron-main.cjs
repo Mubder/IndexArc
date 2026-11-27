@@ -1,5 +1,5 @@
 // @ts-check
-const { app, BrowserWindow, Menu, MenuItem, dialog, ipcMain, Tray, nativeImage, shell, clipboard, ClipboardItem } = require("electron");
+const { app, BrowserWindow, Menu, MenuItem, dialog, ipcMain, Tray, nativeImage, shell, clipboard, ClipboardItem, safeStorage } = require("electron");
 const { spawn } = require("child_process");
 const { childEnv } = require("./shared/child-env.cjs");
 const path = require("path");
@@ -1487,6 +1487,50 @@ function readDocFile(filePath) {
   return Promise.resolve({ ...base, text });
 }
 
+/** @param {string} filePath */
+function fileBackupDir(filePath) {
+  let root = "";
+  try { root = getPortableRoot(); } catch { root = ""; }
+  if (!root) return "";
+  const hash = crypto.createHash("sha256").update(filePath).digest("hex").slice(0, 16);
+  return path.join(root, "backups", "files", hash);
+}
+
+/**
+ * @param {string} dir
+ * @param {string} filePath
+ * @returns {{ path: string, items: { id: string, file: string, createdAt: string }[] }}
+ */
+function loadBackupMeta(dir, filePath) {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, "meta.json"), "utf8"));
+    if (meta && meta.path === filePath && Array.isArray(meta.items)) return meta;
+  } catch {}
+  return { path: filePath, items: [] };
+}
+
+/**
+ * Keep a short version history of the previous on-disk contents.
+ * @param {string} target
+ */
+function backupExisting(target) {
+  const dir = fileBackupDir(target);
+  if (!dir) return;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const meta = loadBackupMeta(dir, target);
+    const id = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+    const file = `${id}${path.extname(target) || ".txt"}`;
+    fs.copyFileSync(target, path.join(dir, file));
+    meta.items.unshift({ id, file, createdAt: new Date().toISOString() });
+    const removed = meta.items.splice(20);
+    for (const old of removed) {
+      try { fs.unlinkSync(path.join(dir, old.file)); } catch {}
+    }
+    fs.writeFileSync(path.join(dir, "meta.json"), JSON.stringify(meta, null, 2), "utf8");
+  } catch {}
+}
+
 /** @param {string} filePath @param {string} text */
 function writeDocFile(filePath, text) {
   if (typeof text !== "string" || text.length > 5_000_000) return { ok: false, reason: "size" };
@@ -1503,6 +1547,7 @@ function writeDocFile(filePath, text) {
   } catch {
     return { ok: false, reason: "path" };
   }
+  if (fs.existsSync(target)) backupExisting(target);
   // Write to a temporary file in the same directory, then rename. A crash
   // mid-write can no longer leave the user's file truncated.
   const tmp = `${target}.indexarc-${process.pid}-${Date.now()}.tmp`;
@@ -1541,8 +1586,52 @@ function regQueryDefault(key) {
 
 handleTrusted("docs-read", (_e, filePath) => readDocFile(String(filePath || "")));
 handleTrusted("docs-write", (_e, filePath, text) => writeDocFile(String(filePath || ""), String(text ?? "")));
+// Recent file paths are metadata about the user's disk; keep them encrypted
+// with the OS-bound key instead of plaintext in the renderer's storage.
+handleTrusted("text-encrypt", (_e, text) => {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    return safeStorage.encryptString(String(text ?? "")).toString("base64");
+  } catch {
+    return null;
+  }
+});
+handleTrusted("text-decrypt", (_e, encoded) => {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    return safeStorage.decryptString(Buffer.from(String(encoded || ""), "base64"));
+  } catch {
+    return null;
+  }
+});
 handleTrusted("docs-take-pending", () => pendingDocPaths.splice(0));
 handleTrusted("docs-open-window", () => { openDocWindow([]); });
+handleTrusted("docs-backups", (_e, filePath) => {
+  const target = String(filePath || "");
+  const dir = fileBackupDir(target);
+  if (!dir) return { ok: false, items: [] };
+  const meta = loadBackupMeta(dir, target);
+  return {
+    ok: true,
+    items: meta.items.map((it) => {
+      let size = 0;
+      try { size = fs.statSync(path.join(dir, it.file)).size; } catch {}
+      return { id: it.id, createdAt: it.createdAt, size };
+    }),
+  };
+});
+handleTrusted("docs-backup-read", (_e, filePath, id) => {
+  const target = String(filePath || "");
+  const dir = fileBackupDir(target);
+  if (!dir) return { ok: false };
+  const item = loadBackupMeta(dir, target).items.find((x) => x.id === String(id));
+  if (!item) return { ok: false };
+  try {
+    return { ok: true, text: fs.readFileSync(path.join(dir, item.file), "utf8") };
+  } catch {
+    return { ok: false };
+  }
+});
 handleTrusted("file-assoc", async (_e, kind, enabled) => {
   if (process.platform !== "win32") return { ok: false, reason: "platform" };
   const plan = fileAssoc.associationPlan(String(kind || ""), process.execPath);

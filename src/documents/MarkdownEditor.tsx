@@ -5,11 +5,11 @@ import { TextSelection } from "@milkdown/kit/prose/state";
 import { undo, redo } from "@milkdown/kit/prose/history";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/classic-dark.css";
-import { matchPositions } from "./findText";
+import { matchPositions, type FindOptions } from "./findText";
 
 export type MarkdownEditorHandle = {
   /** Select the nth visible match. Returns how many matches exist. */
-  selectMatch: (query: string, nth: number) => number;
+  selectMatch: (query: string, nth: number, opts?: FindOptions) => number;
   undo: () => void;
   redo: () => void;
 };
@@ -23,14 +23,14 @@ function MarkdownEditor({ value, onChange, onReady }, ref) {
   onChangeRef.current = onChange;
 
   useImperativeHandle(ref, () => ({
-    selectMatch(query, nth) {
+    selectMatch(query, nth, opts) {
       const crepe = crepeRef.current;
       if (!crepe) return 0;
       let total = 0;
       try {
         crepe.editor.action((ctx) => {
           const view = ctx.get(editorViewCtx);
-          const match = matchPositions(view.state.doc, query, nth);
+          const match = matchPositions(view.state.doc, query, nth, opts);
           if (!match || match.from < 0) {
             total = match?.total ?? 0;
             return;

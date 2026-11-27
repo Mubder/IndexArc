@@ -318,6 +318,12 @@ export interface TranslationDict {
   docs_replace_placeholder: string;
   docs_copy: string;
   docs_add_scratchpad: string;
+  docs_history: string;
+  docs_history_title: string;
+  docs_history_empty: string;
+  docs_restore: string;
+  docs_match_case: string;
+  docs_regex: string;
   docs_find_placeholder: string;
   docs_prev: string;
   docs_next: string;
@@ -1249,6 +1255,12 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     docs_replace_placeholder: "Replace with",
     docs_copy: "Copy",
     docs_add_scratchpad: "Add to scratchpad",
+    docs_history: "History",
+    docs_history_title: "Saved versions",
+    docs_history_empty: "No earlier versions yet. One is kept each time you save over an existing file.",
+    docs_restore: "Restore",
+    docs_match_case: "Match case",
+    docs_regex: "Regular expression",
     docs_find_placeholder: "Find in this file",
     docs_prev: "Prev",
     docs_next: "Next",
@@ -2177,6 +2189,12 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     docs_replace_placeholder: "استبدل بـ",
     docs_copy: "نسخ",
     docs_add_scratchpad: "أضف إلى المفكرة",
+    docs_history: "السجل",
+    docs_history_title: "النسخ المحفوظة",
+    docs_history_empty: "لا توجد نسخ سابقة بعد. تُحفظ نسخة عند كل كتابة فوق ملف موجود.",
+    docs_restore: "استعادة",
+    docs_match_case: "مطابقة حالة الحروف",
+    docs_regex: "تعبير عادي",
     docs_find_placeholder: "ابحث في هذا الملف",
     docs_prev: "السابق",
     docs_next: "التالي",

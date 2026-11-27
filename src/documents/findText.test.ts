@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findMatches, matchPositions, type DocNodeLike } from "./findText";
+import { findMatches, findTextMatches, matchPositions, type DocNodeLike } from "./findText";
 
 describe("findMatches", () => {
   it("finds every case-insensitive hit", () => {
@@ -23,6 +23,24 @@ function docWith(...nodes: { pos: number; text: string }[]) {
     },
   };
 }
+
+describe("find options", () => {
+  it("matches case-sensitively when asked", () => {
+    expect(findTextMatches("Alpha alpha", "alpha", { caseSensitive: true })).toEqual([{ index: 6, length: 5 }]);
+    expect(findTextMatches("Alpha alpha", "alpha")).toEqual([{ index: 0, length: 5 }, { index: 6, length: 5 }]);
+  });
+
+  it("supports regular expressions with variable match lengths", () => {
+    expect(findTextMatches("a1 bb22 c333", "\\d+", { regex: true })).toEqual([
+      { index: 1, length: 1 }, { index: 5, length: 2 }, { index: 9, length: 3 },
+    ]);
+    expect(findTextMatches("A a", "a", { regex: true, caseSensitive: true })).toEqual([{ index: 2, length: 1 }]);
+  });
+
+  it("returns nothing for an invalid pattern instead of throwing", () => {
+    expect(findTextMatches("abc", "[", { regex: true })).toEqual([]);
+  });
+});
 
 describe("matchPositions", () => {
   it("maps a match to the correct document range (no off-by-one)", () => {

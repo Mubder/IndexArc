@@ -1,18 +1,50 @@
-/** Indexes of `query` inside `haystack`, case-insensitive. Overlaps are not returned. */
-export function findMatches(haystack: string, query: string): number[] {
+export interface FindOptions {
+  caseSensitive?: boolean;
+  regex?: boolean;
+}
+
+export interface TextMatch {
+  index: number;
+  length: number;
+}
+
+/** Case-insensitive by default, literal by default, overlaps never returned. */
+export function findTextMatches(haystack: string, query: string, opts: FindOptions = {}): TextMatch[] {
   const q = query.trim();
   if (!q) return [];
-  const h = haystack.toLowerCase();
-  const needle = q.toLowerCase();
-  const out: number[] = [];
+  if (opts.regex) {
+    try {
+      const re = new RegExp(q, opts.caseSensitive ? "g" : "gi");
+      const out: TextMatch[] = [];
+      let match: RegExpExecArray | null;
+      // A hostile pattern (e.g. `(a*)*`) must not hang the renderer.
+      let guard = 0;
+      while ((match = re.exec(haystack)) !== null) {
+        out.push({ index: match.index, length: match[0].length });
+        if (match[0].length === 0) re.lastIndex++;
+        if (++guard > 10_000) break;
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+  const h = opts.caseSensitive ? haystack : haystack.toLowerCase();
+  const needle = opts.caseSensitive ? q : q.toLowerCase();
+  const out: TextMatch[] = [];
   let i = 0;
   while (i <= h.length - needle.length) {
     const at = h.indexOf(needle, i);
     if (at < 0) break;
-    out.push(at);
+    out.push({ index: at, length: needle.length });
     i = at + Math.max(needle.length, 1);
   }
   return out;
+}
+
+/** Index-only view of `findTextMatches`, kept for simple callers. */
+export function findMatches(haystack: string, query: string, opts: FindOptions = {}): number[] {
+  return findTextMatches(haystack, query, opts).map((m) => m.index);
 }
 
 /** The structural bits of a ProseMirror node the mapping needs. */
@@ -33,7 +65,8 @@ export interface DocLike {
 export function matchPositions(
   doc: DocLike,
   query: string,
-  nth: number
+  nth: number,
+  opts: FindOptions = {}
 ): { from: number; to: number; total: number } | null {
   const chars: number[] = [];
   let plain = "";
@@ -46,14 +79,13 @@ export function matchPositions(
       chars.push(-1);
     }
   });
-  const hits = findMatches(plain, query);
+  const hits = findTextMatches(plain, query, opts);
   if (!hits.length) return { from: -1, to: -1, total: 0 };
-  const at = hits[((nth % hits.length) + hits.length) % hits.length];
-  if (at == null) return null;
+  const hit = hits[((nth % hits.length) + hits.length) % hits.length];
+  if (!hit) return null;
   let from = -1;
   let to = -1;
-  const len = query.trim().length;
-  for (let i = at; i < at + len; i++) {
+  for (let i = hit.index; i < Math.min(chars.length, hit.index + hit.length); i++) {
     const pos = chars[i];
     if (pos == null || pos < 0) continue;
     if (from < 0) from = pos;

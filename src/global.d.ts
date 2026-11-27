@@ -13,6 +13,10 @@ interface ElectronAPI {
   writeDocFileSync?: (filePath: string, text: string) => boolean;
   onDocsOpen?: (cb: (paths: string[]) => void) => void;
   takePendingDocs?: () => Promise<string[]>;
+  encryptText?: (text: string) => Promise<string | null>;
+  decryptText?: (encoded: string) => Promise<string | null>;
+  listDocBackups?: (filePath: string) => Promise<{ ok: boolean; items: { id: string; createdAt: string; size: number }[] }>;
+  readDocBackup?: (filePath: string, id: string) => Promise<{ ok: boolean; text?: string }>;
   setFileAssociation?: (ext: "md" | "txt" | "json" | "yaml" | "data" | "pdf", enabled: boolean) => Promise<{ ok: boolean; reason?: string }>;
   onDocsRequestClose?: (cb: () => void) => void;
   docsCloseResult?: (proceed: boolean) => void;

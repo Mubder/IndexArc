@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   writeDocFile: (/** @type {string} */ filePath, /** @type {string} */ text) => ipcRenderer.invoke("docs-write", filePath, text),
   writeDocFileSync: (/** @type {string} */ filePath, /** @type {string} */ text) => ipcRenderer.sendSync("docs-write-sync", filePath, text),
   takePendingDocs: () => ipcRenderer.invoke("docs-take-pending"),
+  encryptText: (/** @type {string} */ text) => ipcRenderer.invoke("text-encrypt", text),
+  decryptText: (/** @type {string} */ encoded) => ipcRenderer.invoke("text-decrypt", encoded),
+  listDocBackups: (/** @type {string} */ filePath) => ipcRenderer.invoke("docs-backups", filePath),
+  readDocBackup: (/** @type {string} */ filePath, /** @type {string} */ id) => ipcRenderer.invoke("docs-backup-read", filePath, id),
   onDocsOpen: (/** @type {(paths: string[]) => void} */ cb) => {
     ipcRenderer.on("docs-open", (_e, paths) => { try { cb(paths || []); } catch {} });
   },
