@@ -294,7 +294,51 @@ export interface TranslationDict {
   files_open_json: string;
   files_open_yaml: string;
   files_open_data: string;
+  files_open_pdf: string;
   files_open_confirm: string;
+  docs_title: string;
+  docs_open_window: string;
+  docs_open_btn: string;
+  docs_open_header: string;
+  docs_open_ellipsis: string;
+  docs_recent: string;
+  docs_nothing_open: string;
+  docs_no_earlier: string;
+  docs_saved: string;
+  docs_unsaved: string;
+  docs_readonly: string;
+  docs_undo: string;
+  docs_redo: string;
+  docs_save: string;
+  docs_source: string;
+  docs_rich: string;
+  docs_find: string;
+  docs_replace: string;
+  docs_replace_all: string;
+  docs_replace_placeholder: string;
+  docs_copy: string;
+  docs_add_scratchpad: string;
+  docs_find_placeholder: string;
+  docs_prev: string;
+  docs_next: string;
+  docs_close: string;
+  docs_close_ask: string;
+  docs_dont_save: string;
+  docs_cancel: string;
+  docs_password_placeholder: string;
+  docs_unlock_add: string;
+  docs_empty_hint: string;
+  docs_saved_status: string;
+  docs_save_failed: string;
+  docs_copied: string;
+  docs_added: string;
+  docs_add_failed: string;
+  docs_setup_first: string;
+  docs_bad_password: string;
+  docs_cannot_open: string;
+  docs_external_change: string;
+  docs_reload: string;
+  docs_reload_confirm: string;
   autolock_section_title: string;
 
   candidates_title: string;
@@ -1181,7 +1225,51 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     files_open_json: "JSON (.json)",
     files_open_yaml: "YAML (.yaml, .yml)",
     files_open_data: "CSV, XML, TOML, INI, and logs",
+    files_open_pdf: "PDF (read-only)",
     files_open_confirm: "Windows will ask you to confirm the default app.",
+    docs_title: "Files",
+    docs_open_window: "Open Files window",
+    docs_open_btn: "Open…",
+    docs_open_header: "OPEN",
+    docs_open_ellipsis: "Open…",
+    docs_recent: "RECENT",
+    docs_nothing_open: "Nothing open",
+    docs_no_earlier: "No earlier files",
+    docs_saved: "Saved",
+    docs_unsaved: "Unsaved",
+    docs_readonly: "Read-only",
+    docs_undo: "Undo",
+    docs_redo: "Redo",
+    docs_save: "Save",
+    docs_source: "Source",
+    docs_rich: "Rich",
+    docs_find: "Find",
+    docs_replace: "Replace",
+    docs_replace_all: "Replace all",
+    docs_replace_placeholder: "Replace with",
+    docs_copy: "Copy",
+    docs_add_scratchpad: "Add to scratchpad",
+    docs_find_placeholder: "Find in this file",
+    docs_prev: "Prev",
+    docs_next: "Next",
+    docs_close: "Close",
+    docs_close_ask: "Save changes before closing?",
+    docs_dont_save: "Don't save",
+    docs_cancel: "Cancel",
+    docs_password_placeholder: "Master password",
+    docs_unlock_add: "Unlock and add",
+    docs_empty_hint: "Open a markdown, JSON, YAML, text, or PDF file.",
+    docs_saved_status: "Saved",
+    docs_save_failed: "Save failed.",
+    docs_copied: "Copied",
+    docs_added: "Added to the scratchpad. The file itself is unchanged.",
+    docs_add_failed: "Could not add the note.",
+    docs_setup_first: "Create the master password in the vault window first.",
+    docs_bad_password: "Password was not accepted.",
+    docs_cannot_open: "That file cannot be opened here.",
+    docs_external_change: "This file changed on disk.",
+    docs_reload: "Reload from disk",
+    docs_reload_confirm: "Discard unsaved changes and reload this file from disk?",
 
     candidates_title: "Extraction Candidates",
     save_selected_btn: "Save Selected to Vault",
@@ -2065,7 +2153,51 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     files_open_json: "JSON",
     files_open_yaml: "YAML",
     files_open_data: "CSV و XML و TOML و INI والسجلات",
+    files_open_pdf: "PDF (للقراءة فقط)",
     files_open_confirm: "سيطلب ويندوز تأكيد التطبيق الافتراضي.",
+    docs_title: "الملفات",
+    docs_open_window: "فتح نافذة الملفات",
+    docs_open_btn: "فتح…",
+    docs_open_header: "مفتوحة",
+    docs_open_ellipsis: "فتح…",
+    docs_recent: "الأخيرة",
+    docs_nothing_open: "لا توجد ملفات مفتوحة",
+    docs_no_earlier: "لا توجد ملفات سابقة",
+    docs_saved: "محفوظ",
+    docs_unsaved: "غير محفوظ",
+    docs_readonly: "للقراءة فقط",
+    docs_undo: "تراجع",
+    docs_redo: "إعادة",
+    docs_save: "حفظ",
+    docs_source: "المصدر",
+    docs_rich: "منسّق",
+    docs_find: "بحث",
+    docs_replace: "استبدال",
+    docs_replace_all: "استبدال الكل",
+    docs_replace_placeholder: "استبدل بـ",
+    docs_copy: "نسخ",
+    docs_add_scratchpad: "أضف إلى المفكرة",
+    docs_find_placeholder: "ابحث في هذا الملف",
+    docs_prev: "السابق",
+    docs_next: "التالي",
+    docs_close: "إغلاق",
+    docs_close_ask: "حفظ التغييرات قبل الإغلاق؟",
+    docs_dont_save: "عدم الحفظ",
+    docs_cancel: "إلغاء",
+    docs_password_placeholder: "كلمة المرور الرئيسية",
+    docs_unlock_add: "فتح القفل والإضافة",
+    docs_empty_hint: "افتح ملف ماركداون أو JSON أو YAML أو نص أو PDF.",
+    docs_saved_status: "تم الحفظ",
+    docs_save_failed: "فشل الحفظ.",
+    docs_copied: "تم النسخ",
+    docs_added: "أُضيفت الملاحظة إلى المفكرة. الملف نفسه لم يتغير.",
+    docs_add_failed: "تعذرت إضافة الملاحظة.",
+    docs_setup_first: "أنشئ كلمة المرور الرئيسية في نافذة الخزنة أولاً.",
+    docs_bad_password: "لم تُقبل كلمة المرور.",
+    docs_cannot_open: "لا يمكن فتح هذا الملف هنا.",
+    docs_external_change: "تغيّر هذا الملف على القرص.",
+    docs_reload: "إعادة التحميل من القرص",
+    docs_reload_confirm: "تجاهل التغييرات غير المحفوظة وإعادة تحميل الملف من القرص؟",
 
     candidates_title: "المرشحون المستخرجون",
     save_selected_btn: "حفظ العناصر المحددة في الخزنة",

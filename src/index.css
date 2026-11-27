@@ -112,6 +112,10 @@
 .doc-readonly p { margin: 0 0 0.8em; }
 .doc-readonly h1, .doc-readonly h2, .doc-readonly h3 { margin: 0.8em 0 0.4em; }
 .doc-markdown .milkdown { color: var(--text); background: transparent; }
+.doc-markdown .ProseMirror-hideselection ::selection,
+.doc-markdown .ProseMirror-hideselection *::selection {
+  background: rgba(37, 99, 235, 0.45) !important;
+}
 .note-editor h1 { font-size: 1.6em; font-weight: 700; margin: 0.9em 0 0.4em; letter-spacing: -0.02em; }
 .note-editor h2 { font-size: 1.3em; font-weight: 600; margin: 0.8em 0 0.35em; }
 .note-editor blockquote {

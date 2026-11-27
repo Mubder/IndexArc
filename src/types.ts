@@ -155,6 +155,7 @@ export interface Settings {
   file_open_json?: boolean;
   file_open_yaml?: boolean;
   file_open_data?: boolean;
+  file_open_pdf?: boolean;
   // Write-only key fields: GET /api/settings never returns key material — it
   // returns these booleans instead. Key inputs in the UI keep drafts locally
   // and only send non-empty values.

@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getApiToken: () => ipcRenderer.invoke("get-api-token"),
   copyText: (/** @type {string} */ text, /** @type {number | undefined} */ clearAfterMs, /** @type {string | undefined} */ html) => ipcRenderer.invoke("copy-text", text, clearAfterMs, html),
   readDocFile: (/** @type {string} */ filePath) => ipcRenderer.invoke("docs-read", filePath),
+  pickDocFiles: () => ipcRenderer.invoke("docs-pick"),
   writeDocFile: (/** @type {string} */ filePath, /** @type {string} */ text) => ipcRenderer.invoke("docs-write", filePath, text),
   writeDocFileSync: (/** @type {string} */ filePath, /** @type {string} */ text) => ipcRenderer.sendSync("docs-write-sync", filePath, text),
   takePendingDocs: () => ipcRenderer.invoke("docs-take-pending"),
@@ -21,6 +22,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("docs-request-close", () => { try { cb(); } catch {} });
   },
   docsCloseResult: (/** @type {boolean} */ proceed) => ipcRenderer.send("docs-close-result", proceed),
+  openFilesWindow: () => ipcRenderer.invoke("docs-open-window"),
+  // Quit handshake for the Files window: main asks us to write every dirty
+  // file synchronously, then we acknowledge so the process can exit.
+  onDocsFlushRequest: (/** @type {() => void} */ cb) => {
+    ipcRenderer.on("docs-flush-request", () => { try { cb(); } catch {} });
+  },
+  docsFlushComplete: () => ipcRenderer.send("docs-flush-complete"),
   notifyScratchpadChanged: () => ipcRenderer.send("scratchpad-changed-from-doc"),
   onScratchpadChanged: (/** @type {() => void} */ cb) => {
     const handler = () => { try { cb(); } catch {} };

@@ -8,13 +8,17 @@ interface ElectronAPI {
   getApiToken: () => Promise<string | null>;
   copyText: (text: string, clearAfterMs?: number, html?: string) => Promise<boolean>;
   readDocFile?: (filePath: string) => Promise<DocFilePayload | null>;
+  pickDocFiles?: () => Promise<string[]>;
   writeDocFile?: (filePath: string, text: string) => Promise<{ ok: boolean; reason?: string }>;
   writeDocFileSync?: (filePath: string, text: string) => boolean;
   onDocsOpen?: (cb: (paths: string[]) => void) => void;
   takePendingDocs?: () => Promise<string[]>;
-  setFileAssociation?: (ext: "md" | "txt" | "json" | "yaml" | "data", enabled: boolean) => Promise<{ ok: boolean; reason?: string }>;
+  setFileAssociation?: (ext: "md" | "txt" | "json" | "yaml" | "data" | "pdf", enabled: boolean) => Promise<{ ok: boolean; reason?: string }>;
   onDocsRequestClose?: (cb: () => void) => void;
   docsCloseResult?: (proceed: boolean) => void;
+  openFilesWindow?: () => Promise<void>;
+  onDocsFlushRequest?: (cb: () => void) => void;
+  docsFlushComplete?: () => void;
   notifyScratchpadChanged?: () => void;
   onScratchpadChanged?: (cb: () => void) => () => void;
   spellcheckWords: (words: string[]) => Promise<string[]>;
@@ -35,16 +39,10 @@ interface DocFilePayload {
   name: string;
   ext: string;
   editable: boolean;
-  /** UTF-8 text for md/txt, plain text for pdf and docx. */
+  /** UTF-8 text for editable files. */
   text?: string;
-  /** Sanitized-later HTML for a read-only Word file. */
-  html?: string;
-  /** Base64 PDF bytes. Present only for pdf. */
+  /** Base64 PDF bytes. Present only for read-only .pdf files. */
   pdfBase64?: string;
-  /** indexarc-doc URL for the built-in PDF viewer. */
-  viewUrl?: string;
-  /** Raw .docx bytes, converted in the window. */
-  bytesBase64?: string;
 }
 
 interface UpdateCheckResult {

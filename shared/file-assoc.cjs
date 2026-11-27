@@ -8,6 +8,7 @@ const KINDS = {
   json: { exts: [".json", ".jsonc"], label: "JSON file" },
   yaml: { exts: [".yaml", ".yml"], label: "YAML file" },
   data: { exts: [".toml", ".ini", ".cfg", ".conf", ".xml", ".csv", ".tsv"], label: "Text data file" },
+  pdf: { exts: [".pdf"], label: "PDF file (read-only)" },
 };
 
 /**

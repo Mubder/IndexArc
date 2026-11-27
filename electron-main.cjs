@@ -600,7 +600,6 @@ app.on("web-contents-created", (_event, contents) => {
   });
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
   contents.on("will-navigate", (e, url) => {
-    if (typeof url === "string" && url.startsWith("indexarc-doc:")) return;
     if (!isAppUrl(url)) e.preventDefault();
   });
 });
@@ -1326,6 +1325,24 @@ function createWindow() {
   createTray();
 }
 
+handleTrusted("docs-pick", async () => {
+  const parent = docWindow && !docWindow.isDestroyed() ? docWindow : mainWindow;
+  const result = parent
+    ? await dialog.showOpenDialog(parent, {
+    title: "Open a text file",
+    properties: ["openFile", "multiSelections"],
+    filters: [{
+      name: "Text",
+      extensions: ["md", "markdown", "txt", "text", "log", "json", "jsonc", "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "properties", "xml", "svg", "csv", "tsv", "sql", "rst", "html", "htm", "css", "js", "mjs", "cjs", "ts", "tsx", "jsx", "py", "sh", "ps1", "bat", "cmd", "pdf"],
+    }],
+  })
+    : await dialog.showOpenDialog({
+      title: "Open a text file",
+      properties: ["openFile", "multiSelections"],
+    });
+  return result.canceled ? [] : result.filePaths;
+});
+
 handleTrusted("select-folder", async () => {
   const result = await dialog.showOpenDialog(/** @type {Win} */ (mainWindow), {
     properties: ["openDirectory"],
@@ -1449,9 +1466,25 @@ function readDocFile(filePath) {
   let buf;
   try { buf = fs.readFileSync(real); } catch { return Promise.resolve({ ok: false, reason: "read" }); }
   const base = { ok: true, path: real, name: classified.name, ext: classified.ext, editable: classified.editable };
-  if (!classified.editable) return Promise.resolve({ ok: false, reason: "type" });
+  if (!classified.editable) {
+    // Read-only formats: hand the renderer the bytes to display in the
+    // built-in viewer. Never accept a write for these paths.
+    if (classified.ext === ".pdf" && buf.length <= 25_000_000) {
+      return Promise.resolve({ ...base, pdfBase64: buf.toString("base64") });
+    }
+    return Promise.resolve({ ok: false, reason: buf.length > 25_000_000 ? "size" : "type" });
+  }
   if (buf.length > 5_000_000) return Promise.resolve({ ok: false, reason: "size" });
-  return Promise.resolve({ ...base, text: buf.toString("utf8") });
+  // Strip BOMs and honour UTF-16 ones. Files without a BOM are read as UTF-8.
+  let text;
+  if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) text = buf.toString("utf8", 3);
+  else if (buf[0] === 0xff && buf[1] === 0xfe) text = buf.toString("utf16le", 2);
+  else if (buf[0] === 0xfe && buf[1] === 0xff && buf.length % 2 === 0) {
+    const swapped = Buffer.from(buf);
+    swapped.swap16();
+    text = swapped.toString("utf16le", 2);
+  } else text = buf.toString("utf8");
+  return Promise.resolve({ ...base, text });
 }
 
 /** @param {string} filePath @param {string} text */
@@ -1461,16 +1494,24 @@ function writeDocFile(filePath, text) {
   try { root = getPortableRoot(); } catch { root = ""; }
   const classified = docFiles.classifyDocPath(root, filePath);
   if (!classified.ok || !classified.editable) return { ok: false, reason: classified.ok ? "readonly" : classified.reason };
+  let target = classified.path;
   try {
-    if (fs.existsSync(classified.path)) {
-      const real = fs.realpathSync(classified.path);
-      if (!docFiles.classifyDocPath(root, real).ok) return { ok: false, reason: "vault" };
-      fs.writeFileSync(real, text, "utf8");
-      return { ok: true };
+    if (fs.existsSync(target)) {
+      target = fs.realpathSync(target);
+      if (!docFiles.classifyDocPath(root, target).ok) return { ok: false, reason: "vault" };
     }
-    fs.writeFileSync(classified.path, text, "utf8");
+  } catch {
+    return { ok: false, reason: "path" };
+  }
+  // Write to a temporary file in the same directory, then rename. A crash
+  // mid-write can no longer leave the user's file truncated.
+  const tmp = `${target}.indexarc-${process.pid}-${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, text, "utf8");
+    fs.renameSync(tmp, target);
     return { ok: true };
   } catch {
+    try { fs.unlinkSync(tmp); } catch {}
     return { ok: false, reason: "write" };
   }
 }
@@ -1501,6 +1542,7 @@ function regQueryDefault(key) {
 handleTrusted("docs-read", (_e, filePath) => readDocFile(String(filePath || "")));
 handleTrusted("docs-write", (_e, filePath, text) => writeDocFile(String(filePath || ""), String(text ?? "")));
 handleTrusted("docs-take-pending", () => pendingDocPaths.splice(0));
+handleTrusted("docs-open-window", () => { openDocWindow([]); });
 handleTrusted("file-assoc", async (_e, kind, enabled) => {
   if (process.platform !== "win32") return { ok: false, reason: "platform" };
   const plan = fileAssoc.associationPlan(String(kind || ""), process.execPath);
@@ -1602,6 +1644,41 @@ function requestRendererFlush(timeoutMs) {
 }
 
 /**
+ * The Files window holds unsaved edits to on-disk files in renderer memory.
+ * Ask it to flush them synchronously before the process goes down; the
+ * renderer answers on "docs-flush-complete" once every dirty file is written.
+ * @param {number} timeoutMs
+ * @returns {Promise<void>}
+ */
+function requestDocsFlush(timeoutMs) {
+  return new Promise((resolve) => {
+    if (!docWindow || docWindow.isDestroyed()) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      try { ipcMain.removeListener("docs-flush-complete", onDone); } catch {}
+      resolve();
+    };
+    /** @param {import("electron").IpcMainEvent} e */
+    const onDone = (e) => {
+      if (docWindow && !docWindow.isDestroyed() && e.sender === docWindow.webContents) finish();
+    };
+    ipcMain.on("docs-flush-complete", onDone);
+    const timer = setTimeout(finish, timeoutMs);
+    timer.unref?.();
+    try {
+      docWindow.webContents.send("docs-flush-request");
+    } catch {
+      finish();
+    }
+  });
+}
+
+/**
  * @param {import("electron").Event | undefined} e
  * @param {number} timeoutMs
  */
@@ -1616,6 +1693,7 @@ function quitWithFlush(e, timeoutMs) {
   // the install folder, which the next reinstall's uninstaller deletes — this
   // keeps the machine-level copy (%APPDATA%) current.
   requestRendererFlush(timeoutMs)
+    .then(() => requestDocsFlush(timeoutMs))
     .then(() => stopBackend(timeoutMs))
     .then(() => {
       isQuiting = true;

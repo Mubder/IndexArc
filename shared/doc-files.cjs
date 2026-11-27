@@ -3,7 +3,7 @@
 // The vault directory is never a document, even if someone passes its path.
 const path = require("path");
 
-// Plain text the editor can read and write back. PDF and Word are not in this list.
+// Plain text the editor can read and write back.
 const EDITABLE = new Set([
   ".md", ".markdown", ".txt", ".text", ".log",
   ".json", ".jsonc", ".yaml", ".yml", ".toml",
@@ -13,6 +13,9 @@ const EDITABLE = new Set([
   ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
   ".py", ".sh", ".ps1", ".bat", ".cmd",
 ]);
+
+// Binary formats the Files window can display but never write back.
+const READONLY = new Set([".pdf"]);
 
 /**
  * @param {string} child
@@ -41,8 +44,9 @@ function classifyDocPath(vaultRoot, requested) {
   const root = vaultRoot ? path.resolve(vaultRoot) : "";
   if (root && isInside(abs, root)) return { ok: false, reason: "vault" };
   const ext = path.extname(abs).toLowerCase();
-  if (!EDITABLE.has(ext)) return { ok: false, reason: "type" };
-  return { ok: true, path: abs, ext, editable: true, name: path.basename(abs) };
+  if (EDITABLE.has(ext)) return { ok: true, path: abs, ext, editable: true, name: path.basename(abs) };
+  if (READONLY.has(ext)) return { ok: true, path: abs, ext, editable: false, name: path.basename(abs) };
+  return { ok: false, reason: "type" };
 }
 
-module.exports = { classifyDocPath, isInside, EDITABLE };
+module.exports = { classifyDocPath, isInside, EDITABLE, READONLY };

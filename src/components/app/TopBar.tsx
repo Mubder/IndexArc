@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import type { Tab, HealthReport } from "../../types";
-import { Search, X, Menu, Lock, Stethoscope, Sun, Moon, Globe } from "lucide-react";
+import { Search, X, Menu, Lock, Stethoscope, Sun, Moon, Globe, FolderOpen } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Settings, SystemStatus } from "../../types";
 import type { TranslationDict } from "../../utils/i18n";
@@ -8,6 +8,7 @@ import type { TranslationDict } from "../../utils/i18n";
 export interface TopBarProps {
   handleAsk: (e?: FormEvent<Element> | undefined) => Promise<void>;
   handleLockVault: () => Promise<void>;
+  onOpenFiles: () => void;
   health: HealthReport | null;
   query: string;
   setCmdPaletteOpen: Dispatch<SetStateAction<boolean>>;
@@ -25,7 +26,7 @@ export interface TopBarProps {
   vaultStatus: { is_locked: boolean; encryption_enabled: boolean; needs_setup?: boolean | undefined; migration_recommended?: boolean | undefined; } | null;
 }
 
-export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPaletteOpen, setHealthOpen, setQuery, setSidebarOpen, setTab, settings, sidebarOpen, status, t, theme, toggleLanguage, toggleTheme, vaultStatus }: TopBarProps) {
+export function TopBar({ handleAsk, handleLockVault, onOpenFiles, health, query, setCmdPaletteOpen, setHealthOpen, setQuery, setSidebarOpen, setTab, settings, sidebarOpen, status, t, theme, toggleLanguage, toggleTheme, vaultStatus }: TopBarProps) {
   return (
     <>
           {/* Top Bar - Fixed Layout */}
@@ -158,6 +159,17 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
                   <Lock className="w-4 h-4" />
                 </button>
               )}
+
+              {/* Files window */}
+              <button
+                onClick={onOpenFiles}
+                className="icon-btn p-2 rounded-xl border transition-all"
+                style={{ borderColor: "var(--border)", background: "var(--bg-surface)", color: "var(--text-dim)" }}
+                title={t("docs_open_window")}
+                aria-label={t("docs_open_window")}
+              >
+                <FolderOpen className="w-4 h-4" />
+              </button>
 
               {/* App Health */}
               <button

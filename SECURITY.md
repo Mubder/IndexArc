@@ -6,7 +6,7 @@ As a portable personal vault, maintaining maximum security for user data and zer
 
 Related documents: [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) (threat model) and [docs/ASVS-L2.md](docs/ASVS-L2.md) (OWASP ASVS L2 and Electron checklist mapping, with evidence and known gaps).
 
----
+***
 
 ## Reporting a vulnerability
 
@@ -16,46 +16,46 @@ Related documents: [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) (threat model) a
 
 Report privately through GitHub private vulnerability reporting (Security Advisories) for this repository:
 
-**https://github.com/Mubder/IndexArc/security/advisories/new**
+**<https://github.com/Mubder/IndexArc/security/advisories/new>**
 
-This is the preferred channel. If you cannot use GitHub, email [b.alfaris@gmail.com](mailto:b.alfaris@gmail.com) instead. The advisory form keeps the report private between you and the maintainers, lets us collaborate on a fix in a private fork, and is how CVEs are requested. A machine-readable pointer is published at [`public/.well-known/security.txt`](public/.well-known/security.txt) (RFC 9116).
+This is the preferred channel. If you cannot use GitHub, email <b.alfaris@gmail.com> instead. The advisory form keeps the report private between you and the maintainers, lets us collaborate on a fix in a private fork, and is how CVEs are requested. A machine-readable pointer is published at [`public/.well-known/security.txt`](public/.well-known/security.txt) (RFC 9116).
 
 Please include:
 
-- the IndexArc version (Settings → Updates → "Check now" shows it, or see the installer file name) and OS;
-- the affected component (Electron shell, vault server, renderer, storage, updater, build/CI);
-- steps to reproduce or a proof of concept, and the impact you observed;
-- whether the issue needs local access, a malicious file, a malicious web page, or network position.
+* the IndexArc version (Settings → Updates → "Check now" shows it, or see the installer file name) and OS;
+* the affected component (Electron shell, vault server, renderer, storage, updater, build/CI);
+* steps to reproduce or a proof of concept, and the impact you observed;
+* whether the issue needs local access, a malicious file, a malicious web page, or network position.
 
 Do not include real secrets or another person's data in a report. Reports in English or Arabic are welcome.
 
 ### Response targets
 
-| Step | Target |
-|---|---|
-| Acknowledge the report | within **3 business days** |
-| Triage (confirm, assign severity, share a plan) | within **7 days** |
-| Fix released — critical | within **14 days** of triage |
-| Fix released — high | within **30 days** of triage |
-| Fix released — medium | within **90 days** of triage |
-| Low / hardening | next regular release, or documented as accepted risk |
+| Step                                            | Target                                               |
+| ----------------------------------------------- | ---------------------------------------------------- |
+| Acknowledge the report                          | within **3 business days**                           |
+| Triage (confirm, assign severity, share a plan) | within **7 days**                                    |
+| Fix released — critical                         | within **14 days** of triage                         |
+| Fix released — high                             | within **30 days** of triage                         |
+| Fix released — medium                           | within **90 days** of triage                         |
+| Low / hardening                                 | next regular release, or documented as accepted risk |
 
 Severity uses CVSS v3.1 as a guide, judged against [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md). We keep you updated at least at each step above and tell you if a target will slip, and why.
 
 ### Coordinated disclosure
 
-- Default embargo is **90 days** from the report, or until a fix is released, whichever comes first. We may agree a shorter or longer window with you, for example if a fix is ready early or depends on an upstream project (Electron, Node, a dependency).
-- When a fix ships, we publish a **GitHub Security Advisory** for the repository and request a **CVE** through GitHub (GitHub is a CVE Numbering Authority) for any issue that affects released builds.
-- Reporters are credited in the advisory unless they ask not to be.
-- If an issue is being actively exploited, we may publish mitigations before the embargo ends.
+* Default embargo is **90 days** from the report, or until a fix is released, whichever comes first. We may agree a shorter or longer window with you, for example if a fix is ready early or depends on an upstream project (Electron, Node, a dependency).
+* When a fix ships, we publish a **GitHub Security Advisory** for the repository and request a **CVE** through GitHub (GitHub is a CVE Numbering Authority) for any issue that affects released builds.
+* Reporters are credited in the advisory unless they ask not to be.
+* If an issue is being actively exploited, we may publish mitigations before the embargo ends.
 
 ### Safe harbor
 
 We consider security research carried out in good faith under this policy to be authorized. We will not pursue or support legal action against you for:
 
-- testing IndexArc on systems and data you own or are allowed to test;
-- circumventing protections in IndexArc itself as needed to show a vulnerability;
-- reporting through the channel above and giving us reasonable time to fix before public disclosure.
+* testing IndexArc on systems and data you own or are allowed to test;
+* circumventing protections in IndexArc itself as needed to show a vulnerability;
+* reporting through the channel above and giving us reasonable time to fix before public disclosure.
 
 Please avoid privacy violations, data destruction and service disruption, do not access data that is not yours, and stop and report as soon as you have shown the issue. If in doubt about whether something is in scope, ask in the advisory first.
 
@@ -63,18 +63,19 @@ Out of scope: findings that need an attacker who already has administrator/kerne
 
 ### Supported versions
 
-| Version | Supported |
-|---|---|
-| 2.1.x | Yes — security fixes |
-| < 2.1 | No — please upgrade |
+| Version | Supported            |
+| ------- | -------------------- |
+| 2.1.x   | Yes — security fixes |
+| < 2.1   | No — please upgrade  |
 
----
+***
 
 ## 1. Security Architecture & Threat Model
 
 IndexArc is designed with a **local-first, local-only by default** security posture. The full threat model is in [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md).
 
 ### 🛡️ Local Encryption At Rest
+
 * **Cipher:** AES-256-GCM with a fresh random 12-byte IV per write and a mandatory 16-byte authentication tag (shorter tags or IVs are rejected on decrypt).
 * **Key Derivation:** Argon2id (64 MiB memory, t=3, p=4 — Bitwarden-aligned), parameters recorded in every envelope and bound-checked on read, so a tampered file cannot weaken derivation. Vaults created before 2.1 used PBKDF2-HMAC-SHA256 (100,000 iterations); they are re-derived to Argon2id transparently on the next successful unlock.
 * **Storage layout (v2):** `data/vault.json` is a small sealed header that serves as the unlock key check. Entries and the semantic index live in `data/vault.db` (SQLite), one row per record, each sealed separately with additional authenticated data `indexarc:v2:<table>:<id>` so a ciphertext cannot be moved to another row. Notes, archive, revisions and scan sessions are separate encrypted JSON files. All of them use one random vault salt, so a single derived key opens them all. See [docs/adr/0001-storage-engine.md](docs/adr/0001-storage-engine.md), including what metadata stays visible at rest (row counts and sizes) and the known limitation that a row rolled back to an older sealed copy is not detected.
@@ -86,9 +87,11 @@ IndexArc is designed with a **local-first, local-only by default** security post
 * **Lost password:** in released builds a lost master password means the data cannot be recovered. A recovery key is being added (see the threat model): whoever holds the recovery code and a copy of the data files can open the vault, so the code must be stored as carefully as the password.
 
 ### 📍 Data outside the portable folder
+
 IndexArc keeps its data in the portable root, with these deliberate exceptions for crash/reinstall recovery: emergency snapshots in `%APPDATA%\IndexArc\emergency` and `~/.IndexArc/emergency` (same encryption as the vault), the vault-root pointer in `HKCU\Software\IndexArc` and `%APPDATA%\IndexArc\vault-root.json`, and Chromium's renderer profile.
 
 ### 🌐 Network & Process Isolation
+
 * **Process separation:** the Electron shell, the vault server (an Electron `utilityProcess`), and the renderer are separate processes. The renderer runs with `sandbox`, `contextIsolation` and no Node integration, and reaches the shell only through a small set of sender-checked IPC calls. Scanned Office/PDF documents are parsed in a worker thread with memory and time limits.
 * **Localhost Binding:** The vault server binds exclusively to `127.0.0.1` (localhost). It does not accept remote incoming network traffic.
 * **Pairing token:** the shell creates a random 256-bit token at every launch and passes it only to the server process. Every `/api` call must carry it; requests with a foreign `Host` header or `Sec-Fetch-Site: cross-site` are rejected. Before showing any window content, the shell checks that the server on the port proves knowledge of the token.
@@ -96,58 +99,70 @@ IndexArc keeps its data in the portable root, with these deliberate exceptions f
 * **AI API Routing:** Credentials for external cloud providers (such as Gemini, Groq, OpenRouter, Anthropic, or custom OpenAI endpoints) are stored locally (OS-wrapped in packaged builds) and injected only during backend API calls. They are never sent back to the frontend UI or exposed in server logs.
 
 ### 🔄 Updates and build integrity
+
 * **Auto-update:** update checks are off by default and run only when the user asks. Updates come from GitHub Releases. Download and install happen only on installed Windows builds that are code-signed, where the update's signature is verified against the publisher; other builds only link to the release page. **Release builds are currently unsigned**, so no build installs updates by itself yet (see [docs/RELEASE.md](docs/RELEASE.md)).
 * **Package integrity:** Electron fuses are set (no run-as-Node, no `NODE_OPTIONS`, no inspector flags, asar integrity, load app only from asar), and the unpacked server bundle is hash-checked against a manifest inside `app.asar` before it runs.
 * **Supply chain:** CI pins every GitHub Action to a commit SHA, runs with read-only permissions by default, fails on high/critical `npm audit` findings, and attaches a CycloneDX SBOM to each release. Dependabot updates npm packages and Actions weekly.
 
----
+***
 
 ## 2. Zero-Secrets Policy & Git Hygiene
 
 We enforce a strict **Zero-Secrets Policy** for the IndexArc Git repository. No actual vault data, settings, logs, `.env` configurations, or private API keys must ever be committed to the repository history.
 
 ### 🔍 Repository Cleanliness Baseline Audit
+
 A security sweep of the repository and its commit history was performed as a baseline.
+
 * **Result at the time of the sweep:** no secrets, active API keys, raw password parameters, or personal data files were found in tracked code or past commits. This is a point-in-time result; contributors keep it true by following section 3.
 * **Excluded Metadata:** IDE and developer agent metadata (such as `.zcode/`) are ignored to keep the commit logs uncluttered and strictly focused on production source code.
 
 ### 🚫 Ignored Directories and Files
+
 The project uses an extensive `.gitignore` specification to prevent accidental commits of local state. The following files are **never tracked by Git** and are **excluded from the packaged Desktop builds**:
 
-| Directory / File | Purpose | Why It's Ignored |
-| :--- | :--- | :--- |
-| `data/` | Vault store (`vault.json` header, `vault.db`, notes, scan sessions, audit log) | Contains actual user secrets, notes, and vector representations. |
-| `config/` | Application configurations (`settings.json`, `settings.key.enc`) | Holds configured AI credentials (e.g., Gemini/OpenAI API keys). |
-| `backups/` | Automated timestamped copies and emergency backups | Contains plaintext or encrypted historical vault state. |
-| `logs/` | Server and crash logs | May accidentally cache structural references or metadata. |
-| `.env` / `.env.*` | Development-specific environment overrides | Used by developers to inject active API overrides locally. |
-| `*.log` | Runtime node/Express server logs (`server-err.log`, etc.) | Logs local process tracebacks and server runtime telemetry. |
-| `dist/` / `dist-desktop/` | Built SPA bundles and native electron builds | Local build artifacts. |
-| `.zcode/` | AI agent plans and tracking session state | Temporary development logs. |
+| Directory / File          | Purpose                                                                        | Why It's Ignored                                                 |
+| :------------------------ | :----------------------------------------------------------------------------- | :--------------------------------------------------------------- |
+| `data/`                   | Vault store (`vault.json` header, `vault.db`, notes, scan sessions, audit log) | Contains actual user secrets, notes, and vector representations. |
+| `config/`                 | Application configurations (`settings.json`, `settings.key.enc`)               | Holds configured AI credentials (e.g., Gemini/OpenAI API keys).  |
+| `backups/`                | Automated timestamped copies and emergency backups                             | Contains plaintext or encrypted historical vault state.          |
+| `logs/`                   | Server and crash logs                                                          | May accidentally cache structural references or metadata.        |
+| `.env` / `.env.*`         | Development-specific environment overrides                                     | Used by developers to inject active API overrides locally.       |
+| `*.log`                   | Runtime node/Express server logs (`server-err.log`, etc.)                      | Logs local process tracebacks and server runtime telemetry.      |
+| `dist/` / `dist-desktop/` | Built SPA bundles and native electron builds                                   | Local build artifacts.                                           |
+| `.zcode/`                 | AI agent plans and tracking session state                                      | Temporary development logs.                                      |
 
----
+***
 
 ## 3. Contributor Guidelines: Avoiding Secret Leaks
 
 To maintain a secure repository, please adhere to the following best practices during development:
 
 ### 💡 1. Use Environment Overrides Safely
+
 If you need to use an active cloud API key during backend testing, place it inside a local `.env` file in the project root:
+
 ```env
 GEMINI_API_KEY=your_actual_api_key_here
 ```
+
 Dotenv is configured locally and will inject this override for development without writing keys into `config/settings.json` or tracking them.
 
 ### 🧹 2. Verify Your Staged Changes Before Committing
+
 Always review your diffs before committing:
+
 ```bash
 # Review exact diffs staged for commit
 git diff --cached
 ```
+
 Check that no real settings, credentials, or databases are listed as additions.
 
 ### 🧪 3. Never Log Sensitive Variables
+
 When writing backend logic or service providers, ensure that log statements do not print raw secret payloads:
+
 ```typescript
 // 👍 Safe (logging metadata/count)
 addLog("DB", `Successfully loaded ${entries.length} vault entries.`);
@@ -156,15 +171,15 @@ addLog("DB", `Successfully loaded ${entries.length} vault entries.`);
 addLog("API", `Sending request with key: ${apiKey}`); // NEVER DO THIS
 ```
 
----
+***
 
 ## 3b. Cloud Egress Gates (enforced in code)
 
 Every path that sends vault-derived text to an AI provider passes through
 `cloudEgressAllowed()` in `server/ai/providers.ts`:
 
-- **Loopback providers (Ollama / LM Studio on 127.0.0.1)** are always allowed — data stays on the machine.
-- **Cloud providers** (Gemini/OpenAI/Groq/OpenRouter/Anthropic, or a "local" provider pointed at a non-loopback host) are **blocked until the user explicitly enables `ai_cloud_consent` in Settings → AI**.
+* **Loopback providers (Ollama / LM Studio on 127.0.0.1)** are always allowed — data stays on the machine.
+* **Cloud providers** (Gemini/OpenAI/Groq/OpenRouter/Anthropic, or a "local" provider pointed at a non-loopback host) are **blocked until the user explicitly enables `ai_cloud_consent` in Settings → AI**.
 
 Gated paths (regression-tested in `server/ai/providers.test.ts` and
 `server/egress.test.ts`): paste/note classification (`analyzePaste`),
@@ -189,7 +204,7 @@ Additionally: secret **values** never enter cloud embedding input at all (see
 (`confirm_word: "ENCRYPT"`) so a hostile token-holder cannot one-call-encrypt
 the vault under an attacker password.
 
----
+***
 
 ## 3c. Endpoint Gating Matrix
 

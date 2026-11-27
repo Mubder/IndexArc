@@ -527,7 +527,7 @@ return (
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
-          <TopBar handleAsk={handleAsk} handleLockVault={handleLockVault} health={health} query={query} setCmdPaletteOpen={setCmdPaletteOpen} setHealthOpen={setHealthOpen} setQuery={setQuery} setSidebarOpen={setSidebarOpen} setTab={setTab} settings={settings} sidebarOpen={sidebarOpen} status={status} t={t} theme={theme} toggleLanguage={toggleLanguage} toggleTheme={toggleTheme} vaultStatus={vaultStatus} />
+          <TopBar handleAsk={handleAsk} handleLockVault={handleLockVault} onOpenFiles={() => { void window.electronAPI?.openFilesWindow?.(); }} health={health} query={query} setCmdPaletteOpen={setCmdPaletteOpen} setHealthOpen={setHealthOpen} setQuery={setQuery} setSidebarOpen={setSidebarOpen} setTab={setTab} settings={settings} sidebarOpen={sidebarOpen} status={status} t={t} theme={theme} toggleLanguage={toggleLanguage} toggleTheme={toggleTheme} vaultStatus={vaultStatus} />
           <ScratchpadConflictBanner t={t} />
 
           {/* Content Area */}

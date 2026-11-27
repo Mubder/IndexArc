@@ -21,8 +21,10 @@ describe("classifyDocPath", () => {
     expect(yaml.ok && yaml.editable).toBe(true);
   });
 
-  it("refuses pdf and word files", () => {
-    expect(classifyDocPath(root, path.resolve("/notes/a.pdf")).ok).toBe(false);
+  it("allows pdf as read-only but refuses word files", () => {
+    const pdf = classifyDocPath(root, path.resolve("/notes/a.pdf"));
+    expect(pdf.ok).toBe(true);
+    if (pdf.ok) expect(pdf.editable).toBe(false);
     expect(classifyDocPath(root, path.resolve("/notes/a.docx")).ok).toBe(false);
   });
 
