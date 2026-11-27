@@ -467,7 +467,7 @@ export function miscRoutes(ctx: RouteContext) {
     const title = req.body?.title === undefined ? undefined : String(req.body.title);
     if (title !== undefined) {
       try {
-        const tab = store.renameScratchpadTab(req.params.id, title);
+        const tab = store.renameScratchpadTab(req.params.id, title, { automatic: req.body?.title_custom === false });
         if (!tab) return res.status(404).json({ error: "Tab not found" });
         return res.json({ tab });
       } catch (e: any) {

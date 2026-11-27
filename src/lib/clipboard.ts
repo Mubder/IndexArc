@@ -25,16 +25,18 @@ export function setSecretClipboardClearSeconds(seconds: number | undefined): voi
 
 export async function copyTextToClipboard(
   text: string,
-  opts: { sensitive?: boolean } = {}
+  opts: { sensitive?: boolean; html?: string } = {}
 ): Promise<boolean> {
   const value = String(text ?? "");
   if (!value) return false;
   const clearAfterMs = opts.sensitive ? secretClearMs : 0;
+  // Secrets stay plain text. Formatted HTML is only for notes and documents.
+  const html = opts.sensitive ? undefined : opts.html;
 
   const bridge = window.electronAPI;
   if (bridge?.copyText) {
     try {
-      if (await bridge.copyText(value, clearAfterMs)) return true;
+      if (await bridge.copyText(value, clearAfterMs, html)) return true;
     } catch {
       /* fall through */
     }

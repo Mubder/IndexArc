@@ -2,7 +2,7 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { NoteBidiMode } from "../../types";
 import type { TranslationDict } from "../../utils/i18n";
 import type { Editor } from "@tiptap/react";
-import { Languages, AlignLeft, AlignRight, ArrowUp, ArrowDown, Undo, Redo, Bold, Italic, Underline, Palette, Highlighter, Eraser, ClipboardPaste } from "lucide-react";
+import { Languages, AlignLeft, AlignRight, ArrowUp, ArrowDown, Undo, Redo, Bold, Italic, Underline, Palette, Highlighter, Eraser, ClipboardPaste, Heading1, Heading2, List, ListOrdered, Quote } from "lucide-react";
 import { TEXT_COLORS, HIGHLIGHT_COLORS } from "./constants";
 import { getTranslation } from "../../utils/i18n";
 
@@ -130,6 +130,14 @@ export function FormattingToolbar({ bidiMode, canScrollDown, canScrollUp, detect
 
           <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
 
+          <button type="button" onClick={() => tiptap?.chain().focus().toggleHeading({ level: 1 }).run()} className="px-1.5 py-1 rounded-lg text-[11px] font-semibold" style={{ color: tiptap?.isActive("heading", { level: 1 }) ? "var(--accent-bright)" : "var(--text-dim)", background: tiptap?.isActive("heading", { level: 1 }) ? "var(--accent-bg)" : "transparent" }} title="H1"><Heading1 className="w-3.5 h-3.5" /></button>
+          <button type="button" onClick={() => tiptap?.chain().focus().toggleHeading({ level: 2 }).run()} className="px-1.5 py-1 rounded-lg text-[11px] font-semibold" style={{ color: tiptap?.isActive("heading", { level: 2 }) ? "var(--accent-bright)" : "var(--text-dim)", background: tiptap?.isActive("heading", { level: 2 }) ? "var(--accent-bg)" : "transparent" }} title="H2"><Heading2 className="w-3.5 h-3.5" /></button>
+          <button type="button" onClick={() => tiptap?.chain().focus().toggleBulletList().run()} className="p-1.5 rounded-lg" style={{ color: tiptap?.isActive("bulletList") ? "var(--accent-bright)" : "var(--text-dim)", background: tiptap?.isActive("bulletList") ? "var(--accent-bg)" : "transparent" }} title={t("slash_bullet_list")}><List className="w-3.5 h-3.5" /></button>
+          <button type="button" onClick={() => tiptap?.chain().focus().toggleOrderedList().run()} className="p-1.5 rounded-lg" style={{ color: tiptap?.isActive("orderedList") ? "var(--accent-bright)" : "var(--text-dim)", background: tiptap?.isActive("orderedList") ? "var(--accent-bg)" : "transparent" }} title="1."><ListOrdered className="w-3.5 h-3.5" /></button>
+          <button type="button" onClick={() => tiptap?.chain().focus().toggleBlockquote().run()} className="p-1.5 rounded-lg" style={{ color: tiptap?.isActive("blockquote") ? "var(--accent-bright)" : "var(--text-dim)", background: tiptap?.isActive("blockquote") ? "var(--accent-bg)" : "transparent" }} title={t("slash_quote")}><Quote className="w-3.5 h-3.5" /></button>
+
+          <div className="w-px h-4 mx-0.5" style={{ background: "var(--border)" }} />
+
           {/* Bold / Italic / Underline */}
           <button
             type="button"
@@ -193,7 +201,7 @@ export function FormattingToolbar({ bidiMode, canScrollDown, canScrollUp, detect
             </div>
             {showTextColorPicker && (
               <div
-                className="absolute bottom-full left-0 mb-1 flex gap-1 p-1.5 rounded-lg z-50"
+                className="absolute top-full left-0 mt-1 flex gap-1 p-1.5 rounded-lg z-50"
                 style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border)" }}
                 onMouseDown={(e) => e.preventDefault()}
               >
@@ -244,7 +252,7 @@ export function FormattingToolbar({ bidiMode, canScrollDown, canScrollUp, detect
             </div>
             {showHighlightPicker && (
               <div
-                className="absolute bottom-full left-0 mb-1 flex gap-1 p-1.5 rounded-lg z-50"
+                className="absolute top-full left-0 mt-1 flex gap-1 p-1.5 rounded-lg z-50"
                 style={{ background: "var(--bg-surface-solid)", border: "1px solid var(--border)" }}
                 onMouseDown={(e) => e.preventDefault()}
               >

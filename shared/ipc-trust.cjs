@@ -22,12 +22,16 @@ function isAppUrl(url, port) {
 
 /**
  * @param {{ sender?: any; senderFrame?: any } | null | undefined} e an IPC event (invoke or send)
- * @param {{ isDestroyed(): boolean; webContents: any } | null | undefined} mainWindow
+ * @param {{ isDestroyed(): boolean; webContents: any } | { isDestroyed(): boolean; webContents: any }[] | null | undefined} windows
+ *        the vault window, or that window plus the document window
  * @param {number | string} port
  */
-function isTrustedSender(e, mainWindow, port) {
+function isTrustedSender(e, windows, port) {
   try {
-    if (!e || !mainWindow || mainWindow.isDestroyed() || e.sender !== mainWindow.webContents) return false;
+    if (!e) return false;
+    const list = Array.isArray(windows) ? windows : windows ? [windows] : [];
+    const owner = list.find((w) => w && !w.isDestroyed() && e.sender === w.webContents);
+    if (!owner) return false;
     const frame = e.senderFrame;
     if (!frame || frame !== e.sender.mainFrame) return false;
     return isAppUrl(frame.url, port);

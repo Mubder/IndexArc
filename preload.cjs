@@ -9,7 +9,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
   startOllama: () => ipcRenderer.invoke("start-ollama"),
   openExternal: (/** @type {string} */ url) => ipcRenderer.invoke("open-external", url),
   getApiToken: () => ipcRenderer.invoke("get-api-token"),
-  copyText: (/** @type {string} */ text, /** @type {number | undefined} */ clearAfterMs) => ipcRenderer.invoke("copy-text", text, clearAfterMs),
+  copyText: (/** @type {string} */ text, /** @type {number | undefined} */ clearAfterMs, /** @type {string | undefined} */ html) => ipcRenderer.invoke("copy-text", text, clearAfterMs, html),
+  readDocFile: (/** @type {string} */ filePath) => ipcRenderer.invoke("docs-read", filePath),
+  writeDocFile: (/** @type {string} */ filePath, /** @type {string} */ text) => ipcRenderer.invoke("docs-write", filePath, text),
+  writeDocFileSync: (/** @type {string} */ filePath, /** @type {string} */ text) => ipcRenderer.sendSync("docs-write-sync", filePath, text),
+  takePendingDocs: () => ipcRenderer.invoke("docs-take-pending"),
+  onDocsOpen: (/** @type {(paths: string[]) => void} */ cb) => {
+    ipcRenderer.on("docs-open", (_e, paths) => { try { cb(paths || []); } catch {} });
+  },
+  onDocsRequestClose: (/** @type {() => void} */ cb) => {
+    ipcRenderer.on("docs-request-close", () => { try { cb(); } catch {} });
+  },
+  docsCloseResult: (/** @type {boolean} */ proceed) => ipcRenderer.send("docs-close-result", proceed),
+  notifyScratchpadChanged: () => ipcRenderer.send("scratchpad-changed-from-doc"),
+  onScratchpadChanged: (/** @type {() => void} */ cb) => {
+    const handler = () => { try { cb(); } catch {} };
+    ipcRenderer.on("scratchpad-changed", handler);
+    return () => ipcRenderer.removeListener("scratchpad-changed", handler);
+  },
+  setFileAssociation: (/** @type {string} */ ext, /** @type {boolean} */ enabled) => ipcRenderer.invoke("file-assoc", ext, enabled),
   spellcheckWords: (/** @type {string[]} */ words) => ipcRenderer.invoke("spellcheck-words", words),
   spellcheckSuggest: (/** @type {string} */ word) => ipcRenderer.invoke("spellcheck-suggest", word),
   addCustomWord: (/** @type {string} */ word) => ipcRenderer.invoke("add-custom-word", word),

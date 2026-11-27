@@ -2473,17 +2473,19 @@ export class VaultStore {
     return n;
   }
 
-  renameScratchpadTab(id: string, title: string): any | null {
+  renameScratchpadTab(id: string, title: string, opts: { automatic?: boolean } = {}): any | null {
     const active = this.getScratchpad();
     const target = active.find((t: any) => t.id === id);
     if (!target) return null;
     if (target.protected && target.title !== title) {
       throw new ProtectedTabError([id]);
     }
-    // An explicit rename: the title stops following the note's first line
-    // (persisted, so it survives a lock / restart, not just this window).
+    // A first-line name must not overwrite a name the user typed, and must
+    // not set the flag that freezes the title.
+    if (opts.automatic && target.title_custom) return target;
+    const title_custom = opts.automatic ? !!target.title_custom : true;
     const saved = this.saveScratchpad(
-      active.map((t: any) => (t.id === id ? { ...t, title, title_custom: true } : t)),
+      active.map((t: any) => (t.id === id ? { ...t, title, title_custom } : t)),
       { force: true }
     );
     return saved.find((t: any) => t.id === id) || null;

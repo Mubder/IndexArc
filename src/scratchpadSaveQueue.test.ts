@@ -12,6 +12,9 @@ import {
   __resetScratchpadSaveQueueForTests,
   purgeScratchpadMirrorOnLock,
   forgetScratchpadTab,
+  getScratchpadConflicts,
+  getUnsyncedScratchpadTabs,
+  resolveScratchpadConflict,
 } from "./scratchpadSaveQueue";
 import type { ScratchTab } from "./types";
 
@@ -291,5 +294,42 @@ describe("scratchpadSaveQueue", () => {
     enqueueScratchpadSave([{ ...loaded, content: "<p>xyz</p>" }]);
     await drainScratchpadSaves();
     expect(conflictsRouted).toBe(0);
+  });
+
+  it("retries a save when only the rev moved and the server text is unchanged", async () => {
+    revServer({ a: { content: "<p>x</p>", rev: 2 } });
+    setSyncedScratchpadTabs([{ ...tab("a", "<p>x</p>"), rev: 1 }]);
+    enqueueScratchpadSave([tab("a", "<p>xy</p>")]);
+    await drainScratchpadSaves();
+    expect(conflictsRouted).toBe(0);
+    expect(getScratchpadConflicts()).toEqual([]);
+    const bodies = (globalThis as any).fetch.mock.calls.map((c: any[]) => JSON.parse(c[1].body));
+    expect(bodies.some((b: any) => b.base_rev === 2 && b.content === "<p>xy</p>")).toBe(true);
+  });
+
+  it("a 409 keeps the unsaved text and does not mark it saved", async () => {
+    revServer({ a: { content: "<p>server</p>", rev: 4 } });
+    setSyncedScratchpadTabs([{ ...tab("a", "<p>old</p>"), rev: 1 }]);
+    enqueueScratchpadSave([tab("a", "<p>mine</p>")]);
+    await drainScratchpadSaves();
+    expect(conflictsRouted).toBe(1);
+    expect(getScratchpadConflicts()[0]?.mine.content).toBe("<p>mine</p>");
+    expect(getUnsyncedScratchpadTabs().map((t) => t.content)).toEqual(["<p>mine</p>"]);
+    const calls = (globalThis as any).fetch.mock.calls.length;
+    enqueueScratchpadSave([tab("a", "<p>mine</p>")]);
+    await drainScratchpadSaves();
+    expect((globalThis as any).fetch.mock.calls.length).toBe(calls);
+  });
+
+  it("keep-mine force-saves the held text", async () => {
+    revServer({ a: { content: "<p>server</p>", rev: 4 } });
+    setSyncedScratchpadTabs([{ ...tab("a", "<p>old</p>"), rev: 1 }]);
+    enqueueScratchpadSave([tab("a", "<p>mine</p>")]);
+    await drainScratchpadSaves();
+    resolveScratchpadConflict("a", true);
+    await drainScratchpadSaves();
+    expect(getScratchpadConflicts()).toEqual([]);
+    const bodies = (globalThis as any).fetch.mock.calls.map((c: any[]) => JSON.parse(c[1].body));
+    expect(bodies.some((b: any) => b.force === true && b.content === "<p>mine</p>")).toBe(true);
   });
 });

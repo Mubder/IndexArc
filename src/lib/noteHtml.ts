@@ -119,7 +119,40 @@ export function htmlToPlainText(html: string): string {
   // Sanitize before the detached-div parse: strips event handlers AND
   // resource-loading elements (img etc.), so extraction can never trigger
   // a network fetch or leave executable attributes behind.
-  d.innerHTML = sanitizeNoteHtmlForStorage(html).replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n</$1>");
-  const text = d.textContent || d.innerText || "";
-  return text.replace(/[\u00A0\u1680\u180E\u2000-\u200B\u202F\u205F\u3000]/g, " ");
+  d.innerHTML = sanitizeNoteHtmlForStorage(html)
+    // Shift+Enter is a <br>. It has to become a newline before the block
+    // closer does, or the Copy button joins those lines into one.
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr|blockquote|pre)>/gi, "\n</$1>");
+  const text = (d.textContent || "").replace(/[\u00A0\u1680\u180E\u2000-\u200B\u202F\u205F\u3000]/g, " ");
+  // The last block closer adds one trailing newline. Further trailing
+  // newlines are that terminator plus nothing else — drop the terminator
+  // so a note that does not end on a blank line copies without one.
+  return text.replace(/\n$/g, "");
+}
+
+/**
+ * Drop the empty paragraph rich-text apps insert between every real paragraph.
+ * A mixed document (some lines already touching) keeps its blank lines.
+ */
+export function normalizePastedHtml(html: string): string {
+  if (!html || typeof DOMParser === "undefined") return html;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const blocks = [...doc.body.children];
+  const empty = (el: Element) => !((el.textContent || "").replace(/\u00a0/g, " ").trim());
+  const gaps: number[] = [];
+  let seen = false;
+  let empties = 0;
+  for (const el of blocks) {
+    if (empty(el)) {
+      if (seen) empties++;
+    } else {
+      if (seen) gaps.push(empties);
+      empties = 0;
+      seen = true;
+    }
+  }
+  if (!(gaps.length > 0 && gaps.every((g) => g === 1))) return html;
+  for (const el of blocks) if (empty(el)) el.remove();
+  return doc.body.innerHTML;
 }

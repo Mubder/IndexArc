@@ -31,6 +31,7 @@
     "desktop:dist": "npm run desktop:win"
   },
   "dependencies": {
+    "@milkdown/crepe": "^7.23.0",
     "@napi-rs/canvas": "0.1.80",
     "cspell-lib": "^10.0.1",
     "electron-updater": "^6.6.2",

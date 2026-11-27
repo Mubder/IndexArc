@@ -216,11 +216,7 @@ export function TopBar({ handleAsk, handleLockVault, health, query, setCmdPalett
               {/* New Entry */}
               <button
                 onClick={() => setTab("home")}
-                className="btn-primary px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
-                style={{
-                  background: "linear-gradient(135deg, var(--accent), #1d4ed8)",
-                  boxShadow: "0 0 20px var(--accent-glow), 0 2px 8px rgba(0,0,0,0.3)",
-                }}
+                className="btn-primary px-4 py-2 rounded-lg text-sm font-semibold text-white"
               >
                 + {t("new_entry_btn")}
               </button>

@@ -1,14 +1,14 @@
 // @ts-check
-const { app, BrowserWindow, Menu, MenuItem, dialog, ipcMain, Tray, nativeImage, shell, clipboard } = require("electron");
+const { app, BrowserWindow, Menu, MenuItem, dialog, ipcMain, Tray, nativeImage, shell, clipboard, ClipboardItem } = require("electron");
 const { spawn } = require("child_process");
 const { childEnv } = require("./shared/child-env.cjs");
 const path = require("path");
 const http = require("http");
 const https = require("https");
 const fs = require("fs");
+const crypto = require("crypto");
 const os = require("os");
 const { execSync, execFileSync } = require("child_process");
-const crypto = require("crypto");
 
 // ── Note editor spellchecker ──
 // Chromium has no Arabic Hunspell dict, so the note editor keeps spellCheck
@@ -154,6 +154,11 @@ let ollamaProcess = null;
 // `mainWindow` as a non-null `Win` (a cast, no runtime check).
 /** @type {Win | null} */
 let mainWindow = null;
+/** @type {Win | null} */
+let docWindow = null;
+/** @type {string[]} */
+let pendingDocPaths = [];
+let docAllowClose = false;
 /** @type {import("electron").Tray | null} */
 let tray = null;
 let isQuiting = false;
@@ -167,7 +172,11 @@ const PORT = Number(process.env.PORT) || 3000;
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", () => showWindow());
+  app.on("second-instance", (_e, argv) => {
+    const files = extractDocArgs(argv || []);
+    if (files.length) openDocWindow(files);
+    else showWindow();
+  });
 }
 
 // Render in SOFTWARE. Three independent GPU-compositing failures on consumer
@@ -372,13 +381,11 @@ function getResourcePath() {
 
 function getTrayIcon() {
   const candidates = [
-    path.join(process.resourcesPath, "app.asar.unpacked", "dist", "Logo1.png"),
-    path.join(process.resourcesPath, "app.asar", "dist", "Logo1.png"),
-    path.join(getResourcePath(), "dist", "Logo1.png"),
-    path.join(getResourcePath(), "public", "Logo1.png"),
-    path.join(getResourcePath(), "assets", "icon.png"),
-    path.join(process.cwd(), "public", "Logo1.png"),
     path.join(process.cwd(), "assets", "icon.png"),
+    path.join(process.cwd(), "public", "Logo1.png"),
+    path.join(getResourcePath(), "assets", "icon.png"),
+    path.join(getResourcePath(), "public", "Logo1.png"),
+    path.join(getResourcePath(), "dist", "Logo1.png"),
   ];
   for (const p of candidates) {
     try {
@@ -575,7 +582,11 @@ function isAppUrl(url) {
 
 /** @param {import("electron").IpcMainInvokeEvent | import("electron").IpcMainEvent} e */
 function isTrustedSender(e) {
-  return ipcTrust.isTrustedSender(e, mainWindow, backendPort || PORT);
+  /** @type {{ isDestroyed(): boolean, webContents: any }[]} */
+  const windows = [];
+  if (mainWindow) windows.push(mainWindow);
+  if (docWindow) windows.push(docWindow);
+  return ipcTrust.isTrustedSender(e, windows, backendPort || PORT);
 }
 
 // Defaults for EVERY webContents, including any created later: no <webview>
@@ -589,6 +600,7 @@ app.on("web-contents-created", (_event, contents) => {
   });
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
   contents.on("will-navigate", (e, url) => {
+    if (typeof url === "string" && url.startsWith("indexarc-doc:")) return;
     if (!isAppUrl(url)) e.preventDefault();
   });
 });
@@ -660,13 +672,17 @@ handleTrusted("get-api-token", () => apiToken);
 // newer copy by the user is never clobbered.
 /** @type {NodeJS.Timeout | null} */
 let clipboardClearTimer = null;
-handleTrusted("copy-text", async (_e, text, clearAfterMs) => {
+handleTrusted("copy-text", async (_e, text, clearAfterMs, html) => {
   if (typeof text !== "string" || text.length === 0 || text.length > 1024 * 1024) return false;
   try {
     // Electron 44: writeText/readText return Promises. Awaiting (via
     // Promise.resolve, so a sync API also works) makes a failed write report
     // false and lets the timed clear compare real text.
-    await Promise.resolve(clipboard.writeText(text));
+    if (typeof html === "string" && html.length > 0 && html.length < 2 * 1024 * 1024) {
+      await clipboard.write([new ClipboardItem({ "text/plain": text, "text/html": html })]);
+    } else {
+      await Promise.resolve(clipboard.writeText(text));
+    }
     if (clipboardClearTimer) clearTimeout(clipboardClearTimer);
     clipboardClearTimer = null;
     const delay = Number(clearAfterMs);
@@ -797,11 +813,11 @@ async function startOllamaIfNeeded() {
 function getAppIcon() {
   const res = getResourcePath();
   const candidates = [
-    path.join(res, "dist", "Logo1.png"),
-    path.join(res, "public", "Logo1.png"),
+    path.join(process.cwd(), "assets", "icon.png"),
     path.join(res, "assets", "icon.png"),
-    path.join(process.resourcesPath, "app", "dist", "Logo1.png"),
-    path.join(process.resourcesPath, "app", "public", "Logo1.png"),
+    path.join(res, "public", "Logo1.png"),
+    path.join(res, "dist", "Logo1.png"),
+    path.join(process.cwd(), "public", "Logo1.png"),
   ];
   for (const p of candidates) {
     try {
@@ -1319,12 +1335,219 @@ handleTrusted("select-folder", async () => {
   return result.filePaths[0];
 });
 
+const docFiles = require("./shared/doc-files.cjs");
+const fileAssoc = require("./shared/file-assoc.cjs");
+
+/** @param {string} root @param {string} raw */
+function existingDoc(root, raw) {
+  const cleaned = String(raw || "").replace(/^"+|"+$/g, "");
+  const classified = docFiles.classifyDocPath(root, cleaned);
+  if (!classified.ok) return "";
+  try {
+    return fs.existsSync(classified.path) ? classified.path : "";
+  } catch {
+    return "";
+  }
+}
+
+/** @param {string[]} argv */
+function extractDocArgs(argv) {
+  let root = "";
+  try { root = getPortableRoot(); } catch { root = ""; }
+  const parts = (argv || []).filter((a) => typeof a === "string" && a && !a.startsWith("-"));
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    let found = "";
+    let consumed = 1;
+    for (let n = 1; n <= 8 && i + n <= parts.length; n++) {
+      const hit = existingDoc(root, parts.slice(i, i + n).join(" "));
+      if (hit) {
+        found = hit;
+        consumed = n;
+      }
+    }
+    if (found) {
+      out.push(found);
+      i += consumed - 1;
+    }
+  }
+  return out;
+}
+
+/** @param {string[]} paths */
+function deliverDocPaths(paths) {
+  const fresh = paths.filter((p) => !pendingDocPaths.includes(p));
+  pendingDocPaths.push(...fresh);
+  if (docWindow && !docWindow.isDestroyed()) {
+    const batch = pendingDocPaths.splice(0);
+    try { docWindow.webContents.send("docs-open", batch); } catch {}
+    if (docWindow.isMinimized()) docWindow.restore();
+    docWindow.show();
+    docWindow.focus();
+  }
+}
+
+/** @param {string[]} paths */
+function openDocWindow(paths) {
+  deliverDocPaths(paths);
+  if (docWindow && !docWindow.isDestroyed()) return;
+  docAllowClose = false;
+  const win = new BrowserWindow({
+    width: 1100,
+    height: 800,
+    minWidth: 720,
+    minHeight: 480,
+    title: "IndexArc Files",
+    icon: getAppIcon(),
+    backgroundColor: "#020617",
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webviewTag: false,
+      spellcheck: true,
+      preload: path.join(__dirname, "preload.cjs"),
+    },
+  });
+  docWindow = win;
+  win.on("close", (e) => {
+    if (docAllowClose || isQuiting) return;
+    e.preventDefault();
+    try { win.webContents.send("docs-request-close"); } catch { docAllowClose = true; win.close(); }
+  });
+  win.on("closed", () => { docWindow = null; });
+  loadDocWhenReady(win);
+}
+
+/** @param {Win} win @param {number} [attempts] */
+function loadDocWhenReady(win, attempts = 0) {
+  if (win.isDestroyed()) return;
+  if (!backendPort) {
+    if (attempts > 300) return;
+    setTimeout(() => loadDocWhenReady(win, attempts + 1), 100);
+    return;
+  }
+  win.loadURL(`http://127.0.0.1:${backendPort}/?surface=docs`);
+}
+
+/** @param {string} filePath */
+function readDocFile(filePath) {
+  let root = "";
+  try { root = getPortableRoot(); } catch { root = ""; }
+  const classified = docFiles.classifyDocPath(root, filePath);
+  if (!classified.ok) return Promise.resolve({ ok: false, reason: classified.reason });
+  let real = classified.path;
+  try {
+    if (fs.existsSync(real)) {
+      real = fs.realpathSync(real);
+      const again = docFiles.classifyDocPath(root, real);
+      if (!again.ok) return Promise.resolve({ ok: false, reason: "vault" });
+    }
+  } catch {
+    return Promise.resolve({ ok: false, reason: "path" });
+  }
+  let buf;
+  try { buf = fs.readFileSync(real); } catch { return Promise.resolve({ ok: false, reason: "read" }); }
+  const base = { ok: true, path: real, name: classified.name, ext: classified.ext, editable: classified.editable };
+  if (!classified.editable) return Promise.resolve({ ok: false, reason: "type" });
+  if (buf.length > 5_000_000) return Promise.resolve({ ok: false, reason: "size" });
+  return Promise.resolve({ ...base, text: buf.toString("utf8") });
+}
+
+/** @param {string} filePath @param {string} text */
+function writeDocFile(filePath, text) {
+  if (typeof text !== "string" || text.length > 5_000_000) return { ok: false, reason: "size" };
+  let root = "";
+  try { root = getPortableRoot(); } catch { root = ""; }
+  const classified = docFiles.classifyDocPath(root, filePath);
+  if (!classified.ok || !classified.editable) return { ok: false, reason: classified.ok ? "readonly" : classified.reason };
+  try {
+    if (fs.existsSync(classified.path)) {
+      const real = fs.realpathSync(classified.path);
+      if (!docFiles.classifyDocPath(root, real).ok) return { ok: false, reason: "vault" };
+      fs.writeFileSync(real, text, "utf8");
+      return { ok: true };
+    }
+    fs.writeFileSync(classified.path, text, "utf8");
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "write" };
+  }
+}
+
+/** @param {string} key @param {string} value */
+function regAdd(key, value) {
+  return new Promise((resolve) => {
+    const child = spawn("reg", ["add", key, "/ve", "/d", value, "/f"], { windowsHide: true });
+    child.on("exit", (code) => resolve(code === 0));
+    child.on("error", () => resolve(false));
+  });
+}
+
+/** @param {string} key */
+function regQueryDefault(key) {
+  return new Promise((resolve) => {
+    const child = spawn("reg", ["query", key, "/ve"], { windowsHide: true });
+    let out = "";
+    child.stdout?.on("data", (/** @type {Buffer | string} */ c) => { out += c; });
+    child.on("exit", () => {
+      const line = out.split(/\r?\n/).find((l) => l.includes("REG_"));
+      resolve(line ? (line.split("REG_SZ").pop() || "").trim() : "");
+    });
+    child.on("error", () => resolve(""));
+  });
+}
+
+handleTrusted("docs-read", (_e, filePath) => readDocFile(String(filePath || "")));
+handleTrusted("docs-write", (_e, filePath, text) => writeDocFile(String(filePath || ""), String(text ?? "")));
+handleTrusted("docs-take-pending", () => pendingDocPaths.splice(0));
+handleTrusted("file-assoc", async (_e, kind, enabled) => {
+  if (process.platform !== "win32") return { ok: false, reason: "platform" };
+  const plan = fileAssoc.associationPlan(String(kind || ""), process.execPath);
+  if (!plan) return { ok: false, reason: "type" };
+  if (enabled) {
+    let ok = true;
+    for (const ext of plan.exts) {
+      ok = (await regAdd(`HKCU\\Software\\Classes\\${ext}`, plan.id)) && ok;
+    }
+    const okId = await regAdd(`HKCU\\Software\\Classes\\${plan.id}`, plan.label);
+    const okCmd = await regAdd(`HKCU\\Software\\Classes\\${plan.id}\\shell\\open\\command`, plan.command);
+    try { await shell.openExternal("ms-settings:defaultapps"); } catch {}
+    return { ok: !!(ok && okId && okCmd) };
+  }
+  for (const ext of plan.exts) {
+    const current = await regQueryDefault(`HKCU\\Software\\Classes\\${ext}`);
+    if (current === plan.id) await regAdd(`HKCU\\Software\\Classes\\${ext}`, "");
+  }
+  return { ok: true };
+});
+
+ipcMain.on("docs-write-sync", (e, filePath, text) => {
+  if (!isTrustedSender(e)) { e.returnValue = false; return; }
+  e.returnValue = !!writeDocFile(filePath, text).ok;
+});
+ipcMain.on("scratchpad-changed-from-doc", (e) => {
+  if (!isTrustedSender(e)) return;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send("scratchpad-changed"); } catch {}
+  }
+});
+ipcMain.on("docs-close-result", (e, proceed) => {
+  if (!isTrustedSender(e) || !docWindow || docWindow.isDestroyed()) return;
+  if (proceed) {
+    docAllowClose = true;
+    docWindow.close();
+  }
+});
+
 app.on("ready", async () => {
   try {
     loadSpellcheckers();
     await startOllamaIfNeeded();
     startBackendServer();
     createWindow();
+    const opened = extractDocArgs(process.argv);
+    if (opened.length) openDocWindow(opened);
   } catch (e) {
     logCrash("ready", e);
   }
@@ -1364,7 +1587,7 @@ function requestRendererFlush(timeoutMs) {
     const onFlushComplete = (e) => {
       // Only the main window may end the flush wait early; anyone else
       // could otherwise cut the save of the last keystrokes short.
-      if (isTrustedSender(e)) finish();
+      if (mainWindow && !mainWindow.isDestroyed() && e.sender === mainWindow.webContents) finish();
       else console.log('[security] Ignored "flush-complete" from an untrusted sender');
     };
     ipcMain.on("flush-complete", onFlushComplete);

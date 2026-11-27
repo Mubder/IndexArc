@@ -4,7 +4,7 @@ import type { TranslationDict } from "../../utils/i18n";
 import { fill } from "../home/DashboardCards";
 import type { Editor } from "@tiptap/react";
 import type { SpellRect } from "./domText";
-import { Check, Copy, Loader2, Sparkles, Zap, Bold, Italic, Underline, Highlighter, BookPlus, EyeOff, ArrowUp, ArrowDown } from "lucide-react";
+import { Loader2, Sparkles, Zap, Bold, Italic, Underline, Highlighter, BookPlus, EyeOff, ArrowUp, ArrowDown } from "lucide-react";
 import { htmlToPlainText } from "../../lib/noteHtml";
 import { RewriteStyle } from "../../types";
 import React from "react";
@@ -77,47 +77,49 @@ export interface EditorPanelProps {
   togglePin: () => Promise<void>;
   togglePredictions: () => void;
   triggerAutocomplete: (prefixText: string) => void;
+  formatBar?: React.ReactNode;
 }
 
-export function EditorPanel({ active, appPicker, handleSaveToApp, activeCharCount, activeId, activeIsPinned, activeIsProtected, activeReadingTime, activeWordCount, analyze, b, bidiMode, canScrollDown, canScrollUp, contextMenu, copied, detectedDir, enablePredictions, ghostCompletion, handleAddToDictionary, handleApplySuggestion, handleCopy, handleIgnoreWord, handleOpenRevisions, handleProofread, handleRephrase, handleSaveNote, handleSaveSecret, handleSmartSplitParagraphs, handleUndoRephrase, hasSecret, highlightColor, noteFontSize, noteOverflows, onContextMenu, onKeyDown, openCompare, openRescue, recordSnapshot, rephraseUndo, scrollEditor, setContent, setContextMenu, setGhostCompletion, setProtectConfirmInput, setProtectError, setProtectModal, setSlashOpen, setStyle, settings, shellRef, slashOpen, spellRects, statusMsg, style, t, tabs, tiptap, togglePin, togglePredictions, triggerAutocomplete }: EditorPanelProps) {
+export function EditorPanel({ active, appPicker, handleSaveToApp, activeCharCount, activeId, activeIsPinned, activeIsProtected, activeReadingTime, activeWordCount, analyze, b, bidiMode, canScrollDown, canScrollUp, contextMenu, copied, detectedDir, enablePredictions, ghostCompletion, handleAddToDictionary, handleApplySuggestion, handleCopy, handleIgnoreWord, handleOpenRevisions, handleProofread, handleRephrase, handleSaveNote, handleSaveSecret, handleSmartSplitParagraphs, handleUndoRephrase, hasSecret, highlightColor, noteFontSize, noteOverflows, onContextMenu, onKeyDown, openCompare, openRescue, recordSnapshot, rephraseUndo, scrollEditor, setContent, setContextMenu, setGhostCompletion, setProtectConfirmInput, setProtectError, setProtectModal, setSlashOpen, setStyle, settings, shellRef, slashOpen, spellRects, statusMsg, style, t, tabs, tiptap, togglePin, togglePredictions, triggerAutocomplete, formatBar }: EditorPanelProps) {
+  const noteActions = (
+    <NoteToolbar
+      appPicker={appPicker}
+      noteApp={active?.app}
+      b={b}
+      copied={copied}
+      hasSecret={hasSecret}
+      hasText={!!htmlToPlainText(active?.content || "").trim()}
+      isProtected={activeIsProtected}
+      proofreaderOn={settings?.enable_ai_proofreader !== false}
+      enablePredictions={enablePredictions}
+      canCompare={tabs.length >= 2}
+      canUndoRephrase={(rephraseUndo[activeId]?.length ?? 0) > 0}
+      style={style}
+      setStyle={setStyle}
+      onSaveToApp={handleSaveToApp}
+      onSaveSecret={handleSaveSecret}
+      onSaveNote={handleSaveNote}
+      onCopy={handleCopy}
+      onDetect={() => analyze(activeId, htmlToPlainText(active?.content || ""))}
+      onProofread={handleProofread}
+      onRephrase={handleRephrase}
+      onUndoRephrase={handleUndoRephrase}
+      onFormat={handleSmartSplitParagraphs}
+      onTogglePredictions={togglePredictions}
+      onHistory={handleOpenRevisions}
+      onCompare={openCompare}
+      onRescue={openRescue}
+      onClear={() => {
+        if (window.confirm(t("confirm_clear_note"))) {
+          recordSnapshot(activeId, active?.content || "", "Before Clear");
+          setContent(activeId, "");
+        }
+      }}
+      t={t}
+    />
+  );
   return (
     <>
-        <NoteToolbar
-          appPicker={appPicker}
-          noteApp={active?.app}
-          b={b}
-          copied={copied}
-          hasSecret={hasSecret}
-          hasText={!!htmlToPlainText(active?.content || "").trim()}
-          isProtected={activeIsProtected}
-          proofreaderOn={settings?.enable_ai_proofreader !== false}
-          enablePredictions={enablePredictions}
-          canCompare={tabs.length >= 2}
-          canUndoRephrase={(rephraseUndo[activeId]?.length ?? 0) > 0}
-          style={style}
-          setStyle={setStyle}
-          onSaveToApp={handleSaveToApp}
-          onSaveSecret={handleSaveSecret}
-          onSaveNote={handleSaveNote}
-          onCopy={handleCopy}
-          onDetect={() => analyze(activeId, htmlToPlainText(active?.content || ""))}
-          onProofread={handleProofread}
-          onRephrase={handleRephrase}
-          onUndoRephrase={handleUndoRephrase}
-          onFormat={handleSmartSplitParagraphs}
-          onTogglePredictions={togglePredictions}
-          onHistory={handleOpenRevisions}
-          onCompare={openCompare}
-          onRescue={openRescue}
-          onClear={() => {
-            if (window.confirm(t("confirm_clear_note"))) {
-              recordSnapshot(activeId, active?.content || "", "Before Clear");
-              setContent(activeId, "");
-            }
-          }}
-          t={t}
-        />
-
         {statusMsg && (
           <p className="text-xs" style={{ color: "var(--accent-bright)" }}>
             {statusMsg}
@@ -136,17 +138,10 @@ export function EditorPanel({ active, appPicker, handleSaveToApp, activeCharCoun
           {/* Frame is height-locked to the viewport. Jump FABs pin to its
               top/bottom corners so they stay reachable on very long notes. */}
           <div className="note-editor-frame">
-            <button
-              type="button"
-              onClick={handleCopy}
-              disabled={!htmlToPlainText(active?.content || "").trim()}
-              className="note-jump-btn note-copy-btn p-2 transition-all disabled:opacity-0"
-              style={{ background: "var(--bg-surface-solid, var(--bg-surface))", color: copied ? "var(--emerald)" : "var(--text-muted)", border: "1px solid var(--border)" }}
-              title={copied ? t("scratchpad_copied") : t("notes_copy_all_title")}
-              aria-label={t("notes_copy_all_title")}
-            >
-              {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-            </button>
+            <div className="editor-bar">
+              {formatBar}
+              {noteActions}
+            </div>
             {tiptap ? (
               <div
                 onContextMenu={onContextMenu}

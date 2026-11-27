@@ -130,7 +130,7 @@ export function Sidebar({ nav, setTab, sidebarOpen, settings, vaultStatus, handl
             title="https://kazma.ai"
           >
             <img
-              src="/kazma-logo.jpeg"
+              src="/kazma-logo.png"
               alt="Kazma.ai"
               className="h-10 w-10 rounded-lg object-contain flex-shrink-0"
             />

@@ -150,6 +150,11 @@ export interface Settings {
   lock_on_minimize?: boolean;
   update_check_on_start?: boolean;
   crash_reports_enabled?: boolean;
+  file_open_md?: boolean;
+  file_open_txt?: boolean;
+  file_open_json?: boolean;
+  file_open_yaml?: boolean;
+  file_open_data?: boolean;
   // Write-only key fields: GET /api/settings never returns key material — it
   // returns these booleans instead. Key inputs in the UI keep drafts locally
   // and only send non-empty values.

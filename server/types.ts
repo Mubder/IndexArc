@@ -101,6 +101,12 @@ export interface AppSettings {
   update_check_on_start?: boolean;
   /** Opt-in: keep a redacted local log of crashes for the diagnostics export (R5). */
   crash_reports_enabled?: boolean;
+  /** Ask Windows to offer IndexArc for this extension. Off until the user turns it on. */
+  file_open_md?: boolean;
+  file_open_txt?: boolean;
+  file_open_json?: boolean;
+  file_open_yaml?: boolean;
+  file_open_data?: boolean;
   enable_ai_proofreader?: boolean;
   /**
    * EGRESS CONSENT (audit H2): cloud AI providers (Gemini/OpenAI/Groq/
@@ -147,6 +153,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   clipboard_clear_seconds: 45,
   update_check_on_start: false,
   crash_reports_enabled: false,
+  file_open_md: false,
+  file_open_txt: false,
+  file_open_json: false,
+  file_open_yaml: false,
+  file_open_data: false,
   enable_ai_proofreader: true,
   ai_cloud_consent: false,
   languagetool_enabled: false,

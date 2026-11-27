@@ -8,10 +8,15 @@ import Typography from "@tiptap/extension-typography";
 import Placeholder from "@tiptap/extension-placeholder";
 import { getTranslation } from "../../utils/i18n";
 import { DOMParser } from "@tiptap/pm/model";
+import { closeHistory } from "@tiptap/pm/history";
 import { safeGetHTML, detectBaseDir } from "./domText";
 import { useRef, useEffect } from "react";
 import { registerFlushHook, enqueueTabsSnapshot } from "../../lib/flushOnExit";
-import { ensureHtmlParagraphs } from "../../lib/noteHtml";
+import { ensureHtmlParagraphs, normalizePastedHtml } from "../../lib/noteHtml";
+import { normalizePastedPlain, plainToParagraphHtml, plainToSimpleHtml } from "../../lib/clipboardText";
+import { isDefaultNoteTitle } from "../../lib/mergeLoadedTabs";
+import { mergeSyncedScratchpadTab } from "../../scratchpadSaveQueue";
+import type { EditorView } from "@tiptap/pm/view";
 import type { Dispatch, SetStateAction, RefObject } from "react";
 import type { ScratchTab, NoteBidiMode, Settings } from "../../types";
 
@@ -35,6 +40,42 @@ export interface UseScratchEditorArgs {
   tabsRef: RefObject<ScratchTab[]>;
   titleTouched: RefObject<Record<string, boolean>>;
   serverLoaded: RefObject<boolean>;
+}
+
+const titleSaveTimers = new Map<string, number>();
+
+/** Persist a title. `automatic` is the first-line name and must not lock the note. */
+function queueTitleSave(id: string, title: string, automatic: boolean): void {
+  const prev = titleSaveTimers.get(id);
+  if (prev) window.clearTimeout(prev);
+  titleSaveTimers.set(
+    id,
+    window.setTimeout(() => {
+      titleSaveTimers.delete(id);
+      fetch(`/api/scratchpad/tabs/${encodeURIComponent(id)}/meta`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, title_custom: automatic ? false : true }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.tab) mergeSyncedScratchpadTab(data.tab);
+        })
+        .catch(() => {});
+    }, 400)
+  );
+}
+
+function writeSelectionClipboard(view: EditorView, event: ClipboardEvent, cut: boolean): boolean {
+  const sel = view.state.selection;
+  if (sel.empty) return false;
+  const slice = sel.content();
+  const text = slice.content.textBetween(0, slice.content.size, "\n", (leaf) => (leaf.type.name === "hardBreak" ? "\n" : ""));
+  event.preventDefault();
+  event.clipboardData?.setData("text/plain", text);
+  event.clipboardData?.setData("text/html", plainToSimpleHtml(text));
+  if (cut) view.dispatch(view.state.tr.deleteSelection().scrollIntoView());
+  return true;
 }
 
 // The TipTap editor instance, the exit-flush hook, and per-tab content/BIDI sync.
@@ -66,33 +107,41 @@ export function useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, 
         class: "note-editor prose max-w-none",
         spellcheck: "false",
       },
-      // Plain-text paste MUST be intercepted here, at the ProseMirror level.
-      // The React onPaste on the wrapper div runs at bubble phase — AFTER
-      // ProseMirror's own target-phase paste handler has already inserted the
-      // clipboard slice. preventDefault() there could no longer stop it, so
-      // the manual insertContent() ran on top and every paste appeared TWICE.
-      // Returning true here tells ProseMirror the event is fully handled.
+      // Paste is handled here, at the ProseMirror level. The React onPaste on
+      // the wrapper runs too late to stop ProseMirror's own insert, which used
+      // to duplicate every paste. Returning true means the event is finished.
       handlePaste: (view, event) => {
-        if (!pastePlainRef.current) return false;
+        const cd = event.clipboardData;
+        if (!cd) return false;
+        const plain = cd.getData("text/plain") ?? "";
+        const html = cd.getData("text/html") ?? "";
+        const wantsRich = !pastePlainRef.current && /<(strong|em|b|i|u|h[1-6]|ul|ol|a|code|pre|blockquote)\b/i.test(html);
         event.preventDefault();
         try {
-          // Clipboards very often carry a trailing newline (copied links,
-          // rows, chat lines). Keeping it appended an empty <p> after every
-          // paste and left the caret parked on that blank line.
-          const text = (event.clipboardData?.getData("text/plain") ?? "").replace(/[\r\n]+$/, "");
-          if (!text) return true;
-          const esc = (s: string) =>
-            s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
           const div = document.createElement("div");
-          div.innerHTML = text
-            .replace(/\r\n/g, "\n")
-            .split("\n")
-            .map((l) => `<p>${l ? esc(l) : ""}</p>`)
-            .join("");
+          if (wantsRich) {
+            div.innerHTML = normalizePastedHtml(html);
+          } else {
+            const text = normalizePastedPlain(plain);
+            if (!text) return true;
+            div.innerHTML = plainToParagraphHtml(text);
+          }
           const slice = DOMParser.fromSchema(view.state.schema).parseSlice(div);
-          view.dispatch(view.state.tr.replaceSelection(slice));
+          view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
+          // Seal the paste as its own undo step. Otherwise a word changed
+          // right after the paste is stored in the same step, and one Ctrl+Z
+          // removes both.
+          view.dispatch(closeHistory(view.state.tr));
         } catch {}
         return true;
+      },
+      // Ctrl+C fallback if the DOM handler below does not run. One newline
+      // between lines, not the editor's default blank line.
+      clipboardTextSerializer: (slice) =>
+        slice.content.textBetween(0, slice.content.size, "\n", (leaf) => (leaf.type.name === "hardBreak" ? "\n" : "")),
+      handleDOMEvents: {
+        copy: (view, event) => writeSelectionClipboard(view, event, false),
+        cut: (view, event) => writeSelectionClipboard(view, event, true),
       },
     },
     onUpdate: ({ editor, transaction }) => {
@@ -124,14 +173,13 @@ export function useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, 
         });
       }
 
-      if ((tiptap as any)._debouncedSync) window.clearTimeout((tiptap as any)._debouncedSync);
-      (tiptap as any)._debouncedSync = window.setTimeout(() => {
-        setTabs((prev) => {
-          const cur = prev.find((x) => x.id === id);
-          if (cur && cur.content === html) return prev;
-          return prev.map((x) => (x.id === id ? { ...x, content: html } : x));
-        });
-      }, 280);
+      // The save queue has its own quiet period. A second delay here is how
+      // the last words existed only in the editor.
+      setTabs((prev) => {
+        const cur = prev.find((x) => x.id === id);
+        if (cur && cur.content === html) return prev;
+        return prev.map((x) => (x.id === id ? { ...x, content: html } : x));
+      });
       // Auto-title from the first non-empty line. Read it straight off the
       // ProseMirror doc (the old detached-div innerHTML parse re-parsed the
       // WHOLE note on every keystroke) and — critically — return `prev`
@@ -146,7 +194,7 @@ export function useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, 
       // keystroke replaced the user's name with the first line).
       const named = tabsRef.current.find((x) => x.id === id);
       const title = named?.title || "";
-      const isDefault = /^Scratch( \d+)?$/.test(title);
+      const isDefault = isDefaultNoteTitle(title);
       const keepName = !!named?.app && !isDefault;
       if (!titleTouched.current[id] && !keepName && !named?.title_custom) {
         const autoOf = (doc: typeof editor.state.doc) => {
@@ -158,18 +206,23 @@ export function useScratchEditor({ activeId, activeIdRef, bidiMode, contentRef, 
           });
           return firstBlock.trim().slice(0, 40);
         };
-        // Notes renamed before title_custom existed carry no flag: follow the
-        // first line only while the title still IS that line (or a prefix of
-        // it — the server keeps the title from the note's first save).
+        // Follow the first line only while the name is still the default, or
+        // still exactly the previous first line. A shorter custom name that
+        // happens to be a prefix of the first line is a name, and it stays.
         const prevAuto = autoOf(transaction.before);
-        const followsFirstLine = isDefault || !named || title === prevAuto || (!!title && prevAuto.startsWith(title));
+        const followsFirstLine = isDefault || !named || title === prevAuto;
         const auto = followsFirstLine ? autoOf(editor.state.doc) : "";
-        if (auto) {
+        if (auto && auto !== title) {
           setTabs((prev) => {
             const cur = prev.find((x) => x.id === id);
-            if (cur && cur.title === auto) return prev;
+            // Recheck at write time: a rename can land between the keystroke
+            // and this update, and must not be replaced by the first line.
+            if (!cur || cur.title_custom || cur.title === auto) return prev;
+            if (!isDefaultNoteTitle(cur.title) && cur.title !== prevAuto && cur.title !== title) return prev;
             return prev.map((x) => (x.id === id ? { ...x, title: auto } : x));
           });
+          // The server ignores this when the note was already named by hand.
+          queueTitleSave(id, auto, true);
         }
       }
       // Slash palette trigger — show when line ends with "/"

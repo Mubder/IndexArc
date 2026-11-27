@@ -4,6 +4,7 @@ import { findDuplicateHits } from "../../utils";
 import { htmlToPlainText } from "../../lib/noteHtml";
 import { textToNoteHtml } from "../../sanitize";
 import { copyTextToClipboard } from "../../lib/clipboard";
+import { plainToSimpleHtml } from "../../lib/clipboardText";
 import type { Dispatch, SetStateAction, RefObject } from "react";
 import type { ScratchTab, Detection, Busy, RewriteStyle } from "../../types";
 import type { TranslationDict } from "../../utils/i18n";
@@ -293,7 +294,8 @@ export function useNoteActions({ active, activeId, detection, protectedIdsRef, r
 
    const handleCopy = async () => {
      try {
-       await copyTextToClipboard(htmlToPlainText(active?.content || ""));
+       const plain = htmlToPlainText(active?.content || "");
+       await copyTextToClipboard(plain, { html: plainToSimpleHtml(plain) });
        setCopied(true);
        setTimeout(() => setCopied(false), 1500);
      } catch {}

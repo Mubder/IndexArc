@@ -3,7 +3,7 @@ import { X, RotateCcw } from "lucide-react";
 import { Settings, RewriteStyle, Detection, Busy, ScratchTab, NoteBidiMode, type AnalyzeCandidate } from "../types";
 import { getTranslation } from "../utils/i18n";
 import { fill } from "./home/DashboardCards";
-import { drainScratchpadSaves, forceSaveScratchpadTab, mergeSyncedScratchpadTab } from "../scratchpadSaveQueue";
+import { drainScratchpadSaves } from "../scratchpadSaveQueue";
 import { takeHandoffNote, REOPEN_NOTE_EVENT, FOCUS_NOTE_EVENT, peekFocusNote, clearFocusNote, takeFocusApp } from "../noteHandoff";
 import { ensureHtmlParagraphs, htmlToPlainText } from "../lib/noteHtml";
 
@@ -82,7 +82,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
   const [clearedAlert, setClearedAlert] = useState<{ tabId: string; content: string; timestamp: number } | null>(null);
   // 409 conflict banner state: the server's current version of the tab whose
   // save conflicted, offered to the user when an autosave raced another window.
-  const [conflictTab, setConflictTab] = useState<any>(null);
+  const [, setConflictTab] = useState<any>(null);
   const { protectConfirmInput, protectError, protectInputRef, protectModal, protectShowInput, protectedIdsRef, setProtectConfirmInput, setProtectError, setProtectModal, setProtectShowInput, submitProtect, togglePin } = useNoteProtection({ activeId, setTabs, tabs, t });
 
   const shellRef = useRef<HTMLDivElement>(null);
@@ -221,21 +221,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     } catch {}
   }, [tiptap, activeId, tabs]);
   const { contextMenu, handleAddToDictionary, handleApplySuggestion, handleIgnoreWord, misspelledWords, onContextMenu, recomputeSpellRects, setContextMenu, spellRects } = useSpellcheck({ active, editorRef, recomputeSpellRectsRef, setStatus, settings, tiptap, triggerAutocomplete });
-  useScratchpadSync({ initial, serverLoaded, setActiveId, setArchivedCount, setConflictTab, setSaveFailing, setTabs, tabs });
-
-  const resolveConflict = useCallback((keepMine: boolean) => {
-    if (!conflictTab) return;
-    if (keepMine) {
-      const mine = tabs.find((x) => x.id === conflictTab.id);
-      if (mine) forceSaveScratchpadTab(mine);
-    } else {
-      // Adopt the server version.
-      setTabs((prev) => prev.map((x) => (x.id === conflictTab.id ? { ...x, content: conflictTab.content, rev: conflictTab.rev } : x)));
-      mergeSyncedScratchpadTab(conflictTab);
-      if (activeId === conflictTab.id) setContent(conflictTab.id, conflictTab.content);
-    }
-    setConflictTab(null);
-  }, [conflictTab, tabs, activeId]);
+  useScratchpadSync({ initial, serverLoaded, setActiveId, setArchivedCount, setConflictTab, setSaveFailing, setTabs, tabs, tabsRef });
 
   // setContent is used by external flows (rephrase, undo-rephrase) to replace
   // the whole editor body. Route through setEditorHtml so the DOM, history
@@ -251,6 +237,23 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     },
     [setEditorHtml]
   );
+  // "Load saved version" while this page is open: the queue adopted the server
+  // note, and the editor has to show it. The same event covers a choice made
+  // from another page.
+  useEffect(() => {
+    const onRevert = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { id?: string; serverTab?: { content?: string; rev?: number; title?: string } } | undefined;
+      const serverTab = detail?.serverTab;
+      const id = detail?.id;
+      if (!id || !serverTab) return;
+      const content = serverTab.content || "<p></p>";
+      setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, content, rev: serverTab.rev, title: serverTab.title || x.title } : x)));
+      contentRef.current[id] = content;
+      if (activeIdRef.current === id) setEditorHtml(content);
+    };
+    window.addEventListener("indexarc-note-reverted", onRevert);
+    return () => window.removeEventListener("indexarc-note-reverted", onRevert);
+  }, [setEditorHtml]);
   const { analyze, handleCopy, handleProofread, handleRephrase, handleSaveNote, handleSaveSecret, handleUndoRephrase } = useNoteActions({ active, activeId, detection, protectedIdsRef, recordSnapshot, rephraseUndo, setBusy, setContent, setCopied, setDetections, setRephraseUndo, setStatus, style, t });
 
   // "Save secret to Vault" asks which application and environment the
@@ -361,11 +364,14 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
     setStatus(t("scratchpad_content_restored"));
   }, [clearedAlert, setStatus, tiptap, settings]);
 
-  // Intercept Tab / ArrowRight to accept inline ghost text auto-complete,
-  // and Ctrl/Cmd+Z/Y for undo/redo history.
+  // Tab accepts a prediction. Arrow keys only move the caret — in an RTL
+  // note the left arrow is the key that used to commit the suggestion.
+  // Undo and redo are ProseMirror's own keys. Handling them again here ran
+  // a second undo, so one Ctrl+Z removed the last edit and the one before it.
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if ((e.key === "Tab" || e.key === "ArrowRight") && ghostCompletion && enablePredictions) {
+      if (!ghostCompletion || !enablePredictions) return;
+      if (e.key === "Tab" && !e.shiftKey) {
         e.preventDefault();
         // Insert as a ProseMirror text transaction — raw DOM insertNode on the
         // editor fights the DOM observer and can duplicate text. No legacy
@@ -383,24 +389,12 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
         }
         return;
       }
-      if ((e.key === "Escape" || e.key === "Backspace") && ghostCompletion) {
+      if (e.key === "Escape" || e.key === "Backspace" || e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") {
         setGhostCompletion("");
         setCaretPos(null);
-        return;
-      }
-
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
-      const key = e.key.toLowerCase();
-      if (key === "z" && !e.shiftKey) {
-        e.preventDefault();
-        historyUndo();
-      } else if ((key === "z" && e.shiftKey) || key === "y") {
-        e.preventDefault();
-        historyRedo();
       }
     },
-    [ghostCompletion, enablePredictions, tiptap, historyUndo, historyRedo]
+    [ghostCompletion, enablePredictions, tiptap, triggerAutocomplete, setGhostCompletion, setCaretPos]
   );
   const { addTab, closeTab, commitRename, renameId, renameInputRef, renameValue, reorderTab, setRenameId, setRenameValue, startRename } = useTabActions({ activeId, setActiveId, setDetections, setRephraseUndo, setStatus, setTabs, t, tabs, titleTouched });
   // Choosing an application shows only its notes; one with none yet
@@ -424,19 +418,6 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
 
     return (
     <div ref={scratchRootRef} className="space-y-4">
-      {conflictTab && (
-        <div className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm" style={{ background: "var(--amber-bg, rgba(251,191,36,0.08))", border: "1px solid rgba(251,191,36,0.35)", color: "var(--text)" }}>
-          <span>{t("scratchpad_conflict_msg" as any) || "This note was changed in another window. Whose version should win?"}</span>
-          <span className="flex items-center gap-2 shrink-0">
-            <button onClick={() => resolveConflict(false)} className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: "var(--accent-bg)", color: "var(--accent-bright)", border: "1px solid var(--border-glow)" }}>
-              {t("scratchpad_conflict_load" as any) || "Load saved version"}
-            </button>
-            <button onClick={() => resolveConflict(true)} className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: "var(--bg-input)", color: "var(--text)", border: "1px solid var(--border-input)" }}>
-              {t("scratchpad_conflict_keep" as any) || "Keep mine"}
-            </button>
-          </span>
-        </div>
-      )}
       <NoteTabStrip
         activeId={activeId}
         addTab={() => addTab(show !== SHOW_ALL && show !== SHOW_NONE ? show : undefined)}
@@ -547,9 +528,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           togglePin={togglePin}
           togglePredictions={togglePredictions}
           triggerAutocomplete={triggerAutocomplete}
-        />
-
-        <FormattingToolbar
+          formatBar={<FormattingToolbar
           bidiMode={bidiMode}
           canScrollDown={canScrollDown}
           canScrollUp={canScrollUp}
@@ -573,6 +552,7 @@ export const ScratchpadTab: React.FC<{ settings: Settings | null }> = ({ setting
           textColor={textColor}
           tiptap={tiptap}
           toolbarRef={toolbarRef}
+        />}
         />
 
         {saveToApp && (

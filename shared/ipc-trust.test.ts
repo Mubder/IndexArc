@@ -39,6 +39,12 @@ describe("IPC sender trust", () => {
     expect(isTrustedSender({ sender: webContents, senderFrame: { url } }, win, PORT)).toBe(false);
   });
 
+  it("trusts a document window that was opened by the app", () => {
+    const main = windowWith();
+    const doc = windowWith(`http://127.0.0.1:${PORT}/?surface=docs`);
+    expect(isTrustedSender({ sender: doc.webContents, senderFrame: doc.mainFrame }, [main.win, doc.win], PORT)).toBe(true);
+  });
+
   it("refuses another webContents, even on the app URL", () => {
     const { win } = windowWith();
     const other = windowWith();

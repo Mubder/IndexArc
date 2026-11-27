@@ -36,7 +36,69 @@ let saveFailing = false;
 // before an auto-lock / lock-on-minimize. Keyed by tab id; a newer queued
 // snapshot of the same tab supersedes the held copy.
 const lockedOut = new Map<string, ScratchTab>();
+// A 409 is not a successful save. The unsaved note stays here until the user
+// chooses, and a later flush must not pretend the server already has it.
+const conflictHeld = new Map<string, ScratchTab>();
+export interface ScratchpadConflict {
+  id: string;
+  title: string;
+  serverTab: ScratchTab | null;
+  mine: ScratchTab;
+}
+const conflicts = new Map<string, ScratchpadConflict>();
+const conflictListeners = new Set<() => void>();
 let failureHandler: ((failing: boolean) => void) | null = null;
+
+function notifyConflicts(): void {
+  for (const fn of conflictListeners) {
+    try { fn(); } catch {}
+  }
+}
+
+export function subscribeScratchpadConflicts(fn: () => void): () => void {
+  conflictListeners.add(fn);
+  return () => conflictListeners.delete(fn);
+}
+
+export function getScratchpadConflicts(): ScratchpadConflict[] {
+  return [...conflicts.values()];
+}
+
+/** Edits that have not reached the server. The load path merges these in. */
+export function getUnsyncedScratchpadTabs(): ScratchTab[] {
+  const byId = new Map<string, ScratchTab>();
+  for (const t of lockedOut.values()) byId.set(t.id, t);
+  for (const t of conflictHeld.values()) byId.set(t.id, t);
+  if (pending) {
+    for (const t of pending) {
+      const s = lastSynced.find((x) => x.id === t.id);
+      if (!s || s.content !== t.content) byId.set(t.id, t);
+    }
+  }
+  return [...byId.values()];
+}
+
+/**
+ * User answered the conflict banner. Keep-mine force-saves. Load-server
+ * adopts the server note and tells a mounted scratchpad to show it.
+ */
+export function resolveScratchpadConflict(id: string, keepMine: boolean): void {
+  const held = conflictHeld.get(id);
+  const view = conflicts.get(id);
+  conflictHeld.delete(id);
+  conflicts.delete(id);
+  notifyConflicts();
+  if (keepMine && held) {
+    void forceSaveScratchpadTab(held);
+    return;
+  }
+  if (view?.serverTab) {
+    mergeSynced([view.serverTab]);
+    try {
+      window.dispatchEvent(new CustomEvent("indexarc-note-reverted", { detail: { id, serverTab: view.serverTab } }));
+    } catch {}
+  }
+}
 
 export function setScratchpadFailureHandler(fn: ((failing: boolean) => void) | null): void {
   failureHandler = fn;
@@ -110,7 +172,7 @@ async function postTabContent(
   baseRev?: number,
   force?: boolean,
   opts: { keepalive?: boolean } = {}
-): Promise<ScratchTab | false | "locked"> {
+): Promise<ScratchTab | false | "locked" | { conflict: true; serverTab: ScratchTab | null }> {
   const url = `/api/scratchpad/tabs/${encodeURIComponent(t.id)}/content`;
   const body = JSON.stringify({
     // Sanitize-on-write: the durable store only ever receives allowlisted
@@ -147,8 +209,8 @@ async function postTabContent(
   }
   if (res.status === 409) {
     const data = await res.json().catch(() => null);
-    conflictHandler?.(data?.server_tab ?? null);
-    return false;
+    const serverTab = (data?.server_tab ?? null) as ScratchTab | null;
+    return { conflict: true, serverTab };
   }
   if (res.status === 423) {
     const data = await res.json().catch(() => null);
@@ -185,10 +247,20 @@ function doFlush(keepalive: boolean): void {
       if (!save || !save.length) return;
       const changed = save.filter((t) => {
         const s = lastSynced.find((x) => x.id === t.id);
-        return !s || s.content !== t.content;
+        if (s && s.content === t.content) {
+          conflictHeld.delete(t.id);
+          if (conflicts.delete(t.id)) notifyConflicts();
+          return false;
+        }
+        // Already shown to the user. Wait for their choice instead of
+        // posting the same text into another 409.
+        const held = conflictHeld.get(t.id);
+        if (held && held.content === t.content) return false;
+        return true;
       });
       const serverTabs: ScratchTab[] = [];
       const locked: ScratchTab[] = [];
+      const conflictIds = new Set<string>();
       for (const t of changed) {
         const s = lastSynced.find((x) => x.id === t.id);
         const saved = await postTabContent(t, s?.rev, undefined, { keepalive });
@@ -196,16 +268,46 @@ function doFlush(keepalive: boolean): void {
           locked.push(t);
           continue;
         }
-        if (!saved) continue; // 409 surfaced to the handler / 423 protected: this tab is not retryable — keep saving the others
+        if (saved && typeof saved === "object" && "conflict" in saved) {
+          // A title save bumps rev without changing the text. That is our own
+          // write. Adopt the rev and send the text once more.
+          const serverTab = saved.serverTab;
+          const base = lastSynced.find((x) => x.id === t.id);
+          if (serverTab && base && serverTab.content === base.content && serverTab.rev !== base.rev) {
+            mergeSynced([serverTab]);
+            const retried = await postTabContent(t, serverTab.rev, undefined, { keepalive });
+            if (retried && typeof retried === "object" && !("conflict" in retried)) {
+              serverTabs.push(retried);
+              lockedOut.delete(t.id);
+              conflictHeld.delete(t.id);
+              if (conflicts.delete(t.id)) notifyConflicts();
+              continue;
+            }
+            if (retried === "locked") {
+              locked.push(t);
+              continue;
+            }
+          }
+          conflictIds.add(t.id);
+          conflictHeld.set(t.id, t);
+          conflicts.set(t.id, { id: t.id, title: t.title || "", serverTab, mine: t });
+          conflictHandler?.(serverTab);
+          notifyConflicts();
+          continue;
+        }
+        if (!saved) continue; // 423 protected: this tab is not retryable — keep saving the others
         serverTabs.push(saved);
-        lockedOut.delete(t.id); // an older held copy must never overwrite this save
+        lockedOut.delete(t.id);
+        conflictHeld.delete(t.id);
+        if (conflicts.delete(t.id)) notifyConflicts();
       }
       // Server tabs merged LAST so their fresh revs win over the client
       // copies — otherwise the next save 409s against our own write. Tabs
-      // held by the lock are NOT merged: the mirror must keep saying they
-      // differ from the server, or the retry would skip them.
-      const lockedIds = new Set(locked.map((t) => t.id));
-      mergeSynced([...save.filter((t) => !lockedIds.has(t.id)), ...serverTabs]);
+      // held by the lock or by a conflict are NOT merged: the mirror must
+      // keep saying they differ from the server, or the retry would skip them
+      // and a restart would load the older copy.
+      const skipIds = new Set([...locked.map((t) => t.id), ...conflictIds]);
+      mergeSynced([...save.filter((t) => !skipIds.has(t.id)), ...serverTabs]);
       if (locked.length) {
         // Flushes run serially, so this flush's copy is the newest one.
         for (const t of locked) lockedOut.set(t.id, t);
@@ -247,11 +349,13 @@ export function forceSaveScratchpadTab(tab: ScratchTab): Promise<void> {
         // Vault locked mid-choice: hold it like any other locked-out save.
         lockedOut.set(tab.id, tab);
         if (timer === null) timer = setTimeout(fire, RETRY_MS);
-      } else if (saved) {
+      } else if (saved && typeof saved === "object" && !("conflict" in saved)) {
         // Adopt the server's saved tab (fresh rev) — the client copy's rev
         // is stale the moment the server accepts the write.
         mergeSynced([tab, saved]);
         lockedOut.delete(tab.id);
+        conflictHeld.delete(tab.id);
+        if (conflicts.delete(tab.id)) notifyConflicts();
       }
     })
     .catch(() => {});
@@ -281,6 +385,9 @@ export function __resetScratchpadSaveQueueForTests(): void {
   chain = Promise.resolve();
   lastSynced = [];
   lockedOut.clear();
+  conflictHeld.clear();
+  conflicts.clear();
+  conflictListeners.clear();
   conflictHandler = null;
   saveFailing = false;
   failureHandler = null;

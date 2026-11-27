@@ -76,8 +76,11 @@ export function createApp({ paths, store, audit, watchers }: CreateAppDeps): { a
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     "connect-src 'self'",
-    "object-src 'none'",
-    "frame-src 'none'",
+    // blob: is the read-only PDF viewer in the document window (Chromium's
+    // PDF plugin). The vault UI does not embed frames or objects.
+    "worker-src 'self'",
+    "object-src 'self' blob:",
+    "frame-src 'self' blob:",
     "base-uri 'none'",
     "form-action 'self'",
     "frame-ancestors 'none'",

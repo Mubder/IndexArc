@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { drainScratchpadSaves, setSyncedScratchpadTabs, enqueueScratchpadSave, setScratchpadConflictHandler, setScratchpadFailureHandler } from "../../scratchpadSaveQueue";
+import { drainScratchpadSaves, setSyncedScratchpadTabs, enqueueScratchpadSave, setScratchpadConflictHandler, setScratchpadFailureHandler, getUnsyncedScratchpadTabs, mergeSyncedScratchpadTab } from "../../scratchpadSaveQueue";
+import { mergeLoadedTabs } from "../../lib/mergeLoadedTabs";
 import { ScratchTab } from "../../types";
 import { normalizeServerTab } from "../../lib/serverTabs";
 import { dropLegacyLocalTabs } from "./noteTabs";
@@ -15,11 +16,12 @@ export interface UseScratchpadSyncArgs {
   setSaveFailing: Dispatch<SetStateAction<boolean>>;
   setTabs: Dispatch<SetStateAction<ScratchTab[]>>;
   tabs: ScratchTab[];
+  tabsRef: RefObject<ScratchTab[]>;
 }
 
 // Server load on mount, queued saves on change, and the save conflict/failure handlers.
 // Moved verbatim from ScratchpadTab (R3.4); the component wires the inputs.
-export function useScratchpadSync({ initial, serverLoaded, setActiveId, setArchivedCount, setConflictTab, setSaveFailing, setTabs, tabs }: UseScratchpadSyncArgs) {
+export function useScratchpadSync({ initial, serverLoaded, setActiveId, setArchivedCount, setConflictTab, setSaveFailing, setTabs, tabs, tabsRef }: UseScratchpadSyncArgs) {
   // Load tabs from the server (portable, survives reinstall/update). The
   // server copy is authoritative when it has content; localStorage is a cache.
   useEffect(() => {
@@ -59,8 +61,22 @@ export function useScratchpadSync({ initial, serverLoaded, setActiveId, setArchi
         // Prime the save queue's mirror so it knows each tab's server rev.
         setSyncedScratchpadTabs(serverTabs);
         if (serverTabs.length) {
-          // Server has the durable copy — it wins over the localStorage cache.
-          setTabs(serverTabs);
+          // Keep a name or a paragraph that was typed while this fetch was in flight.
+          const merged = mergeLoadedTabs(serverTabs, tabsRef.current, getUnsyncedScratchpadTabs());
+          setTabs(merged);
+          for (const m of merged) {
+            const s = serverTabs.find((x) => x.id === m.id);
+            if (s && m.title !== s.title) {
+              fetch(`/api/scratchpad/tabs/${encodeURIComponent(m.id)}/meta`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: m.title, title_custom: !!m.title_custom }),
+              })
+                .then((r) => (r.ok ? r.json() : null))
+                .then((data) => { if (data?.tab) mergeSyncedScratchpadTab(data.tab); })
+                .catch(() => {});
+            }
+          }
           // "Open in Scratchpad" from the Applications page picks the note.
           const focus = peekFocusNote();
           clearFocusNote();
@@ -104,6 +120,31 @@ export function useScratchpadSync({ initial, serverLoaded, setActiveId, setArchi
       cancelled = true;
     };
   }, []);
+
+  // A file window can add a note while this page is already open. Without
+  // this, the new tab stays invisible until the page is left and opened again.
+  useEffect(() => {
+    const off = window.electronAPI?.onScratchpadChanged?.(() => {
+      void (async () => {
+        try {
+          const res = await fetch("/api/scratchpad");
+          if (!res.ok) return;
+          const data = await res.json();
+          const serverTabs: ScratchTab[] = Array.isArray(data.tabs)
+            ? data.tabs.filter((x: any) => x && typeof x === "object" && !x.archived).map((x: any) => normalizeServerTab(x))
+            : [];
+          if (!serverTabs.length) return;
+          const before = new Set(tabsRef.current.map((t) => t.id));
+          setSyncedScratchpadTabs(serverTabs);
+          const merged = mergeLoadedTabs(serverTabs, tabsRef.current, getUnsyncedScratchpadTabs());
+          setTabs(merged);
+          const added = merged.find((t) => !before.has(t.id));
+          if (added) setActiveId(added.id);
+        } catch {}
+      })();
+    });
+    return () => { off?.(); };
+  }, [setActiveId, setTabs]);
 
   // Persist to the server (the ONLY durable store) on change. localStorage is
   // no longer written — notes must not live in browser storage (plaintext

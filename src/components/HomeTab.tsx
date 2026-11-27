@@ -1,4 +1,5 @@
 import React from "react";
+import { insertNormalizedPaste } from "../lib/clipboardText";
 import { Plus, Sparkles, Inbox, Save, SkipForward } from "lucide-react";
 import { VaultEntry, AnalyzeCandidate, Settings } from "../types";
 import type { SystemStatus, HealthReport, FolderScanSession, LibraryFilter } from "../types";
@@ -105,6 +106,14 @@ export const HomeTab: React.FC<HomeTabProps> = ({
         <textarea
           value={paste}
           onChange={(e) => setPaste(e.target.value)}
+          onPaste={(e) => {
+            const incoming = e.clipboardData?.getData("text/plain");
+            if (!incoming) return;
+            e.preventDefault();
+            const el = e.currentTarget;
+            const next = insertNormalizedPaste(paste, el.selectionStart ?? paste.length, el.selectionEnd ?? paste.length, incoming);
+            setPaste(next.value);
+          }}
           // Pasted secrets must never reach the OS spellchecker or its
           // "Add to dictionary" list (plaintext in the Chromium profile).
           spellCheck={false}

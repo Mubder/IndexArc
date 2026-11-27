@@ -35,6 +35,7 @@ import { useSSE } from "./hooks/useSSE";
 import { SettingsTab } from "./components/SettingsTab";
 import { LockScreen } from "./components/LockScreen";
 import { purgeScratchpadMirrorOnLock } from "./scratchpadSaveQueue";
+import { ScratchpadConflictBanner } from "./components/ScratchpadConflictBanner";
 import { flushEverything } from "./lib/flushOnExit";
 import { SetupScreen } from "./components/SetupScreen";
 import { SetupChecker } from "./components/SetupChecker";
@@ -43,7 +44,6 @@ import { HealthModal } from "./components/HealthModal";
 // Modals
 import { FsBrowserModal } from "./components/FsBrowserModal";
 import { CommandPaletteModal } from "./components/CommandPaletteModal";
-import Starfield from "./components/Starfield";
 import { DialogModals } from "./components/app/DialogModals";
 import { HealthBanners } from "./components/app/HealthBanners";
 import { TopBar } from "./components/app/TopBar";
@@ -508,7 +508,7 @@ return (
       }}
     >
       {/* Animated Background */}
-      <Starfield />
+
 
       <EncryptMigrationBanner encryptBannerDismissed={encryptBannerDismissed} setEncryptBannerDismissed={setEncryptBannerDismissed} setTab={setTab} t={t} vaultStatus={vaultStatus} />
 
@@ -528,6 +528,7 @@ return (
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
           <TopBar handleAsk={handleAsk} handleLockVault={handleLockVault} health={health} query={query} setCmdPaletteOpen={setCmdPaletteOpen} setHealthOpen={setHealthOpen} setQuery={setQuery} setSidebarOpen={setSidebarOpen} setTab={setTab} settings={settings} sidebarOpen={sidebarOpen} status={status} t={t} theme={theme} toggleLanguage={toggleLanguage} toggleTheme={toggleTheme} vaultStatus={vaultStatus} />
+          <ScratchpadConflictBanner t={t} />
 
           {/* Content Area */}
           <main dir={settings?.ui_language === "ar" ? "rtl" : "ltr"} className="flex-1 min-h-0 overflow-y-auto px-8 py-6 app-main">

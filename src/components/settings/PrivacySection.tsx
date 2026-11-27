@@ -8,9 +8,37 @@ export interface PrivacySectionProps {
   t: (key: keyof TranslationDict) => string;
 }
 
+const FILE_SWITCHES = [
+  ["file_open_md", "files_open_md", "md"],
+  ["file_open_txt", "files_open_txt", "txt"],
+  ["file_open_json", "files_open_json", "json"],
+  ["file_open_yaml", "files_open_yaml", "yaml"],
+  ["file_open_data", "files_open_data", "data"],
+] as const;
+
 export function PrivacySection({ onPatchSettings, settings, t }: PrivacySectionProps) {
   return (
     <>
+      <div className="space-y-2 rounded-xl p-4" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+        <div className="text-xs font-semibold" style={{ color: "var(--text)" }}>{t("files_open_title")}</div>
+        <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{t("files_open_desc")}</p>
+        {FILE_SWITCHES.map(([key, label, kind]) => (
+          <label key={key} className="flex items-center gap-2 cursor-pointer text-xs" style={{ color: "var(--text-dim)" }}>
+            <input
+              type="checkbox"
+              checked={!!settings[key]}
+              className="accent-blue-500"
+              onChange={(e) => {
+                const enabled = e.target.checked;
+                onPatchSettings({ [key]: enabled });
+                void window.electronAPI?.setFileAssociation?.(kind, enabled);
+              }}
+            />
+            <span>{t(label)}</span>
+          </label>
+        ))}
+        <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>{t("files_open_confirm")}</p>
+      </div>
       {/* Opt-in crash log (R5) */}
       <div className="space-y-2 rounded-xl p-4" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
         <label className="flex items-start gap-2 cursor-pointer">

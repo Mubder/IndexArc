@@ -6,7 +6,17 @@ interface ElectronAPI {
   startOllama: () => Promise<boolean>;
   openExternal: (url: string) => Promise<boolean>;
   getApiToken: () => Promise<string | null>;
-  copyText: (text: string, clearAfterMs?: number) => Promise<boolean>;
+  copyText: (text: string, clearAfterMs?: number, html?: string) => Promise<boolean>;
+  readDocFile?: (filePath: string) => Promise<DocFilePayload | null>;
+  writeDocFile?: (filePath: string, text: string) => Promise<{ ok: boolean; reason?: string }>;
+  writeDocFileSync?: (filePath: string, text: string) => boolean;
+  onDocsOpen?: (cb: (paths: string[]) => void) => void;
+  takePendingDocs?: () => Promise<string[]>;
+  setFileAssociation?: (ext: "md" | "txt" | "json" | "yaml" | "data", enabled: boolean) => Promise<{ ok: boolean; reason?: string }>;
+  onDocsRequestClose?: (cb: () => void) => void;
+  docsCloseResult?: (proceed: boolean) => void;
+  notifyScratchpadChanged?: () => void;
+  onScratchpadChanged?: (cb: () => void) => () => void;
   spellcheckWords: (words: string[]) => Promise<string[]>;
   spellcheckSuggest: (word: string) => Promise<string[]>;
   addCustomWord: (word: string) => Promise<void>;
@@ -16,6 +26,25 @@ interface ElectronAPI {
   downloadUpdate?: () => Promise<{ ok: boolean; reason?: string }>;
   installUpdate?: () => Promise<{ ok: boolean; reason?: string }>;
   onUpdateEvent?: (cb: (name: "update-progress" | "update-ready" | "update-error", payload: any) => void) => void;
+}
+
+interface DocFilePayload {
+  ok: boolean;
+  reason?: string;
+  path: string;
+  name: string;
+  ext: string;
+  editable: boolean;
+  /** UTF-8 text for md/txt, plain text for pdf and docx. */
+  text?: string;
+  /** Sanitized-later HTML for a read-only Word file. */
+  html?: string;
+  /** Base64 PDF bytes. Present only for pdf. */
+  pdfBase64?: string;
+  /** indexarc-doc URL for the built-in PDF viewer. */
+  viewUrl?: string;
+  /** Raw .docx bytes, converted in the window. */
+  bytesBase64?: string;
 }
 
 interface UpdateCheckResult {
