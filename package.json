@@ -84,7 +84,7 @@
     "express": "^4.21.2",
     "fast-check": "^4.3.0",
     "hash-wasm": "^4.12.0",
-    "jsdom": "^30.0.1",
+    "jsdom": "^31.0.1",
     "lucide-react": "^0.546.0",
     "pdf-parse": "^2.4.5",
     "postject": "1.0.0-alpha.6",
