@@ -107,6 +107,9 @@ export interface AppSettings {
   file_open_json?: boolean;
   file_open_yaml?: boolean;
   file_open_data?: boolean;
+  file_open_pdf?: boolean;
+  file_open_doc?: boolean;
+  file_open_sheet?: boolean;
   enable_ai_proofreader?: boolean;
   /**
    * EGRESS CONSENT (audit H2): cloud AI providers (Gemini/OpenAI/Groq/
@@ -158,6 +161,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   file_open_json: false,
   file_open_yaml: false,
   file_open_data: false,
+  file_open_pdf: false,
+  file_open_doc: false,
+  file_open_sheet: false,
   enable_ai_proofreader: true,
   ai_cloud_consent: false,
   languagetool_enabled: false,

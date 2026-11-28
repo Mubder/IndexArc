@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import DOMPurify from "dompurify";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { normalizePastedPlain, plainToSimpleHtml } from "../lib/clipboardText";
 import { textToNoteHtml } from "../sanitize";
@@ -6,6 +7,7 @@ import type { Settings } from "../types";
 import { getTranslation, type TranslationDict } from "../utils/i18n";
 import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor";
 import { SourceEditor, type CaretInfo, type SourceEditorHandle } from "./SourceEditor";
+import { PdfViewer } from "./PdfViewer";
 import { findTextMatches, type FindOptions } from "./findText";
 
 interface OpenDoc {
@@ -15,8 +17,10 @@ interface OpenDoc {
   editable: boolean;
   text: string;
   savedText: string;
-  /** Blob URL for a read-only PDF, created once when the file is opened. */
-  pdfUrl?: string;
+  /** Raw PDF bytes, rendered by PdfViewer. */
+  pdfBase64?: string;
+  /** Sanitised-on-display HTML extracted from a Word file. */
+  html?: string;
 }
 
 const RECENT_KEY = "indexarc-recent-files";
@@ -102,7 +106,6 @@ export default function DocumentApp() {
   const histRef = useRef<Record<string, { undo: string[]; redo: string[] }>>({});
   const editRef = useRef({ undo: () => {}, redo: () => {}, rich: false });
   const writeChain = useRef<Promise<void>>(Promise.resolve());
-  const blobUrls = useRef<Set<string>>(new Set());
   const recentRef = useRef<RecentFile[]>([]);
   docsRef.current = docs;
   activeRef.current = active;
@@ -139,9 +142,6 @@ export default function DocumentApp() {
     document.documentElement.setAttribute("lang", isAr ? "ar" : "en");
     document.documentElement.setAttribute("dir", isAr ? "rtl" : "ltr");
   }, [settings?.ui_language]);
-  useEffect(() => () => {
-    for (const url of blobUrls.current) URL.revokeObjectURL(url);
-  }, []);
   useEffect(() => {
     const onFocus = () => setFocusTick((x) => x + 1);
     window.addEventListener("focus", onFocus);
@@ -170,19 +170,6 @@ export default function DocumentApp() {
         setStatus(`${t("docs_cannot_open")}${payload?.reason ? ` (${payload.reason})` : ""}`);
         continue;
       }
-      let pdfUrl: string | undefined;
-      if (payload.pdfBase64) {
-        try {
-          const binary = atob(payload.pdfBase64);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          pdfUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
-          blobUrls.current.add(pdfUrl);
-        } catch {
-          setStatus(t("docs_cannot_open"));
-          continue;
-        }
-      }
       const text = payload.text || "";
       setDocs((prev) => {
         const next: OpenDoc = {
@@ -192,7 +179,8 @@ export default function DocumentApp() {
           editable: payload.editable,
           text,
           savedText: text,
-          pdfUrl,
+          pdfBase64: payload.pdfBase64,
+          html: payload.html,
         };
         return [...prev.filter((d) => d.path !== next.path), next];
       });
@@ -213,12 +201,6 @@ export default function DocumentApp() {
 
   const dropDocs = (paths: string[]) => {
     const gone = new Set(paths);
-    for (const d of docsRef.current) {
-      if (gone.has(d.path) && d.pdfUrl) {
-        URL.revokeObjectURL(d.pdfUrl);
-        blobUrls.current.delete(d.pdfUrl);
-      }
-    }
     const next = docsRef.current.filter((d) => !gone.has(d.path));
     setDocs(next);
     if (gone.has(activeRef.current)) setActive(next[0]?.path || "");
@@ -428,7 +410,13 @@ export default function DocumentApp() {
   const findOpts = (): FindOptions => ({ caseSensitive: findCaseRef.current, regex: findRegexRef.current });
 
   const replaceCurrent = (all: boolean) => {
-    if (!current?.editable || !sourceRef.current || !findQuery.trim()) return;
+    if (!current?.editable || !findQuery.trim()) return;
+    if (richActive && richReady) {
+      const count = mdRef.current?.replaceMatches(findQuery, replaceQuery, all, findAt, findOpts()) ?? 0;
+      if (count) jumpTo(findQuery, 0);
+      return;
+    }
+    if (!sourceRef.current) return;
     const editor = sourceRef.current;
     const source = editor.getValue();
     const hits = findTextMatches(source, findQuery, findOpts());
@@ -465,11 +453,15 @@ export default function DocumentApp() {
     const editor = sourceRef.current;
     const hits = findTextMatches(editor.getValue(), query, findOpts());
     setFindTotal(hits.length);
-    if (!hits.length) return;
+    if (!hits.length) {
+      sourceRef.current?.clearHighlight();
+      return;
+    }
     const at = ((nth % hits.length) + hits.length) % hits.length;
     setFindAt(at);
     const hit = hits[at];
     editor.selectRange(hit.index, hit.index + hit.length);
+    editor.highlightMatch(hit.index, hit.index + hit.length);
     editor.scrollToSelection();
     requestAnimationFrame(() => findRef.current?.focus());
   };
@@ -611,9 +603,7 @@ export default function DocumentApp() {
                 <button type="button" className="px-3 py-1 rounded-full" style={{ border: "1px solid var(--border)" }} onClick={() => { setMode(mode === "rich" ? "source" : "rich"); setRichReady(false); setFindOpen(false); setReplaceOpen(false); }}>{mode === "rich" ? t("docs_source") : t("docs_rich")}</button>
               )}
               <button type="button" className="px-3 py-1 rounded-full" style={{ border: "1px solid var(--border)" }} onClick={() => { setFindOpen(true); setTimeout(() => findRef.current?.select(), 0); }}>{t("docs_find")}</button>
-              {!(isMarkdown(current.ext) && mode === "rich") && (
-                <button type="button" className="px-3 py-1 rounded-full" style={{ border: "1px solid var(--border)" }} onClick={() => { setReplaceOpen((v) => !v); setFindOpen(true); setTimeout(() => findRef.current?.select(), 0); }}>{t("docs_replace")}</button>
-              )}
+              <button type="button" className="px-3 py-1 rounded-full" style={{ border: "1px solid var(--border)" }} onClick={() => { setReplaceOpen((v) => !v); setFindOpen(true); setTimeout(() => findRef.current?.select(), 0); }}>{t("docs_replace")}</button>
               <button type="button" className="px-3 py-1 rounded-full" style={{ border: "1px solid var(--border)" }} onClick={copyDoc}>{t("docs_copy")}</button>
               <button type="button" className="px-3 py-1 rounded-full" style={{ border: "1px solid var(--border)" }} onClick={() => void openHistory()}>{t("docs_history")}</button>
               <button type="button" className="px-3 py-1 rounded-full" style={{ border: "1px solid var(--border-glow)", background: "var(--accent-bg)" }} onClick={() => void addToScratchpad()}>{t("docs_add_scratchpad")}</button>
@@ -632,7 +622,7 @@ export default function DocumentApp() {
           <input
             ref={findRef}
             value={findQuery}
-            onChange={(e) => { setFindQuery(e.target.value); setFindAt(0); jumpTo(e.target.value, 0); }}
+            onChange={(e) => { setFindQuery(e.target.value); setFindAt(0); sourceRef.current?.clearHighlight(); jumpTo(e.target.value, 0); }}
             onKeyDown={(e) => {
               if (e.key === "Escape") { e.preventDefault(); setFindOpen(false); }
               if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); jumpTo(findQuery, findAt - 1); }
@@ -646,7 +636,7 @@ export default function DocumentApp() {
           <button type="button" title={t("docs_regex")} aria-label={t("docs_regex")} className="px-2 py-1 rounded-lg font-mono" style={{ border: "1px solid var(--border)", background: findRegex ? "var(--accent)" : "transparent", color: findRegex ? "#fff" : "var(--text-muted)" }} onClick={() => { setFindRegex((v) => !v); setFindAt(0); setTimeout(() => jumpTo(findQuery, 0), 0); }}>.*</button>
           <button type="button" className="px-2 py-1 rounded-lg" style={{ border: "1px solid var(--border)" }} onClick={() => jumpTo(findQuery, findAt - 1)}>{t("docs_prev")}</button>
           <button type="submit" className="px-2 py-1 rounded-lg" style={{ border: "1px solid var(--border)" }}>{t("docs_next")}</button>
-          <button type="button" className="px-2 py-1" style={{ color: "var(--text-muted)" }} onClick={() => setFindOpen(false)}>{t("docs_close")}</button>
+          <button type="button" className="px-2 py-1" style={{ color: "var(--text-muted)" }} onClick={() => { setFindOpen(false); sourceRef.current?.clearHighlight(); }}>{t("docs_close")}</button>
         </form>
       )}
       {findOpen && replaceOpen && current && current.editable && (
@@ -663,8 +653,29 @@ export default function DocumentApp() {
       )}
       <div className="flex-1 min-h-0 mx-4 mb-4 rounded-2xl overflow-hidden flex flex-col" style={{ border: "1px solid var(--border)", background: "var(--bg-surface)" }}>
         {!current && <p className="p-8 text-sm" style={{ color: "var(--text-muted)" }}>{t("docs_empty_hint")}</p>}
-        {current && current.ext === ".pdf" && current.pdfUrl && (
-          <iframe title={current.name} src={current.pdfUrl} className="w-full h-full" style={{ border: 0 }} />
+        {current && current.ext === ".pdf" && current.pdfBase64 && (
+          <PdfViewer base64={current.pdfBase64} name={current.name} />
+        )}
+        {current && current.ext === ".docx" && current.html && (
+          <div
+            data-doc-scroll
+            className="h-full overflow-auto doc-readonly"
+            dir="auto"
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(current.html) }}
+          />
+        )}
+        {current && current.ext === ".xlsx" && typeof current.text === "string" && (
+          <div className="flex-1 min-h-0">
+            <SourceEditor
+              key={`${current.path}:readonly:${docEpoch}`}
+              value={current.text}
+              ext=".csv"
+              normalizePaste={false}
+              readOnly
+              onChange={() => {}}
+              onCaret={() => {}}
+            />
+          </div>
         )}
         {current && isMarkdown(current.ext) && (
           <div data-doc-scroll className={mode === "rich" ? "h-full overflow-auto" : "hidden"}>

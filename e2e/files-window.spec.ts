@@ -6,6 +6,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import crypto from "crypto";
+import ExcelJS from "exceljs";
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "indexarc-files-e2e-"));
 const FILES = fs.mkdtempSync(path.join(os.tmpdir(), "indexarc-files-docs-"));
@@ -75,6 +76,53 @@ test("Files window edits, saves, keeps history and restores", async () => {
   } catch (e) {
     throw new Error(`${e}\n${log.join("\n")}`);
   } finally {
-    await app.evaluate(({ app }) => app.quit()).catch(() => {});
+    await quitApp(app);
+  }
+});
+
+async function quitApp(app: ElectronApplication) {
+  await Promise.race([
+    app.waitForEvent("close", { timeout: 20_000 }).catch(() => {}),
+    app.evaluate(({ app }) => app.quit()).catch(() => {}),
+  ]);
+}
+
+async function openFileApp(file: string): Promise<{ app: ElectronApplication; page: Page }> {
+  const app = await electron.launch({
+    args: [path.resolve("electron-main.cjs"), file],
+    env: { ...process.env, INDEXARC_ROOT: ROOT, ELECTRON_ENABLE_LOGGING: "0" },
+    timeout: 60_000,
+  });
+  const page = await docsWindow(app);
+  await page.waitForLoadState("domcontentloaded");
+  return { app, page };
+}
+
+test("JSONL opens as editable text", async () => {
+  const jsonl = path.join(FILES, "events.jsonl");
+  fs.writeFileSync(jsonl, '{"id":1}\n{"id":2}\n', "utf8");
+  const { app, page } = await openFileApp(jsonl);
+  try {
+    await expect(page.locator(".cm-content")).toContainText('"id":1', { timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
+  } finally {
+    await quitApp(app);
+  }
+});
+
+test("XLSX opens as a read-only viewer", async () => {
+  const xlsx = path.join(FILES, "sheet.xlsx");
+  const wb = new ExcelJS.Workbook();
+  const sheet = wb.addWorksheet("Data");
+  sheet.addRow(["name", "value"]);
+  sheet.addRow(["alpha", "42"]);
+  await wb.xlsx.writeFile(xlsx);
+  const { app, page } = await openFileApp(xlsx);
+  try {
+    await expect(page.locator(".cm-content")).toContainText("alpha", { timeout: 30_000 });
+    await expect(page.getByText("Read-only")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
+  } finally {
+    await quitApp(app);
   }
 });

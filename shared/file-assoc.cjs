@@ -5,10 +5,12 @@
 const KINDS = {
   md: { exts: [".md", ".markdown"], label: "Markdown file" },
   txt: { exts: [".txt", ".text", ".log"], label: "Text file" },
-  json: { exts: [".json", ".jsonc"], label: "JSON file" },
+  json: { exts: [".json", ".jsonc", ".jsonl", ".ndjson"], label: "JSON file" },
   yaml: { exts: [".yaml", ".yml"], label: "YAML file" },
   data: { exts: [".toml", ".ini", ".cfg", ".conf", ".xml", ".csv", ".tsv"], label: "Text data file" },
   pdf: { exts: [".pdf"], label: "PDF file (read-only)" },
+  doc: { exts: [".docx"], label: "Word file (read-only)" },
+  sheet: { exts: [".xlsx"], label: "Spreadsheet file (read-only)" },
 };
 
 /**

@@ -5,11 +5,13 @@ import { TextSelection } from "@milkdown/kit/prose/state";
 import { undo, redo } from "@milkdown/kit/prose/history";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/classic-dark.css";
-import { matchPositions, type FindOptions } from "./findText";
+import { allMatchPositions, matchPositions, type FindOptions } from "./findText";
+import { highlightDomRange, showFindHighlight } from "./findHighlight";
 
 export type MarkdownEditorHandle = {
   /** Select the nth visible match. Returns how many matches exist. */
   selectMatch: (query: string, nth: number, opts?: FindOptions) => number;
+  replaceMatches: (query: string, replacement: string, all: boolean, nth: number, opts?: FindOptions) => number;
   undo: () => void;
   redo: () => void;
 };
@@ -33,10 +35,12 @@ function MarkdownEditor({ value, onChange, onReady }, ref) {
           const match = matchPositions(view.state.doc, query, nth, opts);
           if (!match || match.from < 0) {
             total = match?.total ?? 0;
+            showFindHighlight(null);
             return;
           }
           total = match.total;
           view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, match.from, match.to)));
+          highlightDomRange((pos) => view.domAtPos(pos), match.from, match.to);
           try {
             const coords = view.coordsAtPos(match.from);
             const marked = view.dom.closest("[data-doc-scroll]");
@@ -51,6 +55,36 @@ function MarkdownEditor({ value, onChange, onReady }, ref) {
         return 0;
       }
       return total;
+    },
+    replaceMatches(query, replacement, all, nth, opts) {
+      const crepe = crepeRef.current;
+      if (!crepe) return 0;
+      let count = 0;
+      try {
+        crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const hits = allMatchPositions(view.state.doc, query, opts);
+          if (!hits.length) return;
+          if (all) {
+            count = hits.length;
+            let tr = view.state.tr;
+            // Backwards so earlier offsets stay valid.
+            for (let i = hits.length - 1; i >= 0; i--) {
+              tr = tr.insertText(replacement, hits[i].from, hits[i].to);
+            }
+            view.dispatch(tr);
+          } else {
+            const hit = hits[((nth % hits.length) + hits.length) % hits.length];
+            if (!hit) return;
+            count = 1;
+            view.dispatch(view.state.tr.insertText(replacement, hit.from, hit.to));
+          }
+          showFindHighlight(null);
+        });
+      } catch {
+        return 0;
+      }
+      return count;
     },
     undo() { runHistory(undo); },
     redo() { runHistory(redo); },

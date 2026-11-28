@@ -21,11 +21,17 @@ describe("classifyDocPath", () => {
     expect(yaml.ok && yaml.editable).toBe(true);
   });
 
-  it("allows pdf as read-only but refuses word files", () => {
-    const pdf = classifyDocPath(root, path.resolve("/notes/a.pdf"));
-    expect(pdf.ok).toBe(true);
-    if (pdf.ok) expect(pdf.editable).toBe(false);
-    expect(classifyDocPath(root, path.resolve("/notes/a.docx")).ok).toBe(false);
+  it("allows pdf, word and spreadsheet files as read-only", () => {
+    for (const ext of [".pdf", ".docx", ".xlsx"]) {
+      const r = classifyDocPath(root, path.resolve(`/notes/a${ext}`));
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.editable).toBe(false);
+    }
+  });
+
+  it("allows json lines files as editable text", () => {
+    const r = classifyDocPath(root, path.resolve("/notes/a.jsonl"));
+    expect(r.ok && r.editable).toBe(true);
   });
 
   it("refuses the vault directory and unknown types", () => {

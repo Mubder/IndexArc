@@ -15,6 +15,8 @@ const FILE_SWITCHES = [
   ["file_open_yaml", "files_open_yaml", "yaml"],
   ["file_open_data", "files_open_data", "data"],
   ["file_open_pdf", "files_open_pdf", "pdf"],
+  ["file_open_doc", "files_open_doc", "doc"],
+  ["file_open_sheet", "files_open_sheet", "sheet"],
 ] as const;
 
 export function PrivacySection({ onPatchSettings, settings, t }: PrivacySectionProps) {

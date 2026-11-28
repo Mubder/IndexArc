@@ -295,6 +295,8 @@ export interface TranslationDict {
   files_open_yaml: string;
   files_open_data: string;
   files_open_pdf: string;
+  files_open_doc: string;
+  files_open_sheet: string;
   files_open_confirm: string;
   docs_title: string;
   docs_open_window: string;
@@ -1232,6 +1234,8 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     files_open_yaml: "YAML (.yaml, .yml)",
     files_open_data: "CSV, XML, TOML, INI, and logs",
     files_open_pdf: "PDF (read-only)",
+    files_open_doc: "Word (.docx, read-only)",
+    files_open_sheet: "Excel (.xlsx, read-only)",
     files_open_confirm: "Windows will ask you to confirm the default app.",
     docs_title: "Files",
     docs_open_window: "Open Files window",
@@ -2166,6 +2170,8 @@ export const translations: Record<UiLanguage, TranslationDict> = {
     files_open_yaml: "YAML",
     files_open_data: "CSV و XML و TOML و INI والسجلات",
     files_open_pdf: "PDF (للقراءة فقط)",
+    files_open_doc: "Word (.docx، للقراءة فقط)",
+    files_open_sheet: "Excel (.xlsx، للقراءة فقط)",
     files_open_confirm: "سيطلب ويندوز تأكيد التطبيق الافتراضي.",
     docs_title: "الملفات",
     docs_open_window: "فتح نافذة الملفات",

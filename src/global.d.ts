@@ -17,7 +17,7 @@ interface ElectronAPI {
   decryptText?: (encoded: string) => Promise<string | null>;
   listDocBackups?: (filePath: string) => Promise<{ ok: boolean; items: { id: string; createdAt: string; size: number }[] }>;
   readDocBackup?: (filePath: string, id: string) => Promise<{ ok: boolean; text?: string }>;
-  setFileAssociation?: (ext: "md" | "txt" | "json" | "yaml" | "data" | "pdf", enabled: boolean) => Promise<{ ok: boolean; reason?: string }>;
+  setFileAssociation?: (ext: "md" | "txt" | "json" | "yaml" | "data" | "pdf" | "doc" | "sheet", enabled: boolean) => Promise<{ ok: boolean; reason?: string }>;
   onDocsRequestClose?: (cb: () => void) => void;
   docsCloseResult?: (proceed: boolean) => void;
   openFilesWindow?: () => Promise<void>;
@@ -47,6 +47,8 @@ interface DocFilePayload {
   text?: string;
   /** Base64 PDF bytes. Present only for read-only .pdf files. */
   pdfBase64?: string;
+  /** Word document HTML, sanitised in the window before display. */
+  html?: string;
 }
 
 interface UpdateCheckResult {

@@ -6,7 +6,7 @@ const path = require("path");
 // Plain text the editor can read and write back.
 const EDITABLE = new Set([
   ".md", ".markdown", ".txt", ".text", ".log",
-  ".json", ".jsonc", ".yaml", ".yml", ".toml",
+  ".json", ".jsonc", ".jsonl", ".ndjson", ".yaml", ".yml", ".toml",
   ".ini", ".cfg", ".conf", ".env", ".properties",
   ".xml", ".svg", ".csv", ".tsv", ".sql", ".rst",
   ".html", ".htm", ".css",
@@ -15,7 +15,7 @@ const EDITABLE = new Set([
 ]);
 
 // Binary formats the Files window can display but never write back.
-const READONLY = new Set([".pdf"]);
+const READONLY = new Set([".pdf", ".docx", ".xlsx"]);
 
 /**
  * @param {string} child

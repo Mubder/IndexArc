@@ -14,6 +14,7 @@ import { highlightSelectionMatches } from "@codemirror/search";
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import { normalizePastedPlain } from "../lib/clipboardText";
+import { highlightDomRange, showFindHighlight } from "./findHighlight";
 
 export interface CaretInfo {
   line: number;
@@ -29,6 +30,8 @@ export interface SourceEditorHandle {
   selectRange: (from: number, to: number) => void;
   getSelection: () => { from: number; to: number };
   scrollToSelection: () => void;
+  highlightMatch: (from: number, to: number) => void;
+  clearHighlight: () => void;
   undo: () => void;
   redo: () => void;
 }
@@ -74,9 +77,10 @@ export const SourceEditor = forwardRef<SourceEditorHandle, {
   value: string;
   ext: string;
   normalizePaste: boolean;
+  readOnly?: boolean;
   onChange: (text: string) => void;
   onCaret: (info: CaretInfo) => void;
-}>(function SourceEditor({ value, ext, normalizePaste, onChange, onCaret }, ref) {
+}>(function SourceEditor({ value, ext, normalizePaste, readOnly, onChange, onCaret }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -114,6 +118,12 @@ export const SourceEditor = forwardRef<SourceEditorHandle, {
       if (!view) return;
       view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.from, { y: "center" }) });
     },
+    highlightMatch(from, to) {
+      const view = viewRef.current;
+      if (!view) return;
+      highlightDomRange((pos) => view.domAtPos(pos), from, to);
+    },
+    clearHighlight() { showFindHighlight(null); },
     undo() { const view = viewRef.current; if (view) undo(view); },
     redo() { const view = viewRef.current; if (view) redo(view); },
   }), []);
@@ -139,11 +149,15 @@ export const SourceEditor = forwardRef<SourceEditorHandle, {
       highlightSelectionMatches(),
       keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
       EditorView.lineWrapping,
+      EditorView.editable.of(!readOnly),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       editorTheme,
       ...languageFor(ext),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged) onChangeRef.current(update.state.doc.toString());
+        if (update.docChanged) {
+          onChangeRef.current(update.state.doc.toString());
+          showFindHighlight(null); // the range is stale after an edit
+        }
         if (update.docChanged || update.selectionSet) onCaretRef.current(caretOf(update.state));
       }),
     ];

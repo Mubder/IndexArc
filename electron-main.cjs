@@ -1333,7 +1333,7 @@ handleTrusted("docs-pick", async () => {
     properties: ["openFile", "multiSelections"],
     filters: [{
       name: "Text",
-      extensions: ["md", "markdown", "txt", "text", "log", "json", "jsonc", "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "properties", "xml", "svg", "csv", "tsv", "sql", "rst", "html", "htm", "css", "js", "mjs", "cjs", "ts", "tsx", "jsx", "py", "sh", "ps1", "bat", "cmd", "pdf"],
+      extensions: ["md", "markdown", "txt", "text", "log", "json", "jsonc", "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "properties", "xml", "svg", "csv", "tsv", "sql", "rst", "html", "htm", "css", "js", "mjs", "cjs", "ts", "tsx", "jsx", "py", "sh", "ps1", "bat", "cmd", "jsonl", "ndjson", "pdf", "docx", "xlsx"],
     }],
   })
     : await dialog.showOpenDialog({
@@ -1448,7 +1448,7 @@ function loadDocWhenReady(win, attempts = 0) {
 }
 
 /** @param {string} filePath */
-function readDocFile(filePath) {
+async function readDocFile(filePath) {
   let root = "";
   try { root = getPortableRoot(); } catch { root = ""; }
   const classified = docFiles.classifyDocPath(root, filePath);
@@ -1467,12 +1467,42 @@ function readDocFile(filePath) {
   try { buf = fs.readFileSync(real); } catch { return Promise.resolve({ ok: false, reason: "read" }); }
   const base = { ok: true, path: real, name: classified.name, ext: classified.ext, editable: classified.editable };
   if (!classified.editable) {
-    // Read-only formats: hand the renderer the bytes to display in the
-    // built-in viewer. Never accept a write for these paths.
-    if (classified.ext === ".pdf" && buf.length <= 25_000_000) {
-      return Promise.resolve({ ...base, pdfBase64: buf.toString("base64") });
+    // Read-only formats: hand the renderer the bytes / extracted content.
+    // Never accept a write for these paths.
+    if (buf.length > 25_000_000) return { ok: false, reason: "size" };
+    if (classified.ext === ".pdf") return { ...base, pdfBase64: buf.toString("base64") };
+    if (classified.ext === ".docx") {
+      try {
+        const mammoth = require("mammoth");
+        const html = (await mammoth.convertToHtml({ buffer: buf })).value || "";
+        const text = ((await mammoth.extractRawText({ buffer: buf })).value || "").trim();
+        return { ...base, html, text };
+      } catch {
+        return { ok: false, reason: "parse" };
+      }
     }
-    return Promise.resolve({ ok: false, reason: buf.length > 25_000_000 ? "size" : "type" });
+    if (classified.ext === ".xlsx") {
+      try {
+        const ExcelJS = require("exceljs");
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(buf);
+        /** @type {string[]} */
+        const parts = [];
+        workbook.eachSheet((sheet) => {
+          parts.push(`## ${sheet.name}`);
+          sheet.eachRow({ includeEmpty: false }, (row) => {
+            /** @type {string[]} */
+            const values = [];
+            row.eachCell({ includeEmpty: true }, (cell) => values.push(String(cell.value ?? "")));
+            parts.push(values.join("\t"));
+          });
+        });
+        return { ...base, text: parts.join("\n") };
+      } catch {
+        return { ok: false, reason: "parse" };
+      }
+    }
+    return { ok: false, reason: "type" };
   }
   if (buf.length > 5_000_000) return Promise.resolve({ ok: false, reason: "size" });
   // Strip BOMs and honour UTF-16 ones. Files without a BOM are read as UTF-8.

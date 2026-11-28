@@ -62,12 +62,7 @@ export interface DocLike {
  * are represented as a synthetic -1 entry so matches never span paragraphs.
  * ProseMirror text nodes start at `pos`, so character i is at `pos + i`.
  */
-export function matchPositions(
-  doc: DocLike,
-  query: string,
-  nth: number,
-  opts: FindOptions = {}
-): { from: number; to: number; total: number } | null {
+function plainAndPositions(doc: DocLike): { chars: number[]; plain: string } {
   const chars: number[] = [];
   let plain = "";
   doc.descendants((node, pos) => {
@@ -79,10 +74,10 @@ export function matchPositions(
       chars.push(-1);
     }
   });
-  const hits = findTextMatches(plain, query, opts);
-  if (!hits.length) return { from: -1, to: -1, total: 0 };
-  const hit = hits[((nth % hits.length) + hits.length) % hits.length];
-  if (!hit) return null;
+  return { chars, plain };
+}
+
+function rangeOf(chars: number[], hit: TextMatch): { from: number; to: number } | null {
   let from = -1;
   let to = -1;
   for (let i = hit.index; i < Math.min(chars.length, hit.index + hit.length); i++) {
@@ -91,6 +86,33 @@ export function matchPositions(
     if (from < 0) from = pos;
     to = pos + 1;
   }
-  if (from < 0 || to < 0) return null;
-  return { from, to, total: hits.length };
+  return from < 0 || to < 0 ? null : { from, to };
+}
+
+export function matchPositions(
+  doc: DocLike,
+  query: string,
+  nth: number,
+  opts: FindOptions = {}
+): { from: number; to: number; total: number } | null {
+  const { chars, plain } = plainAndPositions(doc);
+  const hits = findTextMatches(plain, query, opts);
+  if (!hits.length) return { from: -1, to: -1, total: 0 };
+  const hit = hits[((nth % hits.length) + hits.length) % hits.length];
+  if (!hit) return null;
+  const range = rangeOf(chars, hit);
+  if (!range) return null;
+  return { ...range, total: hits.length };
+}
+
+/** Every match, mapped to document ranges (used by Replace all in Rich mode). */
+export function allMatchPositions(
+  doc: DocLike,
+  query: string,
+  opts: FindOptions = {}
+): { from: number; to: number }[] {
+  const { chars, plain } = plainAndPositions(doc);
+  return findTextMatches(plain, query, opts)
+    .map((hit) => rangeOf(chars, hit))
+    .filter((r): r is { from: number; to: number } => !!r);
 }
